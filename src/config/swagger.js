@@ -1,0 +1,186 @@
+'use strict';
+
+const swaggerJsdoc = require('swagger-jsdoc');
+
+const options = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Auriva Backend API',
+      version: '1.0.0',
+      description:
+        'REST API for the Auriva learning and support platform — teaching English fundamentals to children with autism in Sri Lanka.',
+    },
+    servers: [
+      { url: 'http://localhost:3000', description: 'Development server' },
+    ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+      schemas: {
+        // ── Auth ────────────────────────────────────────────────────────────
+        LoginRequest: {
+          type: 'object',
+          required: ['password', 'role'],
+          properties: {
+            role:     { type: 'string', enum: ['principal', 'teacher'], example: 'principal' },
+            username: { type: 'string', example: 'principal', description: 'Required when role is principal' },
+            email:    { type: 'string', format: 'email', example: 'teacher@school.lk', description: 'Required when role is teacher' },
+            password: { type: 'string', example: 'Admin@1234' },
+          },
+        },
+        LoginResponse: {
+          type: 'object',
+          properties: {
+            token: { type: 'string', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
+          },
+        },
+        SetPasswordRequest: {
+          type: 'object',
+          required: ['newPassword'],
+          properties: {
+            newPassword: { type: 'string', minLength: 8, example: 'NewPass@123' },
+          },
+        },
+
+        // ── Teacher ─────────────────────────────────────────────────────────
+        Teacher: {
+          type: 'object',
+          properties: {
+            tid:               { type: 'integer', example: 1 },
+            teacher_code:      { type: 'string',  example: 'TCH-0001' },
+            full_name:         { type: 'string',  example: 'Nimal Perera' },
+            email:             { type: 'string',  example: 'nimal@school.lk' },
+            is_first_login:    { type: 'boolean', example: false },
+            profile_photo_url: { type: 'string',  nullable: true, example: 'https://auriva.blob.core.windows.net/auriva/teachers/TCH-0001/profile.jpg' },
+            created_at:        { type: 'string',  format: 'date-time' },
+            created_by:        { type: 'integer', example: 1 },
+          },
+        },
+        CreateTeacherRequest: {
+          type: 'object',
+          required: ['full_name', 'email', 'password'],
+          properties: {
+            full_name: { type: 'string', example: 'Nimal Perera' },
+            email:     { type: 'string', format: 'email', example: 'nimal@school.lk' },
+            password:  { type: 'string', minLength: 8, example: 'TempPass@1' },
+          },
+        },
+        UpdateTeacherRequest: {
+          type: 'object',
+          properties: {
+            full_name: { type: 'string', example: 'Nimal K. Perera' },
+            email:     { type: 'string', format: 'email', example: 'nimal.new@school.lk' },
+          },
+        },
+
+        // ── Student ─────────────────────────────────────────────────────────
+        Student: {
+          type: 'object',
+          properties: {
+            sid:               { type: 'integer', example: 1 },
+            student_code:      { type: 'string',  example: 'STU-0001' },
+            full_name:         { type: 'string',  example: 'Kamal Silva' },
+            date_of_birth:     { type: 'string',  format: 'date', example: '2018-04-12' },
+            disability:        { type: 'string',  example: 'ASD Level 1' },
+            father_name:       { type: 'string',  nullable: true, example: 'Sunil Silva' },
+            mother_name:       { type: 'string',  nullable: true, example: 'Kamala Silva' },
+            address:           { type: 'string',  nullable: true, example: '12 Main St, Colombo 7' },
+            marital_status:    { type: 'string',  nullable: true },
+            mobile_number:     { type: 'string',  nullable: true, example: '+94771234567' },
+            home_number:       { type: 'string',  nullable: true },
+            profile_photo_url: { type: 'string',  nullable: true },
+            teacher_id:        { type: 'integer', nullable: true, example: 1 },
+            created_at:        { type: 'string',  format: 'date-time' },
+          },
+        },
+        CreateStudentRequest: {
+          type: 'object',
+          required: ['full_name', 'date_of_birth', 'disability'],
+          properties: {
+            full_name:      { type: 'string', example: 'Kamal Silva' },
+            date_of_birth:  { type: 'string', format: 'date', example: '2018-04-12' },
+            disability:     { type: 'string', example: 'ASD Level 1' },
+            father_name:    { type: 'string', example: 'Sunil Silva' },
+            mother_name:    { type: 'string', example: 'Kamala Silva' },
+            address:        { type: 'string', example: '12 Main St, Colombo 7' },
+            marital_status: { type: 'string', example: 'N/A' },
+            mobile_number:  { type: 'string', example: '+94771234567' },
+            home_number:    { type: 'string', example: '+94112345678' },
+          },
+        },
+        AssignStudentRequest: {
+          type: 'object',
+          properties: {
+            teacher_id: { type: 'integer', nullable: true, example: 1, description: 'Set to null to unassign' },
+          },
+        },
+
+        // ── Session ─────────────────────────────────────────────────────────
+        Session: {
+          type: 'object',
+          properties: {
+            id:         { type: 'integer', example: 1 },
+            teacher_id: { type: 'integer', example: 1 },
+            student_id: { type: 'integer', example: 1 },
+            started_at: { type: 'string', format: 'date-time' },
+            ended_at:   { type: 'string', format: 'date-time', nullable: true },
+            is_active:  { type: 'boolean', example: true },
+          },
+        },
+
+        // ── Dashboard ───────────────────────────────────────────────────────
+        PrincipalDashboard: {
+          type: 'object',
+          properties: {
+            teacherCount:       { type: 'integer', example: 5 },
+            studentCount:       { type: 'integer', example: 12 },
+            activeSessionCount: { type: 'integer', example: 2 },
+          },
+        },
+        TeacherDashboard: {
+          type: 'object',
+          properties: {
+            profile: { $ref: '#/components/schemas/Teacher' },
+            stats: {
+              type: 'object',
+              properties: {
+                totalSessions:  { type: 'integer', example: 24 },
+                weeklySessions: { type: 'integer', example: 3 },
+                lastSession: {
+                  nullable: true,
+                  type: 'object',
+                  properties: {
+                    studentName: { type: 'string', example: 'Kamal Silva' },
+                    studentCode: { type: 'string', example: 'STU-0001' },
+                    date:        { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        // ── Errors ──────────────────────────────────────────────────────────
+        ErrorResponse: {
+          type: 'object',
+          properties: {
+            error:   { type: 'string', example: 'Invalid credentials' },
+            details: { type: 'array', items: { type: 'object' }, nullable: true },
+          },
+        },
+      },
+    },
+    security: [],
+  },
+  apis: ['./src/routes/*.js'],
+};
+
+const swaggerSpec = swaggerJsdoc(options);
+
+module.exports = swaggerSpec;
