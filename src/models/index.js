@@ -1,10 +1,11 @@
 'use strict';
 
-const sequelize = require('../config/database');
-const Principal = require('./Principal');
-const Teacher   = require('./Teacher');
-const Student   = require('./Student');
-const Session   = require('./Session');
+const sequelize          = require('../config/database');
+const Principal          = require('./Principal');
+const Teacher            = require('./Teacher');
+const Student            = require('./Student');
+const Session            = require('./Session');
+const PasswordResetOtp   = require('./PasswordResetOtp');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -22,4 +23,4 @@ Session.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
 Student.hasMany(Session, { foreignKey: 'student_id', as: 'sessions' });
 Session.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
-module.exports = { sequelize, Principal, Teacher, Student, Session };
+module.exports = { sequelize, Principal, Teacher, Student, Session, PasswordResetOtp };

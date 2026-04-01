@@ -4,6 +4,7 @@ const { sequelize, Teacher, Student, Session, Principal } = require('../models')
 const { generateCode } = require('../utils/codeGenerator');
 const { uploadBuffer, deleteBlob, extractBlobPath, buildBlobPath } = require('./blobService');
 const { hashPassword } = require('./authService');
+const { sendWelcomeEmail } = require('./emailService');
 const ApiError = require('../utils/ApiError');
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
@@ -41,6 +42,10 @@ async function createTeacher(data, file, principalId) {
     }, { transaction: t });
 
     await t.commit();
+
+    // Send welcome email with credentials (fire-and-forget — don't block response)
+    sendWelcomeEmail(data.email, data.full_name, teacher_code, data.password).catch(() => {});
+
     const { password_hash: _, ...safeTeacher } = teacher.toJSON();
     return safeTeacher;
   } catch (err) {
@@ -200,11 +205,15 @@ async function assignStudent(studentId, teacherId) {
 
     const t = await sequelize.transaction();
     try {
-      const count = await Student.count({
+      // Use findAll with row-level lock instead of count — PostgreSQL does not
+      // allow FOR UPDATE with aggregate functions like COUNT(*).
+      const assigned = await Student.findAll({
+        attributes: ['sid'],
         where: { teacher_id: teacherId },
         transaction: t,
         lock: t.LOCK.UPDATE,
       });
+      const count = assigned.length;
       if (count >= 3) {
         await t.rollback();
         throw new ApiError(400, 'Teacher already has the maximum of 3 students assigned');
