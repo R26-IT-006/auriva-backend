@@ -152,14 +152,14 @@ async function createStudent(data, file) {
 
 async function getStudents() {
   return Student.findAll({
-    include: [{ model: Teacher, as: 'teacher', attributes: ['tid', 'full_name', 'teacher_code'] }],
+    include: [{ model: Teacher, as: 'teacher', attributes: ['tid', 'full_name', 'teacher_code', 'profile_photo_url'] }],
     order: [['student_code', 'ASC']],
   });
 }
 
 async function getStudentById(id) {
   const student = await Student.findByPk(id, {
-    include: [{ model: Teacher, as: 'teacher', attributes: ['tid', 'full_name', 'teacher_code'] }],
+    include: [{ model: Teacher, as: 'teacher', attributes: ['tid', 'full_name', 'teacher_code', 'profile_photo_url'] }],
   });
   if (!student) throw new ApiError(404, 'Student not found');
   return student;
