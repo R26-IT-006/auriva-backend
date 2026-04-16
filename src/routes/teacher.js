@@ -171,4 +171,10 @@ router.post('/session/end', [
   body('student_id').isInt({ min: 1 }).withMessage('student_id must be a positive integer'),
 ], ctrl.endSession);
 
+router.post('/students/:id/avatar', [
+  body('avatar_key')
+    .isIn(['boba', 'glitter', 'lily', 'megatron'])
+    .withMessage('avatar_key must be one of: boba, glitter, lily, megatron'),
+], ctrl.setAvatar);
+
 module.exports = router;

@@ -35,4 +35,12 @@ async function endSession(req, res) {
   res.json(session);
 }
 
-module.exports = { getDashboard, getStudents, getStudentById, startSession, endSession };
+async function setAvatar(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const record = await teacherService.setAvatar(req.user.id, req.params.id, req.body.avatar_key);
+  res.status(201).json(record);
+}
+
+module.exports = { getDashboard, getStudents, getStudentById, startSession, endSession, setAvatar };
