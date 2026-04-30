@@ -14,6 +14,7 @@
   "type": "commonjs",
   "dependencies": {
     "@azure/storage-blob": "^12.31.0",
+    "@google-cloud/speech": "^7.3.0",
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
@@ -21,6 +22,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.1",
     "express-validator": "^7.3.1",
+    "fuzzball": "^2.2.3",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
