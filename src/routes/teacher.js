@@ -177,4 +177,6 @@ router.post('/students/:id/avatar', [
     .withMessage('avatar_key must be one of: boba, glitter, lily, megatron'),
 ], ctrl.setAvatar);
 
+router.use('/concepts', require('./concept'));
+
 module.exports = router;
