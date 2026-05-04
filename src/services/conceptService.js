@@ -72,18 +72,19 @@ async function getConceptItems(categoryKey, studentId) {
 
 /**
  * Marks a concept's Tier 1 as in_progress and ensures GKB student node.
+ * Never overwrites a 'passed' or 'failed' status — only advances from 'not_started'.
  */
 async function startTier1(studentId, categoryKey, conceptKey) {
   const student = await assertStudentExists(studentId);
 
-  await StudentConceptProgress.upsert({
-    student_id:    studentId,
-    category_key:  categoryKey,
-    concept_key:   conceptKey,
-    tier1_status:  'in_progress',
-  }, {
-    conflictFields: ['student_id', 'category_key', 'concept_key'],
+  const [row, created] = await StudentConceptProgress.findOrCreate({
+    where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
+    defaults: { tier1_status: 'in_progress' },
   });
+
+  if (!created && row.tier1_status === 'not_started') {
+    await row.update({ tier1_status: 'in_progress' });
+  }
 
   syncToGkb(`/gkb/student/${studentId}`, {
     student_key: `student/${studentId}`,
@@ -117,17 +118,22 @@ async function logInteraction(studentId, sessionId, categoryKey, conceptKey, tie
 async function completeTier1(studentId, categoryKey, conceptKey, passed, score, attemptCount, confusedWith) {
   const now = new Date();
 
-  const [row] = await StudentConceptProgress.upsert({
-    student_id:      studentId,
-    category_key:    categoryKey,
-    concept_key:     conceptKey,
-    tier1_status:    passed ? 'passed' : 'failed',
-    tier1_score:     score,
-    tier1_attempts:  attemptCount,
+  const updateFields = {
+    tier1_status:   passed ? 'passed' : 'failed',
+    tier1_score:    score,
+    tier1_attempts: attemptCount,
     ...(passed && { tier1_passed_at: now }),
-  }, {
-    conflictFields: ['student_id', 'category_key', 'concept_key'],
+  };
+
+  const [row, created] = await StudentConceptProgress.findOrCreate({
+    where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
+    defaults: updateFields,
   });
+
+  // Never downgrade a passed concept — once passed, always passed
+  if (!created && row.tier1_status !== 'passed') {
+    await row.update(updateFields);
+  }
 
   // Log the outcome event
   await ConceptInteractionLog.create({
