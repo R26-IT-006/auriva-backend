@@ -29,6 +29,8 @@ router.post('/tier1/attempt', [
   body('was_correct').isBoolean(),
 ], ctrl.logMatchAttempt);
 
+router.get('/:conceptKey/confusions', ctrl.getConfusions);
+
 router.post('/tier1/complete', [
   body('student_id').isInt({ min: 1 }),
   body('category_key').isString().notEmpty(),
@@ -37,5 +39,21 @@ router.post('/tier1/complete', [
   body('score').isFloat({ min: 0, max: 1 }),
   body('attempt_count').isInt({ min: 1 }),
 ], ctrl.completeTier1);
+
+router.post('/adaptive/attempt', [
+  body('student_id').isInt({ min: 1 }),
+  body('category_key').isString().notEmpty(),
+  body('concept_key').isString().notEmpty(),
+  body('confused_concept_key').isString().notEmpty(),
+  body('round_number').isInt({ min: 1 }),
+  body('was_correct').isBoolean(),
+], ctrl.logAdaptiveAttempt);
+
+router.post('/adaptive/complete', [
+  body('student_id').isInt({ min: 1 }),
+  body('category_key').isString().notEmpty(),
+  body('concept_key').isString().notEmpty(),
+  body('all_passed').isBoolean(),
+], ctrl.completeAdaptive);
 
 module.exports = router;

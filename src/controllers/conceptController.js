@@ -70,4 +70,45 @@ async function completeTier1(req, res) {
   res.json(result);
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1 };
+async function getConfusions(req, res) {
+  const { conceptKey } = req.params;
+  const studentId = parseInt(req.query.student_id, 10);
+  if (!studentId) throw new ApiError(422, 'student_id query param is required');
+
+  const result = await conceptService.getConfusions(studentId, conceptKey);
+  res.json(result);
+}
+
+async function logAdaptiveAttempt(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const {
+    student_id, session_id, category_key, concept_key,
+    confused_concept_key, round_number, was_correct, time_taken_ms,
+  } = req.body;
+
+  const result = await conceptService.logAdaptiveAttempt(
+    student_id, session_id, category_key, concept_key,
+    confused_concept_key, round_number, was_correct, time_taken_ms,
+  );
+  res.status(201).json(result);
+}
+
+async function completeAdaptive(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const {
+    student_id, session_id, category_key, concept_key,
+    confused_keys, round_results, all_passed,
+  } = req.body;
+
+  const result = await conceptService.completeAdaptive(
+    student_id, session_id, category_key, concept_key,
+    confused_keys || [], round_results || [], all_passed,
+  );
+  res.json(result);
+}
+
+module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive };

@@ -23,8 +23,14 @@ const FRUIT_SEQUENCE = [
   'mango', 'orange', 'papaya', 'passion', 'pineapple', 'watermelon',
 ];
 
+const CLASSROOM_SEQUENCE = [
+  'bag', 'blackboard', 'book', 'bottle', 'chair',
+  'desk', 'dustbin', 'eraser', 'pencil', 'ruler', 'table',
+];
+
 const CATEGORY_SEQUENCES = {
-  fruits: FRUIT_SEQUENCE,
+  fruits:    FRUIT_SEQUENCE,
+  classroom: CLASSROOM_SEQUENCE,
 };
 
 function getSequence(categoryKey) {
@@ -35,6 +41,14 @@ function getSequence(categoryKey) {
 
 /**
  * Returns concept items for a category with this student's progress rows.
+ * When GKB confusion data is available the sequence is reordered so that
+ * concepts the student mixed up are inserted right after the concept they
+ * were confused during, and the unlock chain is recalculated accordingly.
+ *
+ * Example: original order Apple→Banana→Cherry→Grapes→Guava→Mango
+ *   Student passes Grapes but confuses Mango.
+ *   Reordered: Apple→Banana→Cherry→Grapes→Mango→Guava→…
+ *   Mango becomes unlocked (Grapes passed), Guava becomes locked (Mango not yet passed).
  */
 async function getConceptItems(categoryKey, studentId) {
   const sequence = getSequence(categoryKey);
@@ -47,25 +61,69 @@ async function getConceptItems(categoryKey, studentId) {
   const progressMap = {};
   progressRows.forEach((row) => { progressMap[row.concept_key] = row; });
 
-  return sequence.map((conceptKey, index) => {
-    const row = progressMap[conceptKey];
-    const prevConceptKey = index > 0 ? sequence[index - 1] : null;
-    const prevRow = prevConceptKey ? progressMap[prevConceptKey] : null;
+  // Determine the working sequence (default = original)
+  let orderedSequence = sequence;
 
-    // First item always unlocked; subsequent items unlock after previous passes tier1
-    const isUnlocked =
-      index === 0 ||
-      (prevRow && prevRow.tier1_status === 'passed');
+  try {
+    const resp = await axios.get(
+      `${GNN_BASE}/gkb/student/${studentId}/category/${categoryKey}/confusions`,
+      { timeout: 500 },
+    );
+    const confusions = resp.data?.confusions || [];
+
+    if (confusions.length > 0) {
+      // Build map: correctKey → [confusedKey sorted by weight desc]
+      const confusionMap = {};
+      confusions.forEach((c) => {
+        const correct  = c.correct_key.split('/').pop();
+        const confused = c.confused_key.split('/').pop();
+        if (!confusionMap[correct]) confusionMap[correct] = [];
+        confusionMap[correct].push({ key: confused, weight: c.weight });
+      });
+      Object.values(confusionMap).forEach((arr) => arr.sort((a, b) => b.weight - a.weight));
+
+      // Walk the original sequence; after each concept insert its confused
+      // siblings (if not already placed) immediately behind it.
+      const placed = new Set();
+      const result = [];
+      for (const key of sequence) {
+        if (placed.has(key)) continue;
+        placed.add(key);
+        result.push(key);
+        for (const { key: confused } of confusionMap[key] || []) {
+          if (!placed.has(confused) && sequence.includes(confused)) {
+            placed.add(confused);
+            result.push(confused);
+          }
+        }
+      }
+      orderedSequence = result;
+    }
+  } catch { /* GKB unavailable — keep standard order */ }
+
+  // Build items using the (possibly reordered) sequence.
+  // Unlock rule: passed concepts are always unlocked; others unlock when
+  // the preceding concept in the adaptive order has been passed.
+  return orderedSequence.map((conceptKey, index) => {
+    const row            = progressMap[conceptKey];
+    const prevKey        = index > 0 ? orderedSequence[index - 1] : null;
+    const prevRow        = prevKey ? progressMap[prevKey] : null;
+    const isPassed       = row?.tier1_status === 'passed';
+    const isUnlocked     = isPassed || index === 0 || !!(prevRow && prevRow.tier1_status === 'passed');
+    const originalIndex  = sequence.indexOf(conceptKey);
+    // Priority: moved earlier in the sequence AND unlocked AND not yet passed
+    const isPriority     = isUnlocked && !isPassed && originalIndex !== index;
 
     return {
       concept_key:    conceptKey,
       category_key:   categoryKey,
       sequence_index: index,
       is_unlocked:    isUnlocked,
-      tier1_status:   row?.tier1_status   || 'not_started',
-      tier1_score:    row?.tier1_score    ?? null,
-      tier2_status:   row?.tier2_status   || 'locked',
-      tier3_status:   row?.tier3_status   || 'locked',
+      is_priority:    isPriority,
+      tier1_status:   row?.tier1_status || 'not_started',
+      tier1_score:    row?.tier1_score  ?? null,
+      tier2_status:   row?.tier2_status || 'locked',
+      tier3_status:   row?.tier3_status || 'locked',
     };
   });
 }
@@ -182,6 +240,87 @@ async function completeTier1(studentId, categoryKey, conceptKey, passed, score, 
   return { completed: true, passed };
 }
 
+/**
+ * Returns unique concept keys this student confused with the given conceptKey,
+ * sourced from the GKB confusion edges (sorted by weight desc).
+ * Falls back to PostgreSQL interaction logs if GKB is unreachable.
+ */
+async function getConfusions(studentId, conceptKey) {
+  try {
+    // Primary: query GKB via FastAPI
+    const resp = await axios.get(
+      `${GNN_BASE}/gkb/student/${studentId}/concept/fruits/${conceptKey}/confusions`
+    );
+    const confusedKeys = (resp.data?.confused_keys || []).slice(0, 2);
+    if (confusedKeys.length > 0) return { confused_keys: confusedKeys };
+  } catch { /* fall through to PostgreSQL fallback */ }
+
+  // Fallback: derive from the most recent tier1_fail interaction log
+  const failLog = await ConceptInteractionLog.findOne({
+    where: { student_id: studentId, concept_key: conceptKey, event_type: 'tier1_fail', tier: 1 },
+    order: [['created_at', 'DESC']],
+  });
+
+  const confusedWith = failLog?.event_data?.confused_with || [];
+  const confusedKeys = [...new Set(confusedWith.map((c) => c.selected_key))].slice(0, 2);
+  return { confused_keys: confusedKeys };
+}
+
+/**
+ * Logs a single adaptive (2-image) quiz attempt to concept_interaction_logs.
+ */
+async function logAdaptiveAttempt(studentId, sessionId, categoryKey, conceptKey, confusedConceptKey, roundNumber, wasCorrect, timeTakenMs) {
+  const log = await ConceptInteractionLog.create({
+    student_id:   studentId,
+    session_id:   sessionId || null,
+    category_key: categoryKey,
+    concept_key:  conceptKey,
+    tier:         1,
+    event_type:   'adaptive_attempt',
+    event_data:   {
+      confused_concept_key: confusedConceptKey,
+      round_number:         roundNumber,
+      was_correct:          wasCorrect,
+      time_taken_ms:        timeTakenMs || null,
+    },
+    created_at: new Date(),
+  });
+  return { id: log.id };
+}
+
+/**
+ * Completes an adaptive quiz session: logs the outcome and forwards any
+ * remaining confusion increments to GKB (fire-and-forget).
+ */
+async function completeAdaptive(studentId, sessionId, categoryKey, conceptKey, confusedKeys, roundResults, allPassed) {
+  await ConceptInteractionLog.create({
+    student_id:   studentId,
+    session_id:   sessionId || null,
+    category_key: categoryKey,
+    concept_key:  conceptKey,
+    tier:         1,
+    event_type:   allPassed ? 'adaptive_pass' : 'adaptive_fail',
+    event_data:   { confused_keys: confusedKeys, round_results: roundResults, all_passed: allPassed },
+    created_at:   new Date(),
+  });
+
+  // If student got any rounds wrong, increment CONFUSION edges in GKB
+  const wrongKeys = (roundResults || [])
+    .filter((r) => !r.was_correct)
+    .map((r) => r.confused_concept_key)
+    .filter(Boolean);
+
+  if (wrongKeys.length > 0) {
+    syncToGkb('/gkb/adaptive/confusion', {
+      correct_key:   conceptKey,
+      category_key:  categoryKey,
+      confused_with: wrongKeys,
+    });
+  }
+
+  return { completed: true, all_passed: allPassed };
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function assertStudentExists(studentId) {
@@ -190,4 +329,4 @@ async function assertStudentExists(studentId) {
   return student;
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, completeTier1 };
+module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive };
