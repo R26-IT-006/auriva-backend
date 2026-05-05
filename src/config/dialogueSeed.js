@@ -126,19 +126,6 @@ const WORDS = [
 
   // ── Magic Words ──────────────────────────────────────────────────────────
   {
-    word: 'Please',
-    category: 'magic_words',
-    difficulty: 1,
-    teaching_order: 2,
-    asset_key: 'please',
-    keyword_triggers: {
-      target: 'Please',
-      score3: ['please', 'plese', 'pleese'],
-      score2: ['plz', 'pls', 'pleas'],
-      score1: ['plee', 'ple', 'pliz'],
-    },
-  },
-  {
     word: 'Thank you',
     category: 'magic_words',
     difficulty: 1,
@@ -149,6 +136,19 @@ const WORDS = [
       score3: ['thank you', 'thank you very much', 'thankyou'],
       score2: ['thank', 'thanks', 'thank u'],
       score1: ['tank', 'tanks', 'thenk'],
+    },
+  },
+  {
+    word: "You're welcome",
+    category: 'magic_words',
+    difficulty: 2,
+    teaching_order: 2,
+    asset_key: 'youre_welcome',
+    keyword_triggers: {
+      target: "You're welcome",
+      score3: ["you're welcome", 'you are welcome', 'your welcome'],
+      score2: ['welcome', "youre welcome", 'ur welcome'],
+      score1: ['welcom', 'wellcome', 'welkum'],
     },
   },
   {
@@ -165,28 +165,15 @@ const WORDS = [
     },
   },
   {
-    word: "You're welcome",
-    category: 'magic_words',
-    difficulty: 2,
-    teaching_order: 4,
-    asset_key: 'youre_welcome',
-    keyword_triggers: {
-      target: "You're welcome",
-      score3: ["you're welcome", 'you are welcome', 'your welcome'],
-      score2: ['welcome', "youre welcome", 'ur welcome'],
-      score1: ['welcom', 'wellcome', 'welkum'],
-    },
-  },
-  {
-    word: 'Please excuse me',
+    word: 'Excuse me',
     category: 'magic_words',
     difficulty: 3,
-    teaching_order: 5,
-    asset_key: 'please_excuse_me',
+    teaching_order: 4,
+    asset_key: 'excuse_me',
     keyword_triggers: {
-      target: 'Please excuse me',
-      score3: ['please excuse me', 'please excus me', 'please xcuse me'],
-      score2: ['excuse me', 'please excuse', 'scuse me'],
+      target: 'Excuse me',
+      score3: ['excuse me', 'excus me', 'xcuse me'],
+      score2: ['excuse', 'scuse me', 'cuse me'],
       score1: ['excuse', 'excus', 'cuse'],
     },
   },
@@ -456,12 +443,19 @@ const WORDS = [
   },
 ];
 
+// asset_keys that were removed or renamed — delete them before upserting
+const STALE_KEYS = ['please', 'please_excuse_me'];
+
 async function seed() {
   await sequelize.authenticate();
   console.log('Connected to database');
 
   await sequelize.sync({ alter: true });
   console.log('Schema synced');
+
+  // Remove stale rows that are no longer in the seed
+  const deleted = await DialogueWord.destroy({ where: { asset_key: STALE_KEYS } });
+  if (deleted) console.log(`  Removed ${deleted} stale word(s): ${STALE_KEYS.join(', ')}`);
 
   let created = 0;
   let updated = 0;
