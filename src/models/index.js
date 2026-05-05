@@ -5,6 +5,7 @@ const Principal          = require('./Principal');
 const Teacher            = require('./Teacher');
 const Student            = require('./Student');
 const Session            = require('./Session');
+const StudentAvatar      = require('./StudentAvatar');
 const PasswordResetOtp   = require('./PasswordResetOtp');
 
 // Principal → Teacher
@@ -23,4 +24,8 @@ Session.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
 Student.hasMany(Session, { foreignKey: 'student_id', as: 'sessions' });
 Session.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
-module.exports = { sequelize, Principal, Teacher, Student, Session, PasswordResetOtp };
+// Student ↔ StudentAvatar (one-to-one)
+Student.hasOne(StudentAvatar, { foreignKey: 'student_id', as: 'avatarRecord' });
+StudentAvatar.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+module.exports = { sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp };

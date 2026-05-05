@@ -1,7 +1,7 @@
 'use strict';
 
 const { Op } = require('sequelize');
-const { Teacher, Student, Session } = require('../models');
+const { Teacher, Student, Session, StudentAvatar } = require('../models');
 const ApiError = require('../utils/ApiError');
 
 async function getDashboardStats(teacherId) {
@@ -39,26 +39,41 @@ async function getDashboardStats(teacherId) {
 }
 
 async function getOwnStudents(teacherId) {
-  return Student.findAll({
+  const students = await Student.findAll({
     where: { teacher_id: teacherId },
     order: [['student_code', 'ASC']],
+    include: [{ model: StudentAvatar, as: 'avatarRecord', attributes: ['avatar_key'] }],
   });
+  return students.map(flattenAvatar);
 }
 
 async function getOwnStudentById(teacherId, studentId) {
   const student = await Student.findOne({
     where: { sid: studentId, teacher_id: teacherId },
+    include: [{ model: StudentAvatar, as: 'avatarRecord', attributes: ['avatar_key'] }],
   });
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
-  return student;
+  return flattenAvatar(student);
 }
 
-async function startSession(teacherId, studentId) {
-  // Verify student belongs to this teacher
+async function setAvatar(teacherId, studentId, avatarKey) {
+  // Verify the student belongs to this teacher
   const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
 
-  // Prevent duplicate active sessions
+  const [record] = await StudentAvatar.upsert({
+    student_id:  studentId,
+    avatar_key:  avatarKey,
+    selected_by: teacherId,
+    selected_at: new Date(),
+  });
+  return record;
+}
+
+async function startSession(teacherId, studentId) {
+  const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
+  if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+
   const existing = await Session.findOne({
     where: { teacher_id: teacherId, student_id: studentId, is_active: true },
   });
@@ -77,10 +92,19 @@ async function endSession(teacherId, studentId) {
   return session;
 }
 
+// Flatten avatarRecord association into a plain avatar_key field
+function flattenAvatar(student) {
+  const plain = student.get({ plain: true });
+  plain.avatar_key = plain.avatarRecord?.avatar_key ?? null;
+  delete plain.avatarRecord;
+  return plain;
+}
+
 module.exports = {
   getDashboardStats,
   getOwnStudents,
   getOwnStudentById,
+  setAvatar,
   startSession,
   endSession,
 };
