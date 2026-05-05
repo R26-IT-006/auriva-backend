@@ -85,16 +85,23 @@ async function getLevel1Overview(teacherId, studentId) {
 /**
  * Returns the recommended next word for this student.
  *
- * Priority:
- *   1. in_progress words (ordered by category / teaching_order)
- *   2. not_started words that are unlocked by difficulty gate
- *   3. struggling words that qualify for Rule 3 re-introduction
- *      (all lower-difficulty words in the same category are mastered)
+ * Options:
+ *   category        – filter to one category (optional)
+ *   exclude_word_id – the word just finished; never returned again this call
+ *   session_passed  – true  → relax difficulty gate so a higher-difficulty word
+ *                             can be introduced after one session pass
+ *   status          – the post-session status of the finished word; used to
+ *                     route struggling students to easier words
  *
- * Rule 3: When a struggling word is re-introduced, its consecutive_fail_count
- * is reset to 0 and status is returned to in_progress.
+ * Difficulty gates:
+ *   Normal:        all lower-difficulty words must be mastered
+ *   Session-pass:  at least one lower-difficulty word has session_pass_count ≥ 1
+ *
+ * Struggling routing:
+ *   D2 struggling → prefer D1 not-mastered, then D2 not-mastered
+ *   D3 struggling → prefer D3, then D2, then D1 not-mastered
  */
-async function getNextWord(teacherId, studentId, category = null) {
+async function getNextWord(teacherId, studentId, { category = null, exclude_word_id = null, session_passed = null, status = null } = {}) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
 
   const whereClause = category ? { category } : {};
@@ -117,8 +124,18 @@ async function getNextWord(teacherId, studentId, category = null) {
     progress: w.get({ plain: true }).progress?.[0] ?? null,
   }));
 
+  // Strict gate: all lower-difficulty words must be mastered
   function allLowerDifficultyMastered(targetWord) {
     if (targetWord.difficulty === 1) return true;
+
+    // days_of_week phrases (D2) unlock after ≥3 day names mastered
+    if (targetWord.category === 'days_of_week' && targetWord.difficulty === 2) {
+      const dayEntries = entries.filter(
+        (e) => e.word.category === 'days_of_week' && e.word.difficulty === 1
+      );
+      return dayEntries.filter((e) => e.progress?.status === 'mastered').length >= 3;
+    }
+
     for (let d = 1; d < targetWord.difficulty; d++) {
       const lowerWords = entries.filter(
         (e) => e.word.category === targetWord.category && e.word.difficulty === d
@@ -128,30 +145,100 @@ async function getNextWord(teacherId, studentId, category = null) {
     return true;
   }
 
-  function isUnlocked(word) {
-    return allLowerDifficultyMastered(word);
+  // Relaxed gate: at least one lower-difficulty word has a session pass
+  function isSessionUnlocked(word) {
+    if (word.difficulty === 1) return true;
+
+    if (word.category === 'days_of_week' && word.difficulty === 2) {
+      const dayD1 = entries.filter(
+        (e) => e.word.category === 'days_of_week' && e.word.difficulty === 1
+      );
+      return dayD1.filter((e) => (e.progress?.session_pass_count ?? 0) >= 1).length >= 3;
+    }
+
+    for (let d = 1; d < word.difficulty; d++) {
+      const lowerWords = entries.filter(
+        (e) => e.word.category === word.category && e.word.difficulty === d
+      );
+      if (!lowerWords.some((e) => (e.progress?.session_pass_count ?? 0) >= 1)) return false;
+    }
+    return true;
   }
 
-  // 1. in_progress word
-  const inProgress = entries.find(
-    ({ word, progress }) => progress?.status === 'in_progress' && isUnlocked(word)
+  const excludedId       = exclude_word_id ? parseInt(exclude_word_id, 10) : null;
+  const currentDifficulty = excludedId
+    ? (entries.find((e) => e.word.id === excludedId)?.word.difficulty ?? null)
+    : null;
+
+  // Pool: exclude the just-finished word and words already mastered
+  const candidates = entries.filter(
+    (e) => e.word.id !== excludedId && e.progress?.status !== 'mastered'
+  );
+
+  function pickFrom(pool) {
+    // in_progress first, then not_started
+    return (
+      pool.find((e) => e.progress?.status === 'in_progress') ??
+      pool.find((e) => !e.progress || e.progress.status === 'not_started') ??
+      null
+    );
+  }
+
+  // ── Case 1: session passed → can unlock next difficulty ────────────────────
+  if (session_passed === true && currentDifficulty !== null) {
+    // Try same difficulty first (other unlearned words at this level)
+    const sameDiff = candidates.filter(
+      (e) => e.word.difficulty === currentDifficulty && allLowerDifficultyMastered(e.word)
+    );
+    const samePick = pickFrom(sameDiff);
+    if (samePick) return formatNextWord(samePick.word, samePick.progress);
+
+    // Offer next difficulty using the relaxed session-pass gate
+    const nextDiff = candidates.filter(
+      (e) => e.word.difficulty === currentDifficulty + 1 && isSessionUnlocked(e.word)
+    );
+    const nextPick = pickFrom(nextDiff);
+    if (nextPick) return formatNextWord(nextPick.word, nextPick.progress);
+  }
+
+  // ── Case 2: struggling at D2 → D1 not-mastered, then D2 not-mastered ─────
+  if (status === 'struggling' && currentDifficulty === 2) {
+    const d1 = pickFrom(candidates.filter((e) => e.word.difficulty === 1));
+    if (d1) return formatNextWord(d1.word, d1.progress);
+
+    const d2 = pickFrom(candidates.filter((e) => e.word.difficulty === 2));
+    if (d2) return formatNextWord(d2.word, d2.progress);
+  }
+
+  // ── Case 3: struggling at D3 → D3, then D2, then D1 not-mastered ──────────
+  if (status === 'struggling' && currentDifficulty === 3) {
+    const d3 = pickFrom(candidates.filter((e) => e.word.difficulty === 3));
+    if (d3) return formatNextWord(d3.word, d3.progress);
+
+    const d2 = pickFrom(candidates.filter((e) => e.word.difficulty === 2));
+    if (d2) return formatNextWord(d2.word, d2.progress);
+
+    const d1 = pickFrom(candidates.filter((e) => e.word.difficulty === 1));
+    if (d1) return formatNextWord(d1.word, d1.progress);
+  }
+
+  // ── Default: in_progress → not_started → Rule 3 re-introduction ──────────
+  const inProgress = candidates.find(
+    ({ word, progress }) => progress?.status === 'in_progress' && allLowerDifficultyMastered(word)
   );
   if (inProgress) return formatNextWord(inProgress.word, inProgress.progress);
 
-  // 2. not_started word
-  const notStarted = entries.find(
+  const notStarted = candidates.find(
     ({ word, progress }) =>
-      (!progress || progress.status === 'not_started') && isUnlocked(word)
+      (!progress || progress.status === 'not_started') && allLowerDifficultyMastered(word)
   );
   if (notStarted) return formatNextWord(notStarted.word, notStarted.progress);
 
-  // 3. Rule 3 — struggling word eligible for re-introduction
-  const reintroEntry = entries.find(
-    ({ word, progress }) =>
-      progress?.status === 'struggling' && allLowerDifficultyMastered(word)
+  // Rule 3 — re-introduce a struggling word when lower difficulty is resolved
+  const reintroEntry = candidates.find(
+    ({ word, progress }) => progress?.status === 'struggling' && allLowerDifficultyMastered(word)
   );
   if (reintroEntry) {
-    // Reset fail streak and status (Rule 3)
     await reintroEntry.progress.update({
       status:                 'in_progress',
       consecutive_fail_count: 0,

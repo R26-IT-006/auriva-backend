@@ -10,8 +10,13 @@ async function getLevel1Overview(req, res) {
 }
 
 async function getNextWord(req, res) {
-  const category = req.query.category ?? null;
-  const word = await dialogueService.getNextWord(req.user.id, req.params.studentId, category);
+  const { category, exclude_word_id, session_passed, status } = req.query;
+  const word = await dialogueService.getNextWord(req.user.id, req.params.studentId, {
+    category:        category        ?? null,
+    exclude_word_id: exclude_word_id ?? null,
+    session_passed:  session_passed === 'true' ? true : session_passed === 'false' ? false : null,
+    status:          status          ?? null,
+  });
   res.json(word ?? { done: true });
 }
 
