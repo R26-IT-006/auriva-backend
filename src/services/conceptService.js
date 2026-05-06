@@ -23,14 +23,57 @@ const FRUIT_SEQUENCE = [
   'mango', 'orange', 'papaya', 'passion', 'pineapple', 'watermelon',
 ];
 
+const PROFESSIONALS_SEQUENCE = [
+  'baker', 'carpenter', 'cashier', 'doctor',
+  'farmer', 'nurse', 'principal', 'teacher',
+];
+
+const ANIMALS_SEQUENCE = [
+  'ant', 'bull', 'butterfly', 'cat', 'caterpillar', 'cock',
+  'cow', 'crow', 'dog', 'elephant', 'goat', 'hen',
+  'horse', 'lion', 'owl', 'parrot', 'peacock', 'rabbit',
+  'snake', 'sparrow', 'tiger',
+];
+
+const HOUSE_SEQUENCE = [
+  'door', 'roof', 'wall', 'windows',
+];
+
+const NUMBERS_SEQUENCE = [
+  'one', 'two', 'three', 'four', 'five',
+  'six', 'seven', 'eight', 'nine', 'ten',
+];
+
+const SHAPES_SEQUENCE = [
+  'circle', 'square', 'rectangle', 'triangle',
+];
+
+const COLORS_SEQUENCE = [
+  'red', 'blue', 'green', 'yellow', 'orange',
+  'pink', 'purple', 'brown', 'black', 'white',
+];
+
 const CLASSROOM_SEQUENCE = [
   'bag', 'blackboard', 'book', 'bottle', 'chair',
   'desk', 'dustbin', 'eraser', 'pencil', 'ruler', 'table',
 ];
 
+const HOUSEHOLD_SEQUENCE = [
+  'bed', 'brush', 'comb', 'cup', 'fork',
+  'glass', 'knife', 'mug', 'pillows', 'plate',
+  'soap', 'spoon', 'toothbrush', 'toothpaste',
+];
+
 const CATEGORY_SEQUENCES = {
-  fruits:    FRUIT_SEQUENCE,
+  fruits:        FRUIT_SEQUENCE,
+  professionals: PROFESSIONALS_SEQUENCE,
+  animals:       ANIMALS_SEQUENCE,
+  house:     HOUSE_SEQUENCE,
+  numbers:   NUMBERS_SEQUENCE,
+  shapes:    SHAPES_SEQUENCE,
+  colors:    COLORS_SEQUENCE,
   classroom: CLASSROOM_SEQUENCE,
+  household: HOUSEHOLD_SEQUENCE,
 };
 
 function getSequence(categoryKey) {
