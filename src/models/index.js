@@ -19,6 +19,11 @@ const Level2GenderSelectionLog   = require('./Level2GenderSelectionLog');
 const Level2ActivitySelectionLog = require('./Level2ActivitySelectionLog');
 const Level2ProductionAttempt    = require('./Level2ProductionAttempt');
 const Level2NonVerbalAttempt     = require('./Level2NonVerbalAttempt');
+const ActionWordProgress         = require('./ActionWordProgress');
+const ActionWordAttempt          = require('./ActionWordAttempt');
+const CanYouGameRound            = require('./CanYouGameRound');
+const ActionIdentificationRound  = require('./ActionIdentificationRound');
+const VerbQAProductionRound      = require('./VerbQAProductionRound');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -110,6 +115,54 @@ Level2ProductionAttempt.belongsTo(Level2Session, { foreignKey: 'level2_session_i
 Level2Session.hasMany(Level2NonVerbalAttempt, { foreignKey: 'level2_session_id', as: 'nonVerbalAttempts' });
 Level2NonVerbalAttempt.belongsTo(Level2Session, { foreignKey: 'level2_session_id', as: 'level2Session' });
 
+// ── Category 3 associations ───────────────────────────────────────────────
+// All Cat3 word lookups use DialogueWord (category='abilities').
+// Yes and No standalone words are seeded into dialogue_words alongside Clap–Sing.
+
+// DialogueWord ↔ ActionWordProgress (Cat3 word teaching progress)
+DialogueWord.hasMany(ActionWordProgress, { foreignKey: 'word_id', as: 'cat3Progress' });
+ActionWordProgress.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
+
+// Student ↔ ActionWordProgress
+Student.hasMany(ActionWordProgress, { foreignKey: 'student_id', as: 'cat3Progress' });
+ActionWordProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// DialogueWord ↔ ActionWordAttempt
+DialogueWord.hasMany(ActionWordAttempt, { foreignKey: 'word_id', as: 'cat3Attempts' });
+ActionWordAttempt.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
+
+// Student ↔ ActionWordAttempt
+Student.hasMany(ActionWordAttempt, { foreignKey: 'student_id', as: 'actionWordAttempts' });
+ActionWordAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Session ↔ ActionWordAttempt
+Session.hasMany(ActionWordAttempt, { foreignKey: 'session_id', as: 'actionWordAttempts' });
+ActionWordAttempt.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
+
+// CanYouGameRound associations
+DialogueWord.hasMany(CanYouGameRound, { foreignKey: 'word_id', as: 'canYouRounds' });
+CanYouGameRound.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
+Student.hasMany(CanYouGameRound, { foreignKey: 'student_id', as: 'canYouRounds' });
+CanYouGameRound.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Session.hasMany(CanYouGameRound, { foreignKey: 'session_id', as: 'canYouRounds' });
+CanYouGameRound.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
+
+// ActionIdentificationRound associations
+DialogueWord.hasMany(ActionIdentificationRound, { foreignKey: 'word_id', as: 'identificationRounds' });
+ActionIdentificationRound.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
+Student.hasMany(ActionIdentificationRound, { foreignKey: 'student_id', as: 'identificationRounds' });
+ActionIdentificationRound.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Session.hasMany(ActionIdentificationRound, { foreignKey: 'session_id', as: 'identificationRounds' });
+ActionIdentificationRound.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
+
+// VerbQAProductionRound associations
+DialogueWord.hasMany(VerbQAProductionRound, { foreignKey: 'word_id', as: 'verbQARounds' });
+VerbQAProductionRound.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
+Student.hasMany(VerbQAProductionRound, { foreignKey: 'student_id', as: 'verbQARounds' });
+VerbQAProductionRound.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Session.hasMany(VerbQAProductionRound, { foreignKey: 'session_id', as: 'verbQARounds' });
+VerbQAProductionRound.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
+
 module.exports = {
   sequelize,
   Principal,
@@ -130,4 +183,9 @@ module.exports = {
   Level2ActivitySelectionLog,
   Level2ProductionAttempt,
   Level2NonVerbalAttempt,
+  ActionWordProgress,
+  ActionWordAttempt,
+  CanYouGameRound,
+  ActionIdentificationRound,
+  VerbQAProductionRound,
 };

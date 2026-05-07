@@ -179,6 +179,35 @@ const WORDS = [
   },
 
   // ── Abilities ────────────────────────────────────────────────────────────
+  // ── Cat3 standalone words (taught before action verbs in Category 3) ──────
+  // Identified in the Cat3 service by asset_key 'cat3_yes' / 'cat3_no'.
+  {
+    word: 'Yes',
+    category: 'abilities',
+    difficulty: 1,
+    teaching_order: 0,
+    asset_key: 'cat3_yes',
+    keyword_triggers: {
+      target: 'Yes',
+      score3: ['yes', 'yeh', 'ya', 'yep'],
+      score2: ['yeah', 'yea', 'es'],
+      score1: ['ye', 'y'],
+    },
+  },
+  {
+    word: 'No',
+    category: 'abilities',
+    difficulty: 1,
+    teaching_order: 0,
+    asset_key: 'cat3_no',
+    keyword_triggers: {
+      target: 'No',
+      score3: ['no', 'noe', 'noh'],
+      score2: ['nope', 'nah', 'na'],
+      score1: ['n'],
+    },
+  },
+
   {
     word: 'Clap',
     category: 'abilities',

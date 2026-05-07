@@ -9,8 +9,9 @@ const morgan    = require('morgan');
 const rateLimit = require('express-rate-limit');
 const logger       = require('./src/utils/logger');
 const ApiError     = require('./src/utils/ApiError');
-const { sequelize } = require('./src/models');
-const swaggerUi    = require('swagger-ui-express');
+const { sequelize }      = require('./src/models');
+const fixCat3ForeignKeys = require('./src/utils/fixCat3ForeignKeys');
+const swaggerUi          = require('swagger-ui-express');
 const swaggerSpec  = require('./src/config/swagger');
 
 const app  = express();
@@ -100,6 +101,7 @@ async function start() {
   logger.info('Database connection established');
 
   if (process.env.NODE_ENV === 'development') {
+    await fixCat3ForeignKeys();
     await sequelize.sync({ alter: true });
     logger.info('Database schema synced');
   }

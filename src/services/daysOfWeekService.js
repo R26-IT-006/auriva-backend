@@ -188,11 +188,12 @@ async function getSpinningWheelRound(teacherId, studentId, attemptedWordIds) {
 
   const introduced = await getIntroducedDayWords(studentId);
 
+  // TEMP: lock disabled for testing — restore by uncommenting the block below
   if (introduced.length < 3) {
-    return {
-      available: false,
-      reason: 'At least 3 day names must be in progress or mastered to unlock the Spinning Wheel',
-    };
+     return {
+       available: false,
+       reason: 'At least 3 day names must be in progress or mastered to unlock the Spinning Wheel',
+     };
   }
 
   const attempted = new Set((attemptedWordIds || []).map(Number));
