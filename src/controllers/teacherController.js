@@ -60,6 +60,14 @@ async function getPronunciationResults(req, res) {
   res.json(results);
 }
 
+async function getPronunciationResultAudio(req, res) {
+  const audio = await teacherService.getPronunciationResultAudio(
+    req.user.id,
+    req.params.resultId
+  );
+  res.json(audio);
+}
+
 module.exports = {
   getDashboard,
   getStudents,
@@ -69,4 +77,5 @@ module.exports = {
   setAvatar,
   savePronunciationResult,
   getPronunciationResults,
+  getPronunciationResultAudio,
 };

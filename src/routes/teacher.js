@@ -181,6 +181,7 @@ router.post('/students/:id/avatar', [
 ], ctrl.setAvatar);
 
 router.get('/students/:id/pronunciation-results', ctrl.getPronunciationResults);
+router.get('/pronunciation-results/:resultId/audio', ctrl.getPronunciationResultAudio);
 
 /**
  * @swagger

@@ -101,6 +101,9 @@ async function endSession(teacherId, studentId) {
 async function savePronunciationResult(teacherId, studentId, data) {
   const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+  const rawAudioBuffer = data.raw_audio_base64
+    ? Buffer.from(data.raw_audio_base64, 'base64')
+    : null;
 
   return PronunciationSessionResult.create({
     teacher_id: teacherId,
@@ -118,6 +121,9 @@ async function savePronunciationResult(teacherId, studentId, data) {
     next_word_id: data.next_word_id || null,
     attempt_number: data.attempt_number || 1,
     recording_uri: data.recording_uri || null,
+    raw_audio_data: rawAudioBuffer,
+    raw_audio_mime_type: data.raw_audio_mime_type || null,
+    raw_audio_size: rawAudioBuffer?.length || data.raw_audio_size || null,
   });
 }
 
@@ -131,11 +137,40 @@ async function getPronunciationResults(teacherId, studentId) {
   });
 
   return results
-    .map((result, index) => ({
-      ...result.get({ plain: true }),
-      session_number: index + 1,
-    }))
+    .map((result, index) => {
+      const plain = result.get({ plain: true });
+      const hasRawAudio = Boolean(plain.raw_audio_data);
+      delete plain.raw_audio_data;
+
+      return {
+        ...plain,
+        has_raw_audio: hasRawAudio,
+        session_number: index + 1,
+      };
+    })
     .reverse();
+}
+
+async function getPronunciationResultAudio(teacherId, resultId) {
+  const result = await PronunciationSessionResult.findOne({
+    where: { id: resultId, teacher_id: teacherId },
+    attributes: [
+      'id',
+      'raw_audio_data',
+      'raw_audio_mime_type',
+      'raw_audio_size',
+    ],
+  });
+
+  if (!result) throw new ApiError(404, 'Pronunciation result not found');
+  if (!result.raw_audio_data) throw new ApiError(404, 'No audio saved for this session');
+
+  return {
+    id: result.id,
+    raw_audio_base64: Buffer.from(result.raw_audio_data).toString('base64'),
+    raw_audio_mime_type: result.raw_audio_mime_type || 'audio/mp4',
+    raw_audio_size: result.raw_audio_size || result.raw_audio_data.length,
+  };
 }
 
 // Flatten avatarRecord association into a plain avatar_key field
@@ -155,4 +190,5 @@ module.exports = {
   endSession,
   savePronunciationResult,
   getPronunciationResults,
+  getPronunciationResultAudio,
 };

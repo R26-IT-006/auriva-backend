@@ -71,6 +71,18 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  raw_audio_data: {
+    type: DataTypes.BLOB('long'),
+    allowNull: true,
+  },
+  raw_audio_mime_type: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  raw_audio_size: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

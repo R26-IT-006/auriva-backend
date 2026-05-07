@@ -2,6 +2,8 @@
 
 const { body } = require('express-validator');
 
+const MAX_RAW_AUDIO_BYTES = 8 * 1024 * 1024;
+
 const savePronunciationResultValidation = [
   body('mode')
     .isIn(['word', 'alphabet'])
@@ -60,6 +62,29 @@ const savePronunciationResultValidation = [
   body('recording_uri')
     .optional({ nullable: true, checkFalsy: true })
     .trim(),
+  body('raw_audio_base64')
+    .optional({ nullable: true, checkFalsy: true })
+    .custom((value) => {
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+        throw new Error('raw_audio_base64 must be a valid base64 string');
+      }
+
+      const byteLength = Buffer.byteLength(value, 'base64');
+      if (byteLength > MAX_RAW_AUDIO_BYTES) {
+        throw new Error('raw_audio_base64 must be 8MB or smaller');
+      }
+
+      return true;
+    }),
+  body('raw_audio_mime_type')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .isString()
+    .withMessage('raw_audio_mime_type must be a string'),
+  body('raw_audio_size')
+    .optional({ nullable: true })
+    .isInt({ min: 1, max: MAX_RAW_AUDIO_BYTES })
+    .withMessage('raw_audio_size must be a positive integer up to 8MB'),
 ];
 
 module.exports = { savePronunciationResultValidation };
