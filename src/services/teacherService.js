@@ -17,11 +17,13 @@ async function getDashboardStats(teacherId) {
 
   const [profile, totalSessions, weeklySessions, lastSession] = await Promise.all([
     Teacher.findByPk(teacherId, { attributes: { exclude: ['password_hash'] } }),
-    Session.count({ where: { teacher_id: teacherId } }),
-    Session.count({ where: { teacher_id: teacherId, started_at: { [Op.gte]: startOfWeek } } }),
-    Session.findOne({
+    PronunciationSessionResult.count({ where: { teacher_id: teacherId } }),
+    PronunciationSessionResult.count({
+      where: { teacher_id: teacherId, created_at: { [Op.gte]: startOfWeek } },
+    }),
+    PronunciationSessionResult.findOne({
       where: { teacher_id: teacherId },
-      order: [['started_at', 'DESC']],
+      order: [['created_at', 'DESC'], ['id', 'DESC']],
       include: [{ model: Student, as: 'student', attributes: ['sid', 'full_name', 'student_code'] }],
     }),
   ]);
@@ -37,7 +39,9 @@ async function getDashboardStats(teacherId) {
         ? {
             studentName: lastSession.student?.full_name,
             studentCode: lastSession.student?.student_code,
-            date: lastSession.started_at,
+            date: lastSession.created_at,
+            score: lastSession.overall_score,
+            wordLabel: lastSession.word_label,
           }
         : null,
     },
