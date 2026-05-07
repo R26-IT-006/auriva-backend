@@ -121,6 +121,23 @@ async function savePronunciationResult(teacherId, studentId, data) {
   });
 }
 
+async function getPronunciationResults(teacherId, studentId) {
+  const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
+  if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+
+  const results = await PronunciationSessionResult.findAll({
+    where: { teacher_id: teacherId, student_id: studentId },
+    order: [['created_at', 'ASC'], ['id', 'ASC']],
+  });
+
+  return results
+    .map((result, index) => ({
+      ...result.get({ plain: true }),
+      session_number: index + 1,
+    }))
+    .reverse();
+}
+
 // Flatten avatarRecord association into a plain avatar_key field
 function flattenAvatar(student) {
   const plain = student.get({ plain: true });
@@ -137,4 +154,5 @@ module.exports = {
   startSession,
   endSession,
   savePronunciationResult,
+  getPronunciationResults,
 };
