@@ -159,6 +159,7 @@ const options = {
             recommendation_message: { type: 'string', nullable: true, example: 'Try another word with the k sound.' },
             next_word_id:           { type: 'string', nullable: true, example: 'dog' },
             attempt_number:         { type: 'integer', minimum: 1, example: 1 },
+            workflow_completed:     { type: 'boolean', example: true },
             recording_uri:          { type: 'string', nullable: true, example: 'file:///recording.m4a' },
             raw_audio_base64:       { type: 'string', nullable: true, description: 'Base64 encoded raw recorded audio, max 8MB decoded.' },
             raw_audio_mime_type:    { type: 'string', nullable: true, example: 'audio/mp4' },

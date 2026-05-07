@@ -124,6 +124,7 @@ async function savePronunciationResult(teacherId, studentId, data) {
     recommendation_message: data.recommendation_message || null,
     next_word_id: data.next_word_id || null,
     attempt_number: data.attempt_number || 1,
+    workflow_completed: data.workflow_completed ?? true,
     recording_uri: data.recording_uri || null,
     raw_audio_data: rawAudioBuffer,
     raw_audio_mime_type: data.raw_audio_mime_type || null,

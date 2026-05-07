@@ -59,6 +59,10 @@ const savePronunciationResultValidation = [
     .optional()
     .isInt({ min: 1 })
     .withMessage('attempt_number must be a positive integer'),
+  body('workflow_completed')
+    .optional()
+    .isBoolean()
+    .withMessage('workflow_completed must be a boolean'),
   body('recording_uri')
     .optional({ nullable: true, checkFalsy: true })
     .trim(),

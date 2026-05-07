@@ -67,6 +67,11 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     allowNull: false,
     defaultValue: 1,
   },
+  workflow_completed: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
   recording_uri: {
     type: DataTypes.TEXT,
     allowNull: true,
