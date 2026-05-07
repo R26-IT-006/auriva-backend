@@ -40,8 +40,9 @@ app.use('/api', rateLimit({
 }));
 
 // ─── Body parsing ─────────────────────────────────────────────────────────────
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// 5mb limit: handwriting assessments send raw stroke point arrays that can be large
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 // ─── Swagger UI ───────────────────────────────────────────────────────────────
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
