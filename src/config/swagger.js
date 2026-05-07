@@ -133,6 +133,49 @@ const options = {
             is_active:  { type: 'boolean', example: true },
           },
         },
+        PronunciationResultRequest: {
+          type: 'object',
+          required: ['mode', 'word_id', 'word_label', 'overall_score'],
+          properties: {
+            mode:                   { type: 'string', enum: ['word', 'alphabet'], example: 'word' },
+            category_id:            { type: 'string', nullable: true, example: 'animals' },
+            word_id:                { type: 'string', example: 'cat' },
+            word_label:             { type: 'string', example: 'cat' },
+            overall_score:          { type: 'integer', minimum: 0, maximum: 100, example: 69 },
+            phoneme_scores: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  text:  { type: 'string', example: 'k' },
+                  type:  { type: 'string', nullable: true, example: 'consonant' },
+                  score: { type: 'integer', minimum: 0, maximum: 100, example: 91 },
+                },
+              },
+            },
+            response_duration:      { type: 'number', nullable: true, example: 2.1 },
+            hesitation_time:        { type: 'number', nullable: true, example: 1.2 },
+            recommendation_type:    { type: 'string', nullable: true, example: 'reinforce' },
+            recommendation_message: { type: 'string', nullable: true, example: 'Try another word with the k sound.' },
+            next_word_id:           { type: 'string', nullable: true, example: 'dog' },
+            attempt_number:         { type: 'integer', minimum: 1, example: 1 },
+            recording_uri:          { type: 'string', nullable: true, example: 'file:///recording.m4a' },
+          },
+        },
+        PronunciationSessionResult: {
+          allOf: [
+            { $ref: '#/components/schemas/PronunciationResultRequest' },
+            {
+              type: 'object',
+              properties: {
+                id:         { type: 'integer', example: 1 },
+                teacher_id: { type: 'integer', example: 1 },
+                student_id: { type: 'integer', example: 1 },
+                created_at: { type: 'string', format: 'date-time' },
+              },
+            },
+          ],
+        },
 
         // ── Dashboard ───────────────────────────────────────────────────────
         PrincipalDashboard: {

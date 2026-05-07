@@ -43,4 +43,24 @@ async function setAvatar(req, res) {
   res.status(201).json(record);
 }
 
-module.exports = { getDashboard, getStudents, getStudentById, startSession, endSession, setAvatar };
+async function savePronunciationResult(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await teacherService.savePronunciationResult(
+    req.user.id,
+    req.params.id,
+    req.body
+  );
+  res.status(201).json(result);
+}
+
+module.exports = {
+  getDashboard,
+  getStudents,
+  getStudentById,
+  startSession,
+  endSession,
+  setAvatar,
+  savePronunciationResult,
+};

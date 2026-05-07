@@ -1,0 +1,65 @@
+'use strict';
+
+const { body } = require('express-validator');
+
+const savePronunciationResultValidation = [
+  body('mode')
+    .isIn(['word', 'alphabet'])
+    .withMessage('mode must be either word or alphabet'),
+  body('category_id')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('word_id')
+    .trim()
+    .notEmpty()
+    .withMessage('word_id is required'),
+  body('word_label')
+    .trim()
+    .notEmpty()
+    .withMessage('word_label is required'),
+  body('overall_score')
+    .isInt({ min: 0, max: 100 })
+    .withMessage('overall_score must be an integer between 0 and 100'),
+  body('phoneme_scores')
+    .optional()
+    .isArray()
+    .withMessage('phoneme_scores must be an array'),
+  body('phoneme_scores.*.text')
+    .optional()
+    .isString()
+    .withMessage('phoneme score text must be a string'),
+  body('phoneme_scores.*.type')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage('phoneme score type must be a string'),
+  body('phoneme_scores.*.score')
+    .optional()
+    .isInt({ min: 0, max: 100 })
+    .withMessage('phoneme score must be an integer between 0 and 100'),
+  body('response_duration')
+    .optional({ nullable: true })
+    .isFloat({ min: 0 })
+    .withMessage('response_duration must be a positive number'),
+  body('hesitation_time')
+    .optional({ nullable: true })
+    .isFloat({ min: 0 })
+    .withMessage('hesitation_time must be a positive number'),
+  body('recommendation_type')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('recommendation_message')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('next_word_id')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('attempt_number')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('attempt_number must be a positive integer'),
+  body('recording_uri')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+];
+
+module.exports = { savePronunciationResultValidation };

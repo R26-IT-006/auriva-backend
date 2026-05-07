@@ -1,7 +1,13 @@
 'use strict';
 
 const { Op } = require('sequelize');
-const { Teacher, Student, Session, StudentAvatar } = require('../models');
+const {
+  Teacher,
+  Student,
+  Session,
+  StudentAvatar,
+  PronunciationSessionResult,
+} = require('../models');
 const ApiError = require('../utils/ApiError');
 
 async function getDashboardStats(teacherId) {
@@ -92,6 +98,29 @@ async function endSession(teacherId, studentId) {
   return session;
 }
 
+async function savePronunciationResult(teacherId, studentId, data) {
+  const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
+  if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+
+  return PronunciationSessionResult.create({
+    teacher_id: teacherId,
+    student_id: studentId,
+    mode: data.mode,
+    category_id: data.category_id || null,
+    word_id: data.word_id,
+    word_label: data.word_label,
+    overall_score: data.overall_score,
+    phoneme_scores: data.phoneme_scores || [],
+    response_duration: data.response_duration ?? null,
+    hesitation_time: data.hesitation_time ?? null,
+    recommendation_type: data.recommendation_type || null,
+    recommendation_message: data.recommendation_message || null,
+    next_word_id: data.next_word_id || null,
+    attempt_number: data.attempt_number || 1,
+    recording_uri: data.recording_uri || null,
+  });
+}
+
 // Flatten avatarRecord association into a plain avatar_key field
 function flattenAvatar(student) {
   const plain = student.get({ plain: true });
@@ -107,4 +136,5 @@ module.exports = {
   setAvatar,
   startSession,
   endSession,
+  savePronunciationResult,
 };

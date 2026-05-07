@@ -7,6 +7,7 @@ const Student            = require('./Student');
 const Session            = require('./Session');
 const StudentAvatar      = require('./StudentAvatar');
 const PasswordResetOtp   = require('./PasswordResetOtp');
+const PronunciationSessionResult = require('./PronunciationSessionResult');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -28,4 +29,27 @@ Session.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 Student.hasOne(StudentAvatar, { foreignKey: 'student_id', as: 'avatarRecord' });
 StudentAvatar.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
-module.exports = { sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp };
+// Teacher → PronunciationSessionResult
+Teacher.hasMany(PronunciationSessionResult, {
+  foreignKey: 'teacher_id',
+  as: 'pronunciationResults',
+});
+PronunciationSessionResult.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
+
+// Student → PronunciationSessionResult
+Student.hasMany(PronunciationSessionResult, {
+  foreignKey: 'student_id',
+  as: 'pronunciationResults',
+});
+PronunciationSessionResult.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+module.exports = {
+  sequelize,
+  Principal,
+  Teacher,
+  Student,
+  Session,
+  StudentAvatar,
+  PasswordResetOtp,
+  PronunciationSessionResult,
+};

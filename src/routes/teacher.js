@@ -5,6 +5,9 @@ const { verifyToken } = require('../middleware/auth');
 const { isTeacher }   = require('../middleware/roleGuard');
 const { body }        = require('express-validator');
 const ctrl            = require('../controllers/teacherController');
+const {
+  savePronunciationResultValidation,
+} = require('../validations/pronunciationValidation');
 
 // All routes require JWT + teacher role + first-login gate
 router.use(verifyToken, isTeacher);
@@ -176,5 +179,52 @@ router.post('/students/:id/avatar', [
     .isIn(['boba', 'glitter', 'lily', 'megatron'])
     .withMessage('avatar_key must be one of: boba, glitter, lily, megatron'),
 ], ctrl.setAvatar);
+
+/**
+ * @swagger
+ * /api/teacher/students/{id}/pronunciation-results:
+ *   post:
+ *     summary: Save a pronunciation module result for a student
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Student ID (sid)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/PronunciationResultRequest'
+ *     responses:
+ *       201:
+ *         description: Pronunciation result saved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PronunciationSessionResult'
+ *       404:
+ *         description: Student not found or not assigned to this teacher
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post(
+  '/students/:id/pronunciation-results',
+  savePronunciationResultValidation,
+  ctrl.savePronunciationResult
+);
 
 module.exports = router;
