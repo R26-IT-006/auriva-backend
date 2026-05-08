@@ -347,6 +347,18 @@ async function completeAdaptive(studentId, sessionId, categoryKey, conceptKey, c
     created_at:   new Date(),
   });
 
+  // Passing the adaptive quiz promotes the concept to 'passed' in PostgreSQL
+  if (allPassed) {
+    const now = new Date();
+    const [row, created] = await StudentConceptProgress.findOrCreate({
+      where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
+      defaults: { tier1_status: 'passed', tier1_passed_at: now },
+    });
+    if (!created && row.tier1_status !== 'passed') {
+      await row.update({ tier1_status: 'passed', tier1_passed_at: now });
+    }
+  }
+
   // If student got any rounds wrong, increment CONFUSION edges in GKB
   const wrongKeys = (roundResults || [])
     .filter((r) => !r.was_correct)
@@ -364,6 +376,78 @@ async function completeAdaptive(studentId, sessionId, categoryKey, conceptKey, c
   return { completed: true, all_passed: allPassed };
 }
 
+/**
+ * Marks a concept's Tier 2 as in_progress.
+ */
+async function startTier2(studentId, categoryKey, conceptKey) {
+  const [row, created] = await StudentConceptProgress.findOrCreate({
+    where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
+    defaults: { tier2_status: 'in_progress' },
+  });
+  if (!created && (row.tier2_status === 'locked' || row.tier2_status === 'not_started')) {
+    await row.update({ tier2_status: 'in_progress' });
+  }
+  return { started: true };
+}
+
+/**
+ * Finalises Tier 2 (pass or fail), logs the outcome, and syncs GKB edges.
+ */
+async function completeTier2(studentId, categoryKey, conceptKey, passed, score, attemptCount, confusedWith) {
+  const now = new Date();
+  const updateFields = { tier2_status: passed ? 'passed' : 'failed' };
+
+  const [row, created] = await StudentConceptProgress.findOrCreate({
+    where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
+    defaults: updateFields,
+  });
+  if (!created && row.tier2_status !== 'passed') {
+    await row.update(updateFields);
+  }
+
+  await ConceptInteractionLog.create({
+    student_id:   studentId,
+    category_key: categoryKey,
+    concept_key:  conceptKey,
+    tier:         2,
+    event_type:   passed ? 'tier2_pass' : 'tier2_fail',
+    event_data:   { score, attempt_count: attemptCount, confused_with: confusedWith },
+    created_at:   now,
+  });
+
+  Student.findByPk(studentId).then((student) => {
+    const fullName = student?.full_name || null;
+
+    syncToGkb('/gkb/tier2/score', {
+      student_id:    studentId,
+      full_name:     fullName,
+      concept_key:   conceptKey,
+      category_key:  categoryKey,
+      score,
+      attempt_count: attemptCount,
+      passed,
+      confused_with: confusedWith || [],
+    });
+
+    return ConceptInteractionLog.findAll({
+      where: { student_id: studentId, category_key: categoryKey, concept_key: conceptKey, event_type: 'image_tap', tier: 2 },
+      order: [['created_at', 'DESC']],
+      limit: 100,
+    }).then((tapLogs) => {
+      syncToGkb('/gkb/tier2/engagement', {
+        student_id:    studentId,
+        full_name:     fullName,
+        concept_key:   conceptKey,
+        category_key:  categoryKey,
+        tap_count:     tapLogs.length,
+        time_spent_ms: tapLogs.length > 0 ? (tapLogs[0].event_data?.time_ms || 0) : 0,
+      });
+    });
+  }).catch(() => {});
+
+  return { completed: true, passed };
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function assertStudentExists(studentId) {
@@ -372,4 +456,4 @@ async function assertStudentExists(studentId) {
   return student;
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive };
+module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2 };
