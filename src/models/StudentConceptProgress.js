@@ -39,10 +39,20 @@ const StudentConceptProgress = sequelize.define('StudentConceptProgress', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  tier1_retry_count: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
   tier2_status: {
-    type: DataTypes.ENUM('locked', 'not_started', 'in_progress', 'passed'),
+    type: DataTypes.ENUM('locked', 'not_started', 'in_progress', 'passed', 'failed'),
     allowNull: false,
     defaultValue: 'locked',
+  },
+  tier2_retry_count: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
   },
   tier3_status: {
     type: DataTypes.ENUM('locked', 'not_started', 'in_progress', 'passed'),

@@ -71,4 +71,16 @@ router.post('/tier2/complete', [
   body('attempt_count').isInt({ min: 1 }),
 ], ctrl.completeTier2);
 
+router.post('/tier3/start', [
+  body('student_id').isInt({ min: 1 }),
+  body('category_key').isString().notEmpty(),
+  body('concept_key').isString().notEmpty(),
+], ctrl.startTier3);
+
+router.post('/tier3/complete', [
+  body('student_id').isInt({ min: 1 }),
+  body('category_key').isString().notEmpty(),
+  body('concept_key').isString().notEmpty(),
+], ctrl.completeTier3);
+
 module.exports = router;

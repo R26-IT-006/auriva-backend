@@ -183,8 +183,12 @@ async function startTier1(studentId, categoryKey, conceptKey) {
     defaults: { tier1_status: 'in_progress' },
   });
 
-  if (!created && row.tier1_status === 'not_started') {
-    await row.update({ tier1_status: 'in_progress' });
+  if (!created) {
+    if (row.tier1_status === 'not_started') {
+      await row.update({ tier1_status: 'in_progress' });
+    } else if (row.tier1_status === 'failed') {
+      await row.update({ tier1_status: 'in_progress', tier1_retry_count: row.tier1_retry_count + 1 });
+    }
   }
 
   syncToGkb(`/gkb/student/${studentId}`, {
@@ -243,7 +247,7 @@ async function completeTier1(studentId, categoryKey, conceptKey, passed, score, 
     concept_key:  conceptKey,
     tier:         1,
     event_type:   passed ? 'tier1_pass' : 'tier1_fail',
-    event_data:   { score, attempt_count: attemptCount, confused_with: confusedWith },
+    event_data:   { score, attempt_count: attemptCount, confused_with: confusedWith, retry_count: row.tier1_retry_count ?? 0 },
     created_at:   now,
   });
 
@@ -384,8 +388,12 @@ async function startTier2(studentId, categoryKey, conceptKey) {
     where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
     defaults: { tier2_status: 'in_progress' },
   });
-  if (!created && (row.tier2_status === 'locked' || row.tier2_status === 'not_started')) {
-    await row.update({ tier2_status: 'in_progress' });
+  if (!created) {
+    if (row.tier2_status === 'locked' || row.tier2_status === 'not_started') {
+      await row.update({ tier2_status: 'in_progress' });
+    } else if (row.tier2_status === 'failed') {
+      await row.update({ tier2_status: 'in_progress', tier2_retry_count: row.tier2_retry_count + 1 });
+    }
   }
   return { started: true };
 }
@@ -411,7 +419,7 @@ async function completeTier2(studentId, categoryKey, conceptKey, passed, score, 
     concept_key:  conceptKey,
     tier:         2,
     event_type:   passed ? 'tier2_pass' : 'tier2_fail',
-    event_data:   { score, attempt_count: attemptCount, confused_with: confusedWith },
+    event_data:   { score, attempt_count: attemptCount, confused_with: confusedWith, retry_count: row.tier2_retry_count ?? 0 },
     created_at:   now,
   });
 
@@ -456,4 +464,45 @@ async function assertStudentExists(studentId) {
   return student;
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2 };
+/**
+ * Marks a concept's Tier 3 as in_progress.
+ */
+async function startTier3(studentId, categoryKey, conceptKey) {
+  const [row, created] = await StudentConceptProgress.findOrCreate({
+    where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
+    defaults: { tier3_status: 'in_progress' },
+  });
+  if (!created && (row.tier3_status === 'locked' || row.tier3_status === 'not_started')) {
+    await row.update({ tier3_status: 'in_progress' });
+  }
+  return { started: true };
+}
+
+/**
+ * Finalises Tier 3 (video watched), logs the outcome.
+ */
+async function completeTier3(studentId, categoryKey, conceptKey, timeSpentMs) {
+  const now = new Date();
+
+  const [row, created] = await StudentConceptProgress.findOrCreate({
+    where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
+    defaults: { tier3_status: 'passed' },
+  });
+  if (!created && row.tier3_status !== 'passed') {
+    await row.update({ tier3_status: 'passed' });
+  }
+
+  await ConceptInteractionLog.create({
+    student_id:   studentId,
+    category_key: categoryKey,
+    concept_key:  conceptKey,
+    tier:         3,
+    event_type:   'tier3_complete',
+    event_data:   { time_spent_ms: timeSpentMs || 0 },
+    created_at:   now,
+  });
+
+  return { completed: true };
+}
+
+module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3 };

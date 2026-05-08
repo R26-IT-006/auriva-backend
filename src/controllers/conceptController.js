@@ -127,4 +127,20 @@ async function completeTier2(req, res) {
   res.json(result);
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2 };
+async function startTier3(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+  const { student_id, category_key, concept_key } = req.body;
+  const result = await conceptService.startTier3(student_id, category_key, concept_key);
+  res.status(201).json(result);
+}
+
+async function completeTier3(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+  const { student_id, category_key, concept_key, time_spent_ms } = req.body;
+  const result = await conceptService.completeTier3(student_id, category_key, concept_key, time_spent_ms || 0);
+  res.json(result);
+}
+
+module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3 };
