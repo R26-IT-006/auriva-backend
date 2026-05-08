@@ -25,6 +25,19 @@ const HandwritingAssessment = sequelize.define('HandwritingAssessment', {
     type: DataTypes.JSON,
     allowNull: false,
   },
+  is_initial: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+  motor_score: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+  },
+  motor_profile: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

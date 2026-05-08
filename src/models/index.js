@@ -10,6 +10,8 @@ const PasswordResetOtp        = require('./PasswordResetOtp');
 const HandwritingAssessment   = require('./HandwritingAssessment');
 const LetterProgress          = require('./LetterProgress');
 const Stroke                  = require('./Stroke');
+const ExplanationResult       = require('./ExplanationResult');
+const RecommendationHistory   = require('./RecommendationHistory');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -47,4 +49,20 @@ Stroke.belongsTo(HandwritingAssessment, { foreignKey: 'assessment_id', as: 'asse
 Student.hasMany(Stroke, { foreignKey: 'student_id', as: 'strokes' });
 Stroke.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
-module.exports = { sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp, HandwritingAssessment, LetterProgress, Stroke };
+// Student → ExplanationResult
+Student.hasMany(ExplanationResult, { foreignKey: 'student_id', as: 'explanationResults' });
+ExplanationResult.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// HandwritingAssessment → ExplanationResult
+HandwritingAssessment.hasOne(ExplanationResult, { foreignKey: 'assessment_id', as: 'explanation' });
+ExplanationResult.belongsTo(HandwritingAssessment, { foreignKey: 'assessment_id', as: 'assessment' });
+
+// Student → RecommendationHistory
+Student.hasMany(RecommendationHistory, { foreignKey: 'student_id', as: 'recommendationHistory' });
+RecommendationHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+module.exports = {
+  sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
+  HandwritingAssessment, LetterProgress, Stroke,
+  ExplanationResult, RecommendationHistory,
+};

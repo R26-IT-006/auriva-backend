@@ -1,7 +1,8 @@
 'use strict';
 
-const { HandwritingAssessment, LetterProgress } = require('../models');
+const { HandwritingAssessment, LetterProgress, ExplanationResult, RecommendationHistory } = require('../models');
 const ApiError = require('../utils/ApiError');
+const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
@@ -36,14 +37,18 @@ async function submitAssessment(req, res) {
     throw new ApiError(422, 'student_id, session_start, session_end, and shapes are required');
   }
 
+  const existingCount = await HandwritingAssessment.count({ where: { student_id } });
+  const is_initial    = existingCount === 0;
+
   const assessment = await HandwritingAssessment.create({
     student_id,
     session_start,
     session_end,
     shapes,
+    is_initial,
   });
 
-  res.status(201).json({ id: assessment.id, message: 'Assessment saved' });
+  res.status(201).json({ id: assessment.id, is_initial, message: 'Assessment saved' });
 }
 
 async function getProgress(req, res) {
@@ -88,4 +93,224 @@ async function recordLetterCompletion(req, res) {
   res.status(created ? 201 : 200).json({ id: record.id, letter, case_type });
 }
 
-module.exports = { submitAssessment, getProgress, recordLetterCompletion };
+/**
+ * POST /handwriting/explain
+ *
+ * Accepts shape-assessment data + optional letter metrics, runs the
+ * rule-based explainability engine, stores the result, and returns a
+ * structured teacher-friendly explanation with feature contributions.
+ *
+ * Request body:
+ *  {
+ *    student_id       : number,
+ *    assessment_id    : number  (optional – link to an existing assessment)
+ *    shapes           : [{ shapeId, features: { smoothness, avg_deviation } }],
+ *    letter_metrics   : { avgPauses, avgTime }  (optional)
+ *    motor_score      : number  (optional pre-computed score)
+ *  }
+ */
+async function explainAssessment(req, res) {
+  const { student_id, assessment_id, shapes, letter_metrics, motor_score } = req.body;
+
+  if (!student_id || !Array.isArray(shapes) || shapes.length === 0) {
+    throw new ApiError(422, 'student_id and shapes array are required');
+  }
+
+  const result = analyzeMotorDifficulty(shapes, letter_metrics ?? {}, motor_score ?? null);
+
+  // Persist explanation result (fire-and-forget — don't block response on DB error)
+  try {
+    const saved = await ExplanationResult.create({
+      assessment_id:        assessment_id ?? null,
+      student_id,
+      difficulty_type:      result.difficultyKey,
+      difficulty_label:     result.difficulty,
+      confidence_score:     result.confidence ?? null,
+      motor_score:          result.motorScore ?? null,
+      feature_contributions: result.featureContributions,
+      explanation_lines:    result.explanation,
+      recommendations:      result.recommendations,
+    });
+
+    // Record in recommendation history only when a real difficulty was detected
+    if (result.difficultyKey && result.difficultyKey !== 'NONE') {
+      await RecommendationHistory.create({
+        student_id,
+        difficulty_type:  result.difficultyKey,
+        difficulty_label: result.difficulty,
+        recommendations:  result.recommendations,
+      });
+    }
+
+    res.status(201).json({
+      id:                   saved.id,
+      difficulty:           result.difficulty,
+      difficultyKey:        result.difficultyKey,
+      confidence:           result.confidence,
+      motorScore:           result.motorScore,
+      description:          result.description,
+      featureContributions: result.featureContributionsMap,
+      explanation:          result.explanation,
+      recommendations:      result.recommendations.map(r => r.text),
+      letterFocus:          result.letterFocus,
+      secondaryDifficulty:  result.secondaryDifficulty ?? null,
+    });
+  } catch (dbErr) {
+    // DB storage failed — still return analysis so teacher can see it
+    console.error('ExplanationResult save error (non-fatal):', dbErr.message);
+    res.status(200).json({
+      difficulty:           result.difficulty,
+      difficultyKey:        result.difficultyKey,
+      confidence:           result.confidence,
+      motorScore:           result.motorScore,
+      description:          result.description,
+      featureContributions: result.featureContributionsMap,
+      explanation:          result.explanation,
+      recommendations:      result.recommendations.map(r => r.text),
+      letterFocus:          result.letterFocus,
+      secondaryDifficulty:  result.secondaryDifficulty ?? null,
+      _warning:             'Result could not be saved to database.',
+    });
+  }
+}
+
+/**
+ * GET /handwriting/explanation/:studentId
+ *
+ * Fetches the most recent explanation result for a student.
+ */
+async function getLatestExplanation(req, res) {
+  const studentId = parseInt(req.params.studentId, 10);
+  if (!studentId) throw new ApiError(422, 'Invalid student ID');
+
+  const record = await ExplanationResult.findOne({
+    where: { student_id: studentId },
+    order: [['created_at', 'DESC']],
+  });
+
+  if (!record) {
+    return res.json({ message: 'No explanation found for this student', data: null });
+  }
+
+  res.json({
+    id:                   record.id,
+    difficulty:           record.difficulty_label,
+    difficultyKey:        record.difficulty_type,
+    confidence:           record.confidence_score,
+    motorScore:           record.motor_score,
+    featureContributions: record.feature_contributions,
+    explanation:          record.explanation_lines,
+    recommendations:      record.recommendations,
+    createdAt:            record.created_at,
+  });
+}
+
+/**
+ * PATCH /handwriting/assessment/:id/finalize
+ *
+ * Called after the client computes the motor profile.
+ * Stores motor_score + motor_profile on the assessment record,
+ * then runs the explainability engine and saves to ExplanationResult.
+ */
+async function finalizeAssessment(req, res) {
+  const assessmentId = parseInt(req.params.id, 10);
+  const { motor_score, motor_profile } = req.body;
+
+  if (!assessmentId || motor_score == null || !motor_profile) {
+    throw new ApiError(422, 'Assessment ID, motor_score, and motor_profile are required');
+  }
+
+  const assessment = await HandwritingAssessment.findByPk(assessmentId);
+  if (!assessment) throw new ApiError(404, 'Assessment not found');
+
+  await assessment.update({ motor_score, motor_profile });
+
+  // Map stored shapes (shape_id) → format expected by explainabilityService (shapeId)
+  const shapesForAnalysis = (assessment.shapes ?? []).map(s => ({
+    shapeId:  s.shape_id,
+    features: s.features,
+  }));
+
+  const result = analyzeMotorDifficulty(shapesForAnalysis, {}, motor_score);
+
+  try {
+    await ExplanationResult.create({
+      assessment_id:         assessmentId,
+      student_id:            assessment.student_id,
+      difficulty_type:       result.difficultyKey,
+      difficulty_label:      result.difficulty,
+      confidence_score:      result.confidence ?? null,
+      motor_score,
+      feature_contributions: result.featureContributions,
+      explanation_lines:     result.explanation,
+      recommendations:       result.recommendations,
+    });
+
+    if (result.difficultyKey && result.difficultyKey !== 'NONE') {
+      await RecommendationHistory.create({
+        student_id:       assessment.student_id,
+        difficulty_type:  result.difficultyKey,
+        difficulty_label: result.difficulty,
+        recommendations:  result.recommendations,
+      });
+    }
+  } catch (dbErr) {
+    console.error('ExplanationResult save error (non-fatal):', dbErr.message);
+  }
+
+  res.json({
+    id:           assessmentId,
+    is_initial:   assessment.is_initial,
+    motor_score,
+    difficulty:   result.difficulty,
+    difficultyKey: result.difficultyKey,
+    message:      'Assessment finalized',
+  });
+}
+
+/**
+ * GET /handwriting/initial-report/:studentId
+ *
+ * Returns the stored initial assessment + explanation for a student,
+ * used by TeacherReportScreen to show permanent motor analysis data.
+ */
+async function getInitialReport(req, res) {
+  const studentId = parseInt(req.params.studentId, 10);
+  if (!studentId) throw new ApiError(422, 'Invalid student ID');
+
+  const assessment = await HandwritingAssessment.findOne({
+    where: { student_id: studentId, is_initial: true },
+    order: [['created_at', 'ASC']],
+  });
+
+  if (!assessment) {
+    return res.json({ hasData: false });
+  }
+
+  const explanation = await ExplanationResult.findOne({
+    where: { assessment_id: assessment.id },
+    order: [['created_at', 'DESC']],
+  });
+
+  res.json({
+    hasData: true,
+    assessment: {
+      id:            assessment.id,
+      motor_score:   assessment.motor_score,
+      motor_profile: assessment.motor_profile,
+      shapes:        assessment.shapes,
+      created_at:    assessment.created_at,
+      is_initial:    assessment.is_initial,
+    },
+    explanation: explanation ? {
+      difficulty:           explanation.difficulty_label,
+      difficultyKey:        explanation.difficulty_type,
+      confidence:           explanation.confidence_score,
+      featureContributions: explanation.feature_contributions,
+      explanation:          explanation.explanation_lines,
+      recommendations:      explanation.recommendations,
+    } : null,
+  });
+}
+
+module.exports = { submitAssessment, getProgress, recordLetterCompletion, explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport };
