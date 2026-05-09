@@ -4,6 +4,82 @@ const { body } = require('express-validator');
 
 const MAX_RAW_AUDIO_BYTES = 8 * 1024 * 1024;
 
+const audioPayloadValidation = [
+  body('raw_audio_base64')
+    .optional({ nullable: true, checkFalsy: true })
+    .custom((value) => {
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+        throw new Error('raw_audio_base64 must be a valid base64 string');
+      }
+
+      const byteLength = Buffer.byteLength(value, 'base64');
+      if (byteLength > MAX_RAW_AUDIO_BYTES) {
+        throw new Error('raw_audio_base64 must be 8MB or smaller');
+      }
+
+      return true;
+    }),
+  body('raw_audio_mime_type')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .isString()
+    .withMessage('raw_audio_mime_type must be a string'),
+  body('raw_audio_size')
+    .optional({ nullable: true })
+    .isInt({ min: 1, max: MAX_RAW_AUDIO_BYTES })
+    .withMessage('raw_audio_size must be a positive integer up to 8MB'),
+];
+
+const scorePronunciationAttemptValidation = [
+  body('mode')
+    .optional()
+    .isIn(['word', 'alphabet'])
+    .withMessage('mode must be either word or alphabet'),
+  body('category_id')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('word_id')
+    .trim()
+    .notEmpty()
+    .withMessage('word_id is required'),
+  body('word_label')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('difficulty')
+    .optional({ nullable: true })
+    .isInt({ min: 1, max: 5 })
+    .withMessage('difficulty must be an integer between 1 and 5'),
+  body('target_phonemes')
+    .optional()
+    .isArray()
+    .withMessage('target_phonemes must be an array'),
+  body('target_phonemes.*.text')
+    .optional()
+    .isString()
+    .withMessage('target phoneme text must be a string'),
+  body('target_phonemes.*.type')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage('target phoneme type must be a string'),
+  body('target_phonemes.*.position')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage('target phoneme position must be a string'),
+  body('response_duration')
+    .optional({ nullable: true })
+    .isFloat({ min: 0 })
+    .withMessage('response_duration must be a positive number'),
+  body('hesitation_time')
+    .optional({ nullable: true })
+    .isFloat({ min: 0 })
+    .withMessage('hesitation_time must be a positive number'),
+  body('attempt_number')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('attempt_number must be a positive integer'),
+  ...audioPayloadValidation,
+];
+
 const savePronunciationResultValidation = [
   body('mode')
     .isIn(['word', 'alphabet'])
@@ -114,29 +190,10 @@ const savePronunciationResultValidation = [
   body('recording_uri')
     .optional({ nullable: true, checkFalsy: true })
     .trim(),
-  body('raw_audio_base64')
-    .optional({ nullable: true, checkFalsy: true })
-    .custom((value) => {
-      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
-        throw new Error('raw_audio_base64 must be a valid base64 string');
-      }
-
-      const byteLength = Buffer.byteLength(value, 'base64');
-      if (byteLength > MAX_RAW_AUDIO_BYTES) {
-        throw new Error('raw_audio_base64 must be 8MB or smaller');
-      }
-
-      return true;
-    }),
-  body('raw_audio_mime_type')
-    .optional({ nullable: true, checkFalsy: true })
-    .trim()
-    .isString()
-    .withMessage('raw_audio_mime_type must be a string'),
-  body('raw_audio_size')
-    .optional({ nullable: true })
-    .isInt({ min: 1, max: MAX_RAW_AUDIO_BYTES })
-    .withMessage('raw_audio_size must be a positive integer up to 8MB'),
+  ...audioPayloadValidation,
 ];
 
-module.exports = { savePronunciationResultValidation };
+module.exports = {
+  savePronunciationResultValidation,
+  scorePronunciationAttemptValidation,
+};

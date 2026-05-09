@@ -55,6 +55,18 @@ async function savePronunciationResult(req, res) {
   res.status(201).json(result);
 }
 
+async function scorePronunciationAttempt(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await teacherService.scorePronunciationAttempt(
+    req.user.id,
+    req.params.id,
+    req.body
+  );
+  res.json(result);
+}
+
 async function getPronunciationResults(req, res) {
   const results = await teacherService.getPronunciationResults(req.user.id, req.params.id);
   res.json(results);
@@ -108,6 +120,7 @@ module.exports = {
   startSession,
   endSession,
   setAvatar,
+  scorePronunciationAttempt,
   savePronunciationResult,
   getPronunciationResults,
   getPronunciationResultAudio,

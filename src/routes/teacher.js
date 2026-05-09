@@ -7,6 +7,7 @@ const { body }        = require('express-validator');
 const ctrl            = require('../controllers/teacherController');
 const {
   savePronunciationResultValidation,
+  scorePronunciationAttemptValidation,
 } = require('../validations/pronunciationValidation');
 
 // All routes require JWT + teacher role + first-login gate
@@ -182,6 +183,11 @@ router.post('/students/:id/avatar', [
 
 router.get('/students/:id/pronunciation-results', ctrl.getPronunciationResults);
 router.get('/pronunciation-results/:resultId/audio', ctrl.getPronunciationResultAudio);
+router.post(
+  '/students/:id/pronunciation-score',
+  scorePronunciationAttemptValidation,
+  ctrl.scorePronunciationAttempt
+);
 
 /**
  * @swagger
