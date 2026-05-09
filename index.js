@@ -16,6 +16,11 @@ const swaggerSpec  = require('./src/config/swagger');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+function getPositiveIntegerEnv(name, fallback) {
+  const value = Number.parseInt(process.env[name], 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 // ─── Security headers ─────────────────────────────────────────────────────────
 app.use(helmet());
 
@@ -30,10 +35,20 @@ app.use(morgan('combined', {
   stream: { write: (msg) => logger.http(msg.trim()) },
 }));
 
-// ─── Rate limiting (100 req / 15 min per IP) ──────────────────────────────────
+// ─── Rate limiting ────────────────────────────────────────────────────────────
+const rateLimitWindowMs = getPositiveIntegerEnv('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000);
+
+app.use('/api/auth', rateLimit({
+  windowMs: rateLimitWindowMs,
+  limit: getPositiveIntegerEnv('AUTH_RATE_LIMIT_MAX', 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication requests, please try again later.' },
+}));
+
 app.use('/api', rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 100,
+  windowMs: rateLimitWindowMs,
+  limit: getPositiveIntegerEnv('API_RATE_LIMIT_MAX', 1000),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
