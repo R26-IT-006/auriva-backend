@@ -111,6 +111,8 @@ async function start() {
 }
 
 start().catch((err) => {
-  logger.error('Startup failed', { err });
+  logger.error(`Startup failed: ${err.name || 'Error'} - ${err.message}`, {
+    stack: err.stack,
+  });
   process.exit(1);
 });

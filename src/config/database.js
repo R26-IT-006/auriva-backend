@@ -3,6 +3,14 @@
 const { Sequelize } = require('sequelize');
 const logger = require('../utils/logger');
 
+function shouldUseSsl() {
+  if (process.env.DB_SSL) {
+    return process.env.DB_SSL === 'true';
+  }
+
+  return String(process.env.DB_HOST || '').includes('postgres.database.azure.com');
+}
+
 const sequelize = new Sequelize(
   process.env.DB_NAME,
   process.env.DB_USER,
@@ -11,12 +19,14 @@ const sequelize = new Sequelize(
     host: process.env.DB_HOST,
     port: parseInt(process.env.DB_PORT, 10),
     dialect: 'postgres',
-    dialectOptions: {
-      ssl: {
-        require: true,
-        rejectUnauthorized: false, // Required for Azure PostgreSQL
-      },
-    },
+    dialectOptions: shouldUseSsl()
+      ? {
+          ssl: {
+            require: true,
+            rejectUnauthorized: false, // Required for Azure PostgreSQL
+          },
+        }
+      : {},
     pool: {
       max: 10,
       min: 2,
