@@ -38,6 +38,54 @@ const savePronunciationResultValidation = [
     .optional()
     .isInt({ min: 0, max: 100 })
     .withMessage('phoneme score must be an integer between 0 and 100'),
+  body('listen_choose_data')
+    .optional({ nullable: true })
+    .isObject()
+    .withMessage('listen_choose_data must be an object'),
+  body('listen_choose_data.activity_type')
+    .optional()
+    .equals('listen_choose')
+    .withMessage('listen_choose_data.activity_type must be listen_choose'),
+  body('listen_choose_data.target_word_id')
+    .optional()
+    .isString()
+    .withMessage('listen_choose_data.target_word_id must be a string'),
+  body('listen_choose_data.target_word_label')
+    .optional()
+    .isString()
+    .withMessage('listen_choose_data.target_word_label must be a string'),
+  body('listen_choose_data.selected_choice_id')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage('listen_choose_data.selected_choice_id must be a string'),
+  body('listen_choose_data.selected_choice_label')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage('listen_choose_data.selected_choice_label must be a string'),
+  body('listen_choose_data.is_correct')
+    .optional()
+    .isBoolean()
+    .withMessage('listen_choose_data.is_correct must be a boolean'),
+  body('listen_choose_data.attempts')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('listen_choose_data.attempts must be a positive integer'),
+  body('listen_choose_data.choice_ids')
+    .optional()
+    .isArray()
+    .withMessage('listen_choose_data.choice_ids must be an array'),
+  body('listen_choose_data.choice_ids.*')
+    .optional()
+    .isString()
+    .withMessage('listen_choose_data.choice_ids values must be strings'),
+  body('listen_choose_data.attempted_choice_ids')
+    .optional()
+    .isArray()
+    .withMessage('listen_choose_data.attempted_choice_ids must be an array'),
+  body('listen_choose_data.attempted_choice_ids.*')
+    .optional()
+    .isString()
+    .withMessage('listen_choose_data.attempted_choice_ids values must be strings'),
   body('response_duration')
     .optional({ nullable: true })
     .isFloat({ min: 0 })

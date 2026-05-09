@@ -42,6 +42,10 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     allowNull: false,
     defaultValue: [],
   },
+  listen_choose_data: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+  },
   response_duration: {
     type: DataTypes.FLOAT,
     allowNull: true,

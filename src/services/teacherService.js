@@ -118,6 +118,7 @@ async function savePronunciationResult(teacherId, studentId, data) {
     word_label: data.word_label,
     overall_score: data.overall_score,
     phoneme_scores: data.phoneme_scores || [],
+    listen_choose_data: data.listen_choose_data || null,
     response_duration: data.response_duration ?? null,
     hesitation_time: data.hesitation_time ?? null,
     recommendation_type: data.recommendation_type || null,
