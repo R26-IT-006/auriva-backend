@@ -176,6 +176,10 @@ const savePronunciationResultValidation = [
   body('recommendation_message')
     .optional({ nullable: true, checkFalsy: true })
     .trim(),
+  body('recommendation_details')
+    .optional({ nullable: true })
+    .isObject()
+    .withMessage('recommendation_details must be an object'),
   body('next_word_id')
     .optional({ nullable: true, checkFalsy: true })
     .trim(),

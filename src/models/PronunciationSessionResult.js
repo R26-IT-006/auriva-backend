@@ -62,6 +62,10 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     type: DataTypes.TEXT,
     allowNull: true,
   },
+  recommendation_details: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+  },
   next_word_id: {
     type: DataTypes.STRING,
     allowNull: true,

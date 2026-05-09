@@ -140,42 +140,128 @@ function buildHistoryCounts(results = []) {
   }, {});
 }
 
-function chooseNextWord({ wordId, weakSound, overallScore, historyCounts }) {
+function getCandidateScore({ candidateId, weakSound, currentDifficulty, historyCounts, preferEasier }) {
+  const candidate = WORD_PROFILES[candidateId];
+  if (!candidate) return null;
+
+  const sharesWeakSound = Boolean(weakSound?.text && candidate.sounds.includes(weakSound.text));
+  const difficultyGap = currentDifficulty - candidate.difficulty;
+  const repeatedWeakSound = weakSound?.text ? historyCounts[weakSound.text] || 0 : 0;
+  const score =
+    (sharesWeakSound ? 45 : 0) +
+    (preferEasier && difficultyGap >= 0 ? 24 + difficultyGap * 4 : 0) +
+    (!preferEasier && difficultyGap <= 1 ? 14 : 0) +
+    Math.max(0, 10 - candidate.difficulty) +
+    Math.min(12, repeatedWeakSound * 4);
+
+  return {
+    word_id: candidateId,
+    difficulty: candidate.difficulty,
+    shares_weak_phoneme: sharesWeakSound,
+    difficulty_gap: difficultyGap,
+    score,
+    reason: sharesWeakSound
+      ? `contains /${weakSound.text}/ for targeted practice`
+      : preferEasier
+        ? 'provides a simpler support step'
+        : 'continues with a related planned word',
+  };
+}
+
+function getRecurringPattern(historyCounts) {
+  const entries = Object.entries(historyCounts).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return null;
+
+  const [phoneme, count] = entries[0];
+  return {
+    phoneme,
+    count,
+    description: count >= 2
+      ? `Recurring weakness detected for /${phoneme}/ across ${count} saved attempts.`
+      : `One previous weak attempt found for /${phoneme}/.`,
+  };
+}
+
+function chooseNextWordDetails({ wordId, weakSound, overallScore, historyCounts }) {
   const profile = WORD_PROFILES[wordId] || {};
+  const currentDifficulty = profile.difficulty || 2;
+  const preferEasier = overallScore < 60 || Boolean(weakSound?.text && historyCounts[weakSound.text] >= 2);
   const candidateIds = overallScore < 60
     ? [...(profile.easierWords || []), ...(profile.relatedWords || [])]
     : [...(profile.relatedWords || []), ...(profile.easierWords || [])];
+  const uniqueCandidateIds = [...new Set(candidateIds)];
+  const candidates = uniqueCandidateIds
+    .map((candidateId) => getCandidateScore({
+      candidateId,
+      weakSound,
+      currentDifficulty,
+      historyCounts,
+      preferEasier,
+    }))
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+  const selected = candidates[0] || null;
 
-  const matchingCandidate = candidateIds.find((candidateId) => {
-    const candidate = WORD_PROFILES[candidateId];
-    return candidate?.sounds?.includes(weakSound?.text);
-  });
-  const fallbackCandidate = candidateIds.find((candidateId) => WORD_PROFILES[candidateId]);
-
-  if (matchingCandidate) return matchingCandidate;
-  if (fallbackCandidate) return fallbackCandidate;
-
-  const repeatedWeakSound = Object.entries(historyCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
-  if (repeatedWeakSound) {
-    return Object.entries(WORD_PROFILES).find(
-      ([candidateId, candidate]) => candidateId !== wordId && candidate.sounds.includes(repeatedWeakSound)
-    )?.[0] || null;
+  if (selected) {
+    return {
+      nextWordId: selected.word_id,
+      selectedCandidate: selected,
+      candidateRankings: candidates,
+      adaptationFocus: preferEasier ? 'remediation' : 'reinforcement',
+    };
   }
 
-  return null;
+  const recurringPattern = getRecurringPattern(historyCounts);
+  const fallbackWordId = recurringPattern?.phoneme
+    ? Object.entries(WORD_PROFILES).find(
+      ([candidateId, candidate]) => candidateId !== wordId && candidate.sounds.includes(recurringPattern.phoneme)
+    )?.[0] || null
+    : null;
+
+  return {
+    nextWordId: fallbackWordId,
+    selectedCandidate: fallbackWordId
+      ? getCandidateScore({
+        candidateId: fallbackWordId,
+        weakSound: { text: recurringPattern.phoneme },
+        currentDifficulty,
+        historyCounts,
+        preferEasier: true,
+      })
+      : null,
+    candidateRankings: candidates,
+    adaptationFocus: fallbackWordId ? 'recurring-phoneme-review' : 'planned-progression',
+  };
 }
 
-function buildRecommendation({ overallScore, weakSound, nextWordId, historyCounts }) {
+function buildRecommendation({ overallScore, weakSound, nextWordId, historyCounts, nextWordDecision, hesitationTime, difficulty }) {
   const repeatedCount = weakSound?.text ? historyCounts[weakSound.text] || 0 : 0;
   const positionText = weakSound?.position ? `${weakSound.position} ` : '';
   const soundText = weakSound?.text ? `/${weakSound.text}/` : 'the target sound';
+  const recurringPattern = getRecurringPattern(historyCounts);
+  const selectedReason = nextWordDecision?.selectedCandidate?.reason || null;
+  const evidence = [
+    `overall score ${overallScore}%`,
+    weakSound?.text ? `${positionText}${soundText} scored lowest` : null,
+    repeatedCount > 0 ? `${soundText} appeared weak in ${repeatedCount} previous attempt${repeatedCount === 1 ? '' : 's'}` : null,
+    hesitationTime >= 1.5 ? `hesitation time ${hesitationTime}s suggests extra support` : null,
+    difficulty >= 4 ? 'current word is high difficulty' : null,
+    selectedReason ? `next word ${nextWordId} ${selectedReason}` : null,
+  ].filter(Boolean);
 
   if (overallScore >= 80) {
     return {
       recommendation_type: 'continue',
       recommendation_message: nextWordId
-        ? `Pronunciation is strong. Continue to the next related word: ${nextWordId}.`
+        ? `Pronunciation is strong. Continue to ${nextWordId}.`
         : 'Pronunciation is strong. Continue to the next planned word.',
+      recommendation_details: {
+        focus: 'progression',
+        evidence,
+        recurring_pattern: recurringPattern,
+        selected_candidate: nextWordDecision?.selectedCandidate || null,
+        candidate_rankings: nextWordDecision?.candidateRankings || [],
+      },
     };
   }
 
@@ -183,14 +269,28 @@ function buildRecommendation({ overallScore, weakSound, nextWordId, historyCount
     return {
       recommendation_type: 'reinforce',
       recommendation_message: repeatedCount > 0
-        ? `Reinforce the ${positionText}${soundText} sound; it has appeared as a weak sound before.`
-        : `Reinforce the ${positionText}${soundText} sound with another related word.`,
+        ? `Reinforce the ${positionText}${soundText} sound; it has appeared as a weak sound before. Recommended next word: ${nextWordId || 'related practice'}.`
+        : `Reinforce the ${positionText}${soundText} sound with another related word. Recommended next word: ${nextWordId || 'related practice'}.`,
+      recommendation_details: {
+        focus: 'reinforcement',
+        evidence,
+        recurring_pattern: recurringPattern,
+        selected_candidate: nextWordDecision?.selectedCandidate || null,
+        candidate_rankings: nextWordDecision?.candidateRankings || [],
+      },
     };
   }
 
   return {
     recommendation_type: 'remediate',
-    recommendation_message: `Use a simpler support word before moving ahead because the ${positionText}${soundText} sound needs support.`,
+    recommendation_message: `Use a simpler support word before moving ahead because the ${positionText}${soundText} sound needs support. Recommended next word: ${nextWordId || 'simpler practice'}.`,
+    recommendation_details: {
+      focus: 'remediation',
+      evidence,
+      recurring_pattern: recurringPattern,
+      selected_candidate: nextWordDecision?.selectedCandidate || null,
+      candidate_rankings: nextWordDecision?.candidateRankings || [],
+    },
   };
 }
 
@@ -318,6 +418,7 @@ async function savePronunciationResult(teacherId, studentId, data) {
     hesitation_time: data.hesitation_time ?? null,
     recommendation_type: data.recommendation_type || null,
     recommendation_message: data.recommendation_message || null,
+    recommendation_details: data.recommendation_details || null,
     next_word_id: data.next_word_id || null,
     attempt_number: data.attempt_number || 1,
     workflow_completed: data.workflow_completed ?? true,
@@ -388,21 +489,25 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
     ? phonemeScores.reduce((total, sound) => total + sound.score, 0) / phonemeScores.length
     : baseScore;
   const overallScore = clampScore((baseScore + averagePhonemeScore) / 2);
-  const nextWordId = chooseNextWord({
+  const nextWordDecision = chooseNextWordDetails({
     wordId: data.word_id,
     weakSound,
     overallScore,
     historyCounts,
   });
+  const nextWordId = nextWordDecision.nextWordId;
+  const hesitationTime = data.hesitation_time ?? Number(
+    Math.max(0.2, Math.min(6, 0.4 + attemptNumber * 0.28 + (overallScore < 65 ? 0.8 : 0.15))).toFixed(1)
+  );
   const recommendation = buildRecommendation({
     overallScore,
     weakSound,
     nextWordId,
     historyCounts,
+    nextWordDecision,
+    hesitationTime,
+    difficulty,
   });
-  const hesitationTime = data.hesitation_time ?? Number(
-    Math.max(0.2, Math.min(6, 0.4 + attemptNumber * 0.28 + (overallScore < 65 ? 0.8 : 0.15))).toFixed(1)
-  );
 
   return {
     mode: data.mode || 'word',
