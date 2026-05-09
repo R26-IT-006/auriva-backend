@@ -10,6 +10,17 @@ const {
 } = require('../models');
 const ApiError = require('../utils/ApiError');
 
+function normalizeStudentId(studentId) {
+  const numericId = Number(studentId);
+  return Number.isInteger(numericId) && numericId > 0 ? numericId : studentId;
+}
+
+async function findTeacherStudent(teacherId, studentId) {
+  return Student.findOne({
+    where: { sid: normalizeStudentId(studentId), teacher_id: teacherId },
+  });
+}
+
 async function getDashboardStats(teacherId) {
   const startOfWeek = new Date();
   startOfWeek.setHours(0, 0, 0, 0);
@@ -59,7 +70,7 @@ async function getOwnStudents(teacherId) {
 
 async function getOwnStudentById(teacherId, studentId) {
   const student = await Student.findOne({
-    where: { sid: studentId, teacher_id: teacherId },
+    where: { sid: normalizeStudentId(studentId), teacher_id: teacherId },
     include: [{ model: StudentAvatar, as: 'avatarRecord', attributes: ['avatar_key'] }],
   });
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
@@ -103,7 +114,7 @@ async function endSession(teacherId, studentId) {
 }
 
 async function savePronunciationResult(teacherId, studentId, data) {
-  const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
+  const student = await findTeacherStudent(teacherId, studentId);
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
   const rawAudioBuffer = data.raw_audio_base64
     ? Buffer.from(data.raw_audio_base64, 'base64')
@@ -111,7 +122,7 @@ async function savePronunciationResult(teacherId, studentId, data) {
 
   return PronunciationSessionResult.create({
     teacher_id: teacherId,
-    student_id: studentId,
+    student_id: student.sid,
     mode: data.mode,
     category_id: data.category_id || null,
     word_id: data.word_id,
@@ -134,11 +145,11 @@ async function savePronunciationResult(teacherId, studentId, data) {
 }
 
 async function getPronunciationResults(teacherId, studentId) {
-  const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
+  const student = await findTeacherStudent(teacherId, studentId);
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
 
   const results = await PronunciationSessionResult.findAll({
-    where: { teacher_id: teacherId, student_id: studentId },
+    where: { teacher_id: teacherId, student_id: student.sid },
     order: [['created_at', 'ASC'], ['id', 'ASC']],
   });
 
