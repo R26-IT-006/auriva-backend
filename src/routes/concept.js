@@ -5,6 +5,7 @@ const { body } = require('express-validator');
 const ctrl   = require('../controllers/conceptController');
 
 router.get('/:category/items', ctrl.getConceptItems);
+router.get('/distractors', ctrl.getDistractors);
 
 router.post('/tier1/start', [
   body('student_id').isInt({ min: 1 }),

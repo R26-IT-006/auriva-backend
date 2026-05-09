@@ -70,6 +70,16 @@ async function completeTier1(req, res) {
   res.json(result);
 }
 
+async function getDistractors(req, res) {
+  const studentId  = parseInt(req.query.student_id, 10);
+  const { category_key, concept_key } = req.query;
+  const tier = parseInt(req.query.tier || '1', 10);
+  if (!studentId) throw new ApiError(422, 'student_id required');
+  if (!category_key || !concept_key) throw new ApiError(422, 'category_key and concept_key required');
+  const result = await conceptService.getDistractors(studentId, category_key, concept_key, tier);
+  res.json(result);
+}
+
 async function getConfusions(req, res) {
   const { conceptKey } = req.params;
   const studentId = parseInt(req.query.student_id, 10);
@@ -143,4 +153,4 @@ async function completeTier3(req, res) {
   res.json(result);
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3 };
+module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getConfusions, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3 };

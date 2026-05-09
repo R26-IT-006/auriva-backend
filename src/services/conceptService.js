@@ -80,18 +80,78 @@ function getSequence(categoryKey) {
   return CATEGORY_SEQUENCES[categoryKey] || [];
 }
 
+// ─── Ordering helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Builds a confusionMap from GKB-style records: [{ correct_key, confused_key, weight }]
+ * Keys are bare (without category prefix).
+ */
+function buildConfusionMapFromGkb(confusions) {
+  const map = {};
+  confusions.forEach((c) => {
+    const correct  = c.correct_key.split('/').pop();
+    const confused = c.confused_key.split('/').pop();
+    if (!map[correct]) map[correct] = [];
+    map[correct].push({ key: confused, weight: c.weight });
+  });
+  Object.values(map).forEach((arr) => arr.sort((a, b) => b.weight - a.weight));
+  return map;
+}
+
+/**
+ * Derives a confusionMap from tier1_fail logs stored in PostgreSQL.
+ * Used when GKB is unavailable or hasn't synced the latest results yet.
+ */
+async function buildConfusionMapFromLogs(studentId, categoryKey) {
+  const failLogs = await ConceptInteractionLog.findAll({
+    where: { student_id: studentId, category_key: categoryKey, event_type: 'tier1_fail', tier: 1 },
+  });
+  const map = {};
+  failLogs.forEach((log) => {
+    const confusedWith = log.event_data?.confused_with || [];
+    confusedWith.forEach(({ correct_key, selected_key }) => {
+      if (!correct_key || !selected_key) return;
+      if (!map[correct_key]) map[correct_key] = [];
+      if (!map[correct_key].find((x) => x.key === selected_key)) {
+        map[correct_key].push({ key: selected_key, weight: 1 });
+      }
+    });
+  });
+  return map;
+}
+
+/**
+ * Re-orders a concept sequence so that confused siblings appear immediately
+ * after the concept they were confused during.
+ */
+function applyConfusionOrdering(sequence, confusionMap) {
+  const placed = new Set();
+  const result = [];
+  for (const key of sequence) {
+    if (placed.has(key)) continue;
+    placed.add(key);
+    result.push(key);
+    for (const { key: confused } of confusionMap[key] || []) {
+      if (!placed.has(confused) && sequence.includes(confused)) {
+        placed.add(confused);
+        result.push(confused);
+      }
+    }
+  }
+  return result;
+}
+
 // ─── Service functions ────────────────────────────────────────────────────────
 
 /**
  * Returns concept items for a category with this student's progress rows.
- * When GKB confusion data is available the sequence is reordered so that
- * concepts the student mixed up are inserted right after the concept they
+ * When confusion data is available (from GKB or PostgreSQL logs) the sequence
+ * is reordered so confused concepts are inserted right after the concept they
  * were confused during, and the unlock chain is recalculated accordingly.
  *
  * Example: original order Apple→Banana→Cherry→Grapes→Guava→Mango
  *   Student passes Grapes but confuses Mango.
  *   Reordered: Apple→Banana→Cherry→Grapes→Mango→Guava→…
- *   Mango becomes unlocked (Grapes passed), Guava becomes locked (Mango not yet passed).
  */
 async function getConceptItems(categoryKey, studentId) {
   const sequence = getSequence(categoryKey);
@@ -113,36 +173,26 @@ async function getConceptItems(categoryKey, studentId) {
       { timeout: 500 },
     );
     const confusions = resp.data?.confusions || [];
+    let confusionMap = confusions.length > 0 ? buildConfusionMapFromGkb(confusions) : {};
 
-    if (confusions.length > 0) {
-      // Build map: correctKey → [confusedKey sorted by weight desc]
-      const confusionMap = {};
-      confusions.forEach((c) => {
-        const correct  = c.correct_key.split('/').pop();
-        const confused = c.confused_key.split('/').pop();
-        if (!confusionMap[correct]) confusionMap[correct] = [];
-        confusionMap[correct].push({ key: confused, weight: c.weight });
-      });
-      Object.values(confusionMap).forEach((arr) => arr.sort((a, b) => b.weight - a.weight));
-
-      // Walk the original sequence; after each concept insert its confused
-      // siblings (if not already placed) immediately behind it.
-      const placed = new Set();
-      const result = [];
-      for (const key of sequence) {
-        if (placed.has(key)) continue;
-        placed.add(key);
-        result.push(key);
-        for (const { key: confused } of confusionMap[key] || []) {
-          if (!placed.has(confused) && sequence.includes(confused)) {
-            placed.add(confused);
-            result.push(confused);
-          }
-        }
-      }
-      orderedSequence = result;
+    // GKB returned nothing — GKB sync may not have completed yet (fire-and-forget lag).
+    // Fall back to PostgreSQL logs which are always written before completeTier1 returns.
+    if (Object.keys(confusionMap).length === 0) {
+      confusionMap = await buildConfusionMapFromLogs(studentId, categoryKey);
     }
-  } catch { /* GKB unavailable — keep standard order */ }
+
+    if (Object.keys(confusionMap).length > 0) {
+      orderedSequence = applyConfusionOrdering(sequence, confusionMap);
+    }
+  } catch {
+    // GKB service unreachable — derive ordering directly from PostgreSQL logs.
+    try {
+      const confusionMap = await buildConfusionMapFromLogs(studentId, categoryKey);
+      if (Object.keys(confusionMap).length > 0) {
+        orderedSequence = applyConfusionOrdering(sequence, confusionMap);
+      }
+    } catch { /* ignore — keep standard order */ }
+  }
 
   // Build items using the (possibly reordered) sequence.
   // Unlock rule: passed concepts are always unlocked; others unlock when
@@ -456,6 +506,75 @@ async function completeTier2(studentId, categoryKey, conceptKey, passed, score, 
   return { completed: true, passed };
 }
 
+/**
+ * Returns 2 personalised distractor concept keys for a student + concept + tier.
+ *
+ * Priority order:
+ *  1. GKB bidirectional confusion query (personalised, live)
+ *  2. PostgreSQL interaction logs (always available, handles GKB sync lag)
+ *  3. Sequential neighbours (last resort)
+ */
+async function getDistractors(studentId, categoryKey, conceptKey, tier) {
+  const sequence = getSequence(categoryKey);
+  const idx      = sequence.indexOf(conceptKey);
+  const sequential = [
+    sequence[(idx + 1) % sequence.length],
+    sequence[(idx + 2) % sequence.length],
+  ].filter((k) => k && k !== conceptKey);
+
+  // 1. Try GKB
+  try {
+    const resp = await axios.get(
+      `${GNN_BASE}/gkb/student/${studentId}/distractors`,
+      { params: { category_key: categoryKey, concept_key: conceptKey, tier }, timeout: 400 },
+    );
+    const distractors = resp.data?.distractors || [];
+    if (distractors.length >= 2) return { distractors };
+  } catch { /* fall through */ }
+
+  // 2. Derive from PostgreSQL logs (bidirectional: FROM this concept + TO this concept)
+  try {
+    const eventType = tier === 2 ? 'tier2_fail' : 'tier1_fail';
+
+    // FROM: this concept's fail logs → what the student picked instead
+    const fromLogs = await ConceptInteractionLog.findAll({
+      where: { student_id: studentId, category_key: categoryKey, concept_key: conceptKey, event_type: eventType },
+      order: [['created_at', 'DESC']], limit: 10,
+    });
+    const fromKeys = [];
+    fromLogs.forEach((log) => {
+      (log.event_data?.confused_with || []).forEach(({ selected_key }) => {
+        if (selected_key && selected_key !== conceptKey && !fromKeys.includes(selected_key))
+          fromKeys.push(selected_key);
+      });
+    });
+
+    // TO: other concepts' fail logs where the student picked THIS concept
+    const allFailLogs = await ConceptInteractionLog.findAll({
+      where: { student_id: studentId, category_key: categoryKey, event_type: eventType },
+      order: [['created_at', 'DESC']], limit: 100,
+    });
+    const toKeys = [];
+    allFailLogs.forEach((log) => {
+      if (log.concept_key === conceptKey) return;
+      (log.event_data?.confused_with || []).forEach(({ selected_key }) => {
+        if (selected_key === conceptKey && !toKeys.includes(log.concept_key))
+          toKeys.push(log.concept_key);
+      });
+    });
+
+    const combined = [...new Set([...fromKeys, ...toKeys])].filter((k) => sequence.includes(k));
+    if (combined.length >= 2) return { distractors: combined.slice(0, 2) };
+    if (combined.length === 1) {
+      const rest = sequential.filter((k) => !combined.includes(k));
+      return { distractors: [...combined, ...rest].slice(0, 2) };
+    }
+  } catch { /* fall through */ }
+
+  // 3. Sequential neighbours
+  return { distractors: sequential };
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function assertStudentExists(studentId) {
@@ -505,4 +624,4 @@ async function completeTier3(studentId, categoryKey, conceptKey, timeSpentMs) {
   return { completed: true };
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3 };
+module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3 };
