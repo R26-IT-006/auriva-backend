@@ -56,6 +56,18 @@ async function getOwnStudentById(teacherId, studentId) {
   return flattenAvatar(student);
 }
 
+async function setThreshold(teacherId, studentId, letter, value) {
+  const student = await Student.findOne({
+    where: { sid: studentId, teacher_id: teacherId },
+    attributes: ['sid', 'personal_thresholds'],
+  });
+  if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+
+  const updated = { ...student.personal_thresholds, [letter]: value };
+  await student.update({ personal_thresholds: updated });
+  return { student_id: student.sid, letter, value, personal_thresholds: updated };
+}
+
 async function setAvatar(teacherId, studentId, avatarKey) {
   // Verify the student belongs to this teacher
   const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
@@ -104,6 +116,7 @@ module.exports = {
   getDashboardStats,
   getOwnStudents,
   getOwnStudentById,
+  setThreshold,
   setAvatar,
   startSession,
   endSession,

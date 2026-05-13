@@ -25,6 +25,11 @@ const LetterProgress = sequelize.define('LetterProgress', {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+  blocked_attempts: {
+    type:         DataTypes.INTEGER,
+    allowNull:    false,
+    defaultValue: 0,
+  },
 }, {
   tableName: 'letter_progress',
   timestamps: false,

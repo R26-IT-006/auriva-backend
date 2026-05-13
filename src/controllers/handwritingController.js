@@ -3,11 +3,14 @@
 const {
   HandwritingAssessment,
   LetterProgress,
+  Student,
   ExplanationResult,
   RecommendationHistory,
   StudentMotorFeature,
 } = require('../models');
 const ApiError = require('../utils/ApiError');
+const logger   = require('../utils/logger');
+const { getStudentThreshold } = require('../utils/thresholdUtils');
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
@@ -137,7 +140,7 @@ async function getProgress(req, res) {
 }
 
 async function recordLetterCompletion(req, res) {
-  const { student_id, letter, case_type } = req.body;
+  const { student_id, letter, case_type, attempt_scores, quality_threshold, wrote_correctly } = req.body;
 
   if (!student_id || !letter || !case_type) {
     throw new ApiError(422, 'student_id, letter, and case_type are required');
@@ -146,11 +149,73 @@ async function recordLetterCompletion(req, res) {
     throw new ApiError(422, 'case_type must be lowercase or uppercase');
   }
 
+  let bestScore = null;
+  let threshold = null;
+
+  if (Array.isArray(attempt_scores) && attempt_scores.length > 0) {
+    bestScore = Math.max(...attempt_scores);
+    threshold = typeof quality_threshold === 'number'
+      ? quality_threshold
+      : await getStudentThreshold(student_id, letter);
+    if (bestScore < threshold) {
+      const [rec] = await LetterProgress.findOrCreate({
+        where:    { student_id, letter, case_type },
+        defaults: { student_id, letter, case_type, blocked_attempts: 0 },
+      });
+      await rec.increment('blocked_attempts', { by: 1 });
+      const updatedRec = await LetterProgress.findOne({
+        where: { student_id, letter, case_type },
+      });
+      if (updatedRec.blocked_attempts > 3) {
+        const student = await Student.findByPk(student_id);
+        const current    = student.personal_thresholds ?? {};
+        const currentVal = current[letter] ?? current.default ?? 55;
+        const newVal     = Math.max(20, currentVal - 5);
+        await student.update({
+          personal_thresholds: { ...current, [letter]: newVal },
+        });
+        logger.info(`Auto-lowered threshold: student=${student_id} ` +
+          `letter=${letter} ${currentVal} → ${newVal} ` +
+          `(blocked_attempts=${updatedRec.blocked_attempts})`);
+      }
+      logger.info(`Letter blocked: student=${student_id} ` +
+        `letter=${letter} bestScore=${bestScore} ` +
+        `threshold=${threshold} wroteCorrectly=${wrote_correctly}`);
+      return res.status(200).json({
+        completed: false, bestScore, threshold,
+        message: 'Quality threshold not met'
+      });
+    }
+  }
+
   const [record, created] = await LetterProgress.findOrCreate({
-    where: { student_id, letter, case_type },
-    defaults: { student_id, letter, case_type },
+    where:    { student_id, letter, case_type },
+    defaults: { student_id, letter, case_type, blocked_attempts: 0 },
   });
 
+  const recentPasses = await LetterProgress.findAll({
+    where: { student_id, case_type },
+    order: [['completed_at', 'DESC']],
+    limit: 5,
+  });
+  if (recentPasses.length === 5 &&
+      recentPasses.every(r => r.blocked_attempts === 0)) {
+    const student        = await Student.findByPk(student_id);
+    const current        = student.personal_thresholds ?? {};
+    const currentDefault = current.default ?? 55;
+    const newDefault     = Math.min(85, currentDefault + 5);
+    if (newDefault !== currentDefault) {
+      await student.update({
+        personal_thresholds: { ...current, default: newDefault },
+      });
+      logger.info(`Auto-raised default threshold: student=${student_id} ` +
+        `${currentDefault} → ${newDefault} (5 clean consecutive passes)`);
+    }
+  }
+
+  logger.info(`Letter complete: student=${student_id} ` +
+    `letter=${letter} bestScore=${bestScore ?? 'n/a'} ` +
+    `threshold=${threshold ?? 'default'} wroteCorrectly=${wrote_correctly}`);
   res.status(created ? 201 : 200).json({ id: record.id, letter, case_type });
 }
 
