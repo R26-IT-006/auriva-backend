@@ -12,6 +12,7 @@ const LetterProgress          = require('./LetterProgress');
 const Stroke                  = require('./Stroke');
 const ExplanationResult       = require('./ExplanationResult');
 const RecommendationHistory   = require('./RecommendationHistory');
+const StudentMotorFeature     = require('./StudentMotorFeature');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -36,6 +37,12 @@ StudentAvatar.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 // Student → HandwritingAssessment
 Student.hasMany(HandwritingAssessment, { foreignKey: 'student_id', as: 'handwritingAssessments' });
 HandwritingAssessment.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+Student.hasMany(StudentMotorFeature, { foreignKey: 'student_id', as: 'motorFeatures' });
+StudentMotorFeature.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+HandwritingAssessment.hasOne(StudentMotorFeature, { foreignKey: 'assessment_id', as: 'motorFeature' });
+StudentMotorFeature.belongsTo(HandwritingAssessment, { foreignKey: 'assessment_id', as: 'assessment' });
 
 // Student → LetterProgress
 Student.hasMany(LetterProgress, { foreignKey: 'student_id', as: 'letterProgress' });
@@ -64,5 +71,5 @@ RecommendationHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'studen
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
   HandwritingAssessment, LetterProgress, Stroke,
-  ExplanationResult, RecommendationHistory,
+  ExplanationResult, RecommendationHistory, StudentMotorFeature,
 };

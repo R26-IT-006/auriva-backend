@@ -1,16 +1,5 @@
 'use strict';
 
-/**
- * Rule-based motor difficulty definitions.
- *
- * Each rule contains:
- *  - conditions  : array of { featureKey, threshold (0-100), weight, featureName, hint }
- *  - feature values are all normalised to 0-100 (higher = more problematic) by explainabilityService
- *  - weights per rule MUST sum to 100
- *  - explanationTemplates : per-feature teacher-friendly text, shown when that condition fires
- *  - exercises : recommended targeted activities, ordered by priority
- */
-
 const DIFFICULTY_RULES = {
 
   WEAK_CURVE_CONTROL: {

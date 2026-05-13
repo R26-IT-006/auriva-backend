@@ -2,13 +2,6 @@
 
 /**
  * explainabilityService.js
- *
- * Rule-based SHAP-inspired motor difficulty analyser.
- * Accepts raw shape-assessment features, computes feature contributions,
- * classifies the primary motor difficulty, and returns a structured
- * teacher-friendly explanation.
- *
- * No ML models are used — pure threshold + weighted-rule logic.
  */
 
 const DIFFICULTY_RULES = require('./difficultyRules');

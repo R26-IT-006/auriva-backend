@@ -1,6 +1,12 @@
 'use strict';
 
-const { HandwritingAssessment, LetterProgress, ExplanationResult, RecommendationHistory } = require('../models');
+const {
+  HandwritingAssessment,
+  LetterProgress,
+  ExplanationResult,
+  RecommendationHistory,
+  StudentMotorFeature,
+} = require('../models');
 const ApiError = require('../utils/ApiError');
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 
@@ -8,6 +14,49 @@ const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 const CURVE_SHAPES = ['half_circle', 'full_circle', 'curve_wave'];
 const LINE_SHAPES  = ['horizontal_line', 'vertical_line'];
+
+function average(values) {
+  const validValues = values.filter(value => Number.isFinite(value));
+  if (validValues.length === 0) return null;
+  return validValues.reduce((sum, value) => sum + value, 0) / validValues.length;
+}
+
+function toNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function buildMotorFeatureSummary(shapes) {
+  const safeShapes = Array.isArray(shapes) ? shapes : [];
+
+  const avg_duration_ms = average(safeShapes.map(shape => toNumber(shape.features?.duration_ms)));
+  const avg_total_distance = average(safeShapes.map(shape => toNumber(shape.features?.total_distance)));
+  const avg_speed = average(safeShapes.map(shape => toNumber(shape.features?.avg_speed)));
+  const avg_smoothness = average(safeShapes.map(shape => toNumber(shape.features?.smoothness)));
+  const avg_pause_count = average(safeShapes.map(shape => toNumber(shape.features?.pause_count)));
+  const avg_accuracy = average(safeShapes.map(shape => toNumber(shape.features?.accuracy)));
+  const avg_stroke_count = average(safeShapes.map(shape => toNumber(shape.stroke_count)));
+
+  return {
+    shape_count: safeShapes.length,
+    avg_duration_ms,
+    avg_total_distance,
+    avg_speed,
+    avg_smoothness,
+    avg_pause_count,
+    avg_accuracy,
+    avg_stroke_count,
+    feature_vector: {
+      avg_duration_ms,
+      avg_total_distance,
+      avg_speed,
+      avg_smoothness,
+      avg_pause_count,
+      avg_accuracy,
+      avg_stroke_count,
+    },
+  };
+}
 
 function deriveReason(shapes) {
   if (!Array.isArray(shapes)) return 'Continue regular letter practice.';
@@ -47,6 +96,18 @@ async function submitAssessment(req, res) {
     shapes,
     is_initial,
   });
+
+  try {
+    const featureSummary = buildMotorFeatureSummary(shapes);
+    await StudentMotorFeature.create({
+      student_id,
+      assessment_id: assessment.id,
+      is_initial,
+      ...featureSummary,
+    });
+  } catch (dbErr) {
+    console.error('StudentMotorFeature save error (non-fatal):', dbErr.message);
+  }
 
   res.status(201).json({ id: assessment.id, is_initial, message: 'Assessment saved' });
 }
