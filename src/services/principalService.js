@@ -10,12 +10,12 @@ const ApiError = require('../utils/ApiError');
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
 async function getDashboardStats() {
-  const [teacherCount, studentCount, activeSessionCount] = await Promise.all([
+  const [teacherCount, studentCount, unassignedStudents] = await Promise.all([
     Teacher.count(),
     Student.count(),
-    Session.count({ where: { is_active: true } }),
+    Student.count({ where: { teacher_id: null } }),
   ]);
-  return { teacherCount, studentCount, activeSessionCount };
+  return { teacherCount, studentCount, unassignedStudents };
 }
 
 // ─── Teachers ────────────────────────────────────────────────────────────────

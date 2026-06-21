@@ -1,39 +1,45 @@
 'use strict';
 
-const { Op } = require('sequelize');
-const { Teacher, Student, Session, StudentAvatar } = require('../models');
+const axios  = require('axios');
+const { Teacher, Student, StudentConceptProgress, StudentAvatar } = require('../models');
 const ApiError = require('../utils/ApiError');
 
-async function getDashboardStats(teacherId) {
-  const startOfWeek = new Date();
-  startOfWeek.setHours(0, 0, 0, 0);
-  startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay()); // Sunday
+const GNN_BASE = process.env.GNN_SERVICE_URL || 'http://localhost:8000';
 
-  const [profile, totalSessions, weeklySessions, lastSession] = await Promise.all([
+async function getDashboardStats(teacherId) {
+  const [profile, students] = await Promise.all([
     Teacher.findByPk(teacherId, { attributes: { exclude: ['password_hash'] } }),
-    Session.count({ where: { teacher_id: teacherId } }),
-    Session.count({ where: { teacher_id: teacherId, started_at: { [Op.gte]: startOfWeek } } }),
-    Session.findOne({
-      where: { teacher_id: teacherId },
-      order: [['started_at', 'DESC']],
-      include: [{ model: Student, as: 'student', attributes: ['sid', 'full_name', 'student_code'] }],
-    }),
+    Student.findAll({ where: { teacher_id: teacherId }, attributes: ['sid'] }),
   ]);
 
   if (!profile) throw new ApiError(404, 'Teacher not found');
 
+  const studentIds = students.map((s) => s.sid);
+  const totalStudents = studentIds.length;
+
+  const [conceptsMastered, avgEngagement] = await Promise.all([
+    totalStudents > 0
+      ? StudentConceptProgress.count({
+          where: { tier1_status: 'passed', student_id: studentIds },
+        })
+      : 0,
+    totalStudents > 0
+      ? axios
+          .get(`${GNN_BASE}/gkb/teacher/engagement`, {
+            params: { student_ids: studentIds.join(',') },
+            timeout: 4000,
+          })
+          .then((r) => r.data.avg_engagement)
+          .catch(() => null)
+      : null,
+  ]);
+
   return {
     profile,
     stats: {
-      totalSessions,
-      weeklySessions,
-      lastSession: lastSession
-        ? {
-            studentName: lastSession.student?.full_name,
-            studentCode: lastSession.student?.student_code,
-            date: lastSession.started_at,
-          }
-        : null,
+      totalStudents,
+      conceptsMastered,
+      avgEngagement,
     },
   };
 }
@@ -57,7 +63,6 @@ async function getOwnStudentById(teacherId, studentId) {
 }
 
 async function setAvatar(teacherId, studentId, avatarKey) {
-  // Verify the student belongs to this teacher
   const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
 
@@ -70,29 +75,6 @@ async function setAvatar(teacherId, studentId, avatarKey) {
   return record;
 }
 
-async function startSession(teacherId, studentId) {
-  const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
-  if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
-
-  const existing = await Session.findOne({
-    where: { teacher_id: teacherId, student_id: studentId, is_active: true },
-  });
-  if (existing) throw new ApiError(409, 'A session is already active for this student');
-
-  return Session.create({ teacher_id: teacherId, student_id: studentId });
-}
-
-async function endSession(teacherId, studentId) {
-  const session = await Session.findOne({
-    where: { teacher_id: teacherId, student_id: studentId, is_active: true },
-  });
-  if (!session) throw new ApiError(404, 'No active session found for this student');
-
-  await session.update({ ended_at: new Date(), is_active: false });
-  return session;
-}
-
-// Flatten avatarRecord association into a plain avatar_key field
 function flattenAvatar(student) {
   const plain = student.get({ plain: true });
   plain.avatar_key = plain.avatarRecord?.avatar_key ?? null;
@@ -105,6 +87,4 @@ module.exports = {
   getOwnStudents,
   getOwnStudentById,
   setAvatar,
-  startSession,
-  endSession,
 };
