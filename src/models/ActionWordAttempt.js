@@ -38,6 +38,25 @@ const ActionWordAttempt = sequelize.define('ActionWordAttempt', {
     type: DataTypes.ENUM('none', 'exact', 'keyword', 'fuzzy', 'non_verbal'),
     allowNull: true,
   },
+  // RC1 — phoneme scorer (mirrors DialogueWordAttempt)
+  phase2_phoneme_error_class: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+  },
+  phase2_phoneme_accuracy: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+  },
+  // RC3 — echolalia detection (mirrors DialogueWordAttempt)
+  phase2_response_latency_ms: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  phase2_echolalia_flag: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false,
+  },
   phase3_correct: {
     type: DataTypes.BOOLEAN,
     allowNull: true,

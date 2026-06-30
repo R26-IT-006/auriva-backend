@@ -34,6 +34,8 @@ router.post('/student/:studentId/cat3/word/:wordId/phase2-assess', [
   body('audio_base64').isString().notEmpty().withMessage('audio_base64 is required'),
   body('mime_type').isString().notEmpty().withMessage('mime_type is required'),
   body('session_id').optional().isInt({ min: 1 }),
+  body('avatar_audio_end_ts').optional().isInt({ min: 0 }),
+  body('recording_start_ts').optional().isInt({ min: 0 }),
 ], ctrl.assessPhase2Speech);
 
 // Score 0 three times → Word-to-Action Matching non-verbal fallback
@@ -51,6 +53,14 @@ router.post('/student/:studentId/cat3/word/:wordId/phase3-check', [
   body('correct_on_first').isBoolean().withMessage('correct_on_first must be a boolean'),
   body('second_attempt_correct').optional().isBoolean(),
   body('session_id').optional().isInt({ min: 1 }),
+  body('attempt1_latency_ms').optional().isInt({ min: 0 }),
+  body('attempt2_latency_ms').optional().isInt({ min: 0 }),
+  body('attempt1_first_tap_correct').optional().isBoolean(),
+  body('attempt2_first_tap_correct').optional().isBoolean(),
+  body('attempt1_selection_change_count').optional().isInt({ min: 0, max: 2 }),
+  body('attempt2_selection_change_count').optional().isInt({ min: 0, max: 2 }),
+  body('attempt1_prompt_count').optional().isInt({ min: 1 }),
+  body('attempt2_prompt_count').optional().isInt({ min: 1 }),
 ], ctrl.recordPhase3Check);
 
 // ── Complete Word Session (Mastery Algorithm) ─────────────────────────────

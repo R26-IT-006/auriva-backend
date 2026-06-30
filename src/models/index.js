@@ -10,6 +10,7 @@ const PasswordResetOtp           = require('./PasswordResetOtp');
 const DialogueWord               = require('./DialogueWord');
 const DialogueWordProgress       = require('./DialogueWordProgress');
 const DialogueWordAttempt        = require('./DialogueWordAttempt');
+const DialoguePhase3Attempt      = require('./DialoguePhase3Attempt');
 const DaysWheelAttempt           = require('./DaysWheelAttempt');
 const SentenceQuestionnaire      = require('./SentenceQuestionnaire');
 const Level2TopicProgress        = require('./Level2TopicProgress');
@@ -19,7 +20,6 @@ const Level2GenderSelectionLog   = require('./Level2GenderSelectionLog');
 const Level2ActivitySelectionLog = require('./Level2ActivitySelectionLog');
 const Level2ProductionAttempt    = require('./Level2ProductionAttempt');
 const Level2NonVerbalAttempt     = require('./Level2NonVerbalAttempt');
-const ActionWordProgress         = require('./ActionWordProgress');
 const ActionWordAttempt          = require('./ActionWordAttempt');
 const CanYouGameRound            = require('./CanYouGameRound');
 const ActionIdentificationRound  = require('./ActionIdentificationRound');
@@ -53,6 +53,11 @@ DialogueWordProgress.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'word'
 Student.hasMany(DialogueWordProgress, { foreignKey: 'student_id', as: 'dialogueProgress' });
 DialogueWordProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// DialogueWordProgress cat3Progress aliases (used by category3Service.js)
+DialogueWord.hasMany(DialogueWordProgress, { foreignKey: 'word_id', as: 'cat3Progress' });
+DialogueWordProgress.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'cat3ProgressWord' });
+Student.hasMany(DialogueWordProgress, { foreignKey: 'student_id', as: 'cat3ProgressRecords' });
+
 // DialogueWord ↔ DialogueWordAttempt
 DialogueWord.hasMany(DialogueWordAttempt, { foreignKey: 'word_id', as: 'attempts' });
 DialogueWordAttempt.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'word' });
@@ -64,6 +69,18 @@ DialogueWordAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student'
 // Session ↔ DialogueWordAttempt
 Session.hasMany(DialogueWordAttempt, { foreignKey: 'session_id', as: 'wordAttempts' });
 DialogueWordAttempt.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
+
+// DialogueWord ↔ DialoguePhase3Attempt
+DialogueWord.hasMany(DialoguePhase3Attempt, { foreignKey: 'word_id', as: 'phase3Attempts' });
+DialoguePhase3Attempt.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'word' });
+
+// Student ↔ DialoguePhase3Attempt
+Student.hasMany(DialoguePhase3Attempt, { foreignKey: 'student_id', as: 'phase3Attempts' });
+DialoguePhase3Attempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Session ↔ DialoguePhase3Attempt
+Session.hasMany(DialoguePhase3Attempt, { foreignKey: 'session_id', as: 'phase3WordAttempts' });
+DialoguePhase3Attempt.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
 
 // DaysWheelAttempt associations
 Student.hasMany(DaysWheelAttempt, { foreignKey: 'student_id', as: 'wheelAttempts' });
@@ -119,14 +136,6 @@ Level2NonVerbalAttempt.belongsTo(Level2Session, { foreignKey: 'level2_session_id
 // All Cat3 word lookups use DialogueWord (category='abilities').
 // Yes and No standalone words are seeded into dialogue_words alongside Clap–Sing.
 
-// DialogueWord ↔ ActionWordProgress (Cat3 word teaching progress)
-DialogueWord.hasMany(ActionWordProgress, { foreignKey: 'word_id', as: 'cat3Progress' });
-ActionWordProgress.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
-
-// Student ↔ ActionWordProgress
-Student.hasMany(ActionWordProgress, { foreignKey: 'student_id', as: 'cat3Progress' });
-ActionWordProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
-
 // DialogueWord ↔ ActionWordAttempt
 DialogueWord.hasMany(ActionWordAttempt, { foreignKey: 'word_id', as: 'cat3Attempts' });
 ActionWordAttempt.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
@@ -174,6 +183,7 @@ module.exports = {
   DialogueWord,
   DialogueWordProgress,
   DialogueWordAttempt,
+  DialoguePhase3Attempt,
   DaysWheelAttempt,
   SentenceQuestionnaire,
   Level2TopicProgress,
@@ -183,7 +193,6 @@ module.exports = {
   Level2ActivitySelectionLog,
   Level2ProductionAttempt,
   Level2NonVerbalAttempt,
-  ActionWordProgress,
   ActionWordAttempt,
   CanYouGameRound,
   ActionIdentificationRound,

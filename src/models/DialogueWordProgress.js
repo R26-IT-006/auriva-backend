@@ -59,6 +59,16 @@ const DialogueWordProgress = sequelize.define('DialogueWordProgress', {
     type: DataTypes.INTEGER,
     defaultValue: 0,
   },
+  last_session_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+    defaultValue: null,
+  },
+  echolalia_rate: {
+    type: DataTypes.FLOAT,
+    defaultValue: 0.0,
+    allowNull: false,
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

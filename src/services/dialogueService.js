@@ -1,9 +1,14 @@
 'use strict';
 
 const { Op }                    = require('sequelize');
-const { DialogueWord, DialogueWordProgress, DialogueWordAttempt, Student, Session } = require('../models');
+const { DialogueWord, DialogueWordProgress, DialogueWordAttempt, DialoguePhase3Attempt, Student, Session } = require('../models');
 const ApiError                  = require('../utils/ApiError');
 const speechAssessment          = require('./speechAssessmentService');
+
+// RC3 — echolalia detection thresholds
+const ECHOLALIA_THRESHOLD_MS = 1500;  // below this, treat as probable echolalia
+const ECHOLALIA_EMA_ALPHA    = 0.3;   // smoothing factor for the running echolalia_rate
+const ECHOLALIA_MIC_DELAY_MS = 3000;  // delay applied to the next attempt when echolalia_rate > 0.5
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -308,7 +313,10 @@ async function recordPhase1Gate(teacherId, studentId, wordId, gatePassed) {
   return { gate_passed: gatePassed, current_phase: gatePassed ? 2 : 1 };
 }
 
-async function assessPhase2Speech(teacherId, studentId, wordId, { audio_base64, mime_type, session_id }) {
+async function assessPhase2Speech(teacherId, studentId, wordId, {
+  audio_base64, mime_type, session_id,
+  avatar_audio_end_ts, recording_start_ts,
+}) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
   const word = await assertWordExists(wordId);
 
@@ -324,11 +332,25 @@ async function assessPhase2Speech(teacherId, studentId, wordId, { audio_base64, 
     activeSessionId = session.id;
   }
 
-  const { score, transcript, match_type } = await speechAssessment.assessSpeech(
+  const {
+    score, transcript, match_type, phoneme_error_class, phoneme_accuracy, first_word_offset_ms,
+  } = await speechAssessment.assessSpeech(
     audio_base64,
     mime_type,
     word.keyword_triggers
   );
+
+  // ── RC3 — echolalia detection ──────────────────────────────────────────────
+  // child_speech_onset_ts = when recording started + offset of first detected
+  // word within that recording. response_latency_ms = onset - avatar audio end.
+  // Both stay null/false until the frontend sends real timestamps (separate FSD).
+  let response_latency_ms = null;
+  let echolalia_flag = false;
+  if (avatar_audio_end_ts && recording_start_ts) {
+    const childSpeechOnsetTs = recording_start_ts + (first_word_offset_ms ?? 0);
+    response_latency_ms = Math.max(0, childSpeechOnsetTs - avatar_audio_end_ts);
+    echolalia_flag = response_latency_ms < ECHOLALIA_THRESHOLD_MS;
+  }
 
   const progress = await getOrCreateProgress(studentId, wordId);
 
@@ -337,9 +359,14 @@ async function assessPhase2Speech(teacherId, studentId, wordId, { audio_base64, 
     ? progress.consecutive_fail_count + 1
     : 0;
 
+  // RC3 — running echolalia rate (exponential moving average, no extra column needed)
+  const newEcholaliaRate = progress.echolalia_rate
+    + ECHOLALIA_EMA_ALPHA * ((echolalia_flag ? 1 : 0) - progress.echolalia_rate);
+
   const updates = {
     consecutive_fail_count: newConsecutiveFails,
     status: 'in_progress',
+    echolalia_rate: newEcholaliaRate,
     updated_at: new Date(),
   };
 
@@ -357,6 +384,10 @@ async function assessPhase2Speech(teacherId, studentId, wordId, { audio_base64, 
     speech_score: score,
     transcript,
     match_type,
+    phoneme_error_class,
+    phoneme_accuracy,
+    response_latency_ms,
+    echolalia_flag,
   });
 
   return {
@@ -367,6 +398,7 @@ async function assessPhase2Speech(teacherId, studentId, wordId, { audio_base64, 
     advance_to_phase3:      score >= 2,
     trigger_nonverbal:      newConsecutiveFails >= 3,
     consecutive_fail_count: newConsecutiveFails,
+    mic_delay_ms:           newEcholaliaRate > 0.5 ? ECHOLALIA_MIC_DELAY_MS : 0,
   };
 }
 
@@ -411,17 +443,23 @@ async function recordNonVerbalResult(teacherId, studentId, wordId, { image_selec
  * Records a single Phase 3 scenario attempt (A, B, C, or checkpoint).
  * Does NOT trigger mastery computation — call phase3-complete for that.
  */
-async function recordPhase3Scenario(teacherId, studentId, wordId, { scenario_label, selected_correct, session_id }) {
+async function recordPhase3Scenario(teacherId, studentId, wordId, {
+  scenario_label, selected_correct, session_id,
+  response_latency_ms, selection_change_count, prompt_count, first_tap_correct,
+}) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
   await assertWordExists(wordId);
 
-  await DialogueWordAttempt.create({
-    student_id:     studentId,
-    word_id:        wordId,
-    session_id:     session_id ?? null,
-    phase:          3,
+  await DialoguePhase3Attempt.create({
+    student_id:             studentId,
+    word_id:                wordId,
+    session_id:             session_id ?? null,
     scenario_label,
-    phase3_correct: selected_correct,
+    phase3_correct:         selected_correct,
+    response_latency_ms:    response_latency_ms ?? null,
+    selection_change_count: selection_change_count ?? 0,
+    prompt_count:           prompt_count ?? 1,
+    first_tap_correct:      first_tap_correct ?? null,
   });
 
   return { scenario_label, selected_correct };
@@ -451,9 +489,10 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
 
   // A non-verbal attempt (match_type='non_verbal') counts as phase2 partial credit
   // and allows moving to Phase 3, but the speech_score determines mastery eligibility.
-  const phase2Score = lastPhase2?.speech_score ?? 0;
-  const phase2Passed = phase2Score >= 2;
-  const sessionPassed = phase2Passed && phase3_passed;
+  const phase2Score     = lastPhase2?.speech_score ?? 0;
+  const phase2Passed    = phase2Score >= 2;
+  const phase2Echolalic = lastPhase2?.echolalia_flag === true; // RC3
+  const sessionPassed   = phase2Passed && phase3_passed;
 
   const today = todayString();
   let newStatus           = progress.status;
@@ -463,7 +502,13 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
   let newTotalSessions    = progress.total_sessions + 1;
   let mastered            = false;
 
-  if (sessionPassed) {
+  if (sessionPassed && phase2Echolalic) {
+    // RC3 — echolalic pass: genuine comprehension not yet confirmed.
+    // Stays in_progress; does not count toward the 2-pass mastery rule,
+    // but is not penalised as a failure either.
+    newStatus      = 'in_progress';
+    newConsecFails = 0;
+  } else if (sessionPassed) {
     const differentDay = progress.last_pass_date && progress.last_pass_date !== today;
     newSessionPassCount = progress.session_pass_count + 1;
     newLastPassDate     = today;
@@ -508,13 +553,14 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
     updated_at:                new Date(),
   });
 
-  await DialogueWordAttempt.create({
+  await DialoguePhase3Attempt.create({
     student_id:     studentId,
     word_id:        wordId,
     session_id:     session_id ?? null,
-    phase:          3,
     phase3_correct: phase3_passed,
     session_passed: sessionPassed,
+    // blooms_level and pragmatic_confidence are added
+    // in the pragmatic model FSD. They remain null here.
   });
 
   return {

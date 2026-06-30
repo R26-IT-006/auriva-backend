@@ -3,7 +3,7 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-const DialogueWordAttempt = sequelize.define('DialogueWordAttempt', {
+const DialoguePhase3Attempt = sequelize.define('DialoguePhase3Attempt', {
   id: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -21,38 +21,43 @@ const DialogueWordAttempt = sequelize.define('DialogueWordAttempt', {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
-  phase: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-  },
-  speech_score: {
-    type: DataTypes.INTEGER,
+  scenario_label: {
+    type: DataTypes.STRING(20),
     allowNull: true,
   },
-  transcript: {
-    type: DataTypes.STRING,
+  phase3_correct: {
+    type: DataTypes.BOOLEAN,
     allowNull: true,
   },
-  match_type: {
-    type: DataTypes.ENUM('none', 'exact', 'keyword', 'fuzzy', 'non_verbal'),
+  session_passed: {
+    type: DataTypes.BOOLEAN,
     allowNull: true,
   },
-  // RC3 — echolalia detection (populated by assessPhase2Speech after echolalia FSD)
+  // RC2 — ML training features (populated from frontend tap timing)
   response_latency_ms: {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
-  echolalia_flag: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: false,
+  selection_change_count: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
     allowNull: false,
   },
-  // RC1 — phoneme scorer (populated after phoneme microservice FSD)
-  phoneme_error_class: {
-    type: DataTypes.STRING(50),
+  first_tap_correct: {
+    type: DataTypes.BOOLEAN,
     allowNull: true,
   },
-  phoneme_accuracy: {
+  prompt_count: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    allowNull: false,
+  },
+  // RC2 — Bloom's classification (populated after pragmatic model FSD)
+  blooms_level: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  pragmatic_confidence: {
     type: DataTypes.FLOAT,
     allowNull: true,
   },
@@ -61,9 +66,9 @@ const DialogueWordAttempt = sequelize.define('DialogueWordAttempt', {
     defaultValue: DataTypes.NOW,
   },
 }, {
-  tableName: 'dialogue_word_attempts',
+  tableName: 'dialogue_phase3_attempts',
   timestamps: false,
   freezeTableName: true,
 });
 
-module.exports = DialogueWordAttempt;
+module.exports = DialoguePhase3Attempt;

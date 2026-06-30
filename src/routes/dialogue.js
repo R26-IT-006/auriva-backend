@@ -27,6 +27,8 @@ router.post('/student/:studentId/level1/word/:wordId/phase2-assess', [
   body('audio_base64').isString().notEmpty().withMessage('audio_base64 is required'),
   body('mime_type').isString().notEmpty().withMessage('mime_type is required'),
   body('session_id').optional().isInt({ min: 1 }),
+  body('avatar_audio_end_ts').optional().isInt({ min: 0 }),
+  body('recording_start_ts').optional().isInt({ min: 0 }),
 ], ctrl.assessPhase2Speech);
 
 // ── Phase 2 non-verbal fallback ───────────────────────────────────────────
@@ -42,6 +44,11 @@ router.post('/student/:studentId/level1/word/:wordId/phase3-scenario', [
   body('scenario_label').isIn(['A', 'B', 'C', 'checkpoint']).withMessage('scenario_label must be A, B, C, or checkpoint'),
   body('selected_correct').isBoolean().withMessage('selected_correct must be a boolean'),
   body('session_id').optional().isInt({ min: 1 }),
+  body('response_latency_ms').optional().isInt({ min: 0 }),
+  body('selection_change_count').optional().isInt({ min: 0, max: 2 })
+    .withMessage('selection_change_count must be an integer between 0 and 2'),
+  body('prompt_count').optional().isInt({ min: 1 }),
+  body('first_tap_correct').optional().isBoolean(),
 ], ctrl.recordPhase3Scenario);
 
 router.post('/student/:studentId/level1/word/:wordId/phase3-complete', [

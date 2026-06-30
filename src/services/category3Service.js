@@ -2,7 +2,8 @@
 
 const {
   DialogueWord,
-  ActionWordProgress,
+  DialogueWordProgress,
+  DialoguePhase3Attempt,
   ActionWordAttempt,
   CanYouGameRound,
   ActionIdentificationRound,
@@ -12,6 +13,11 @@ const {
 } = require('../models');
 const ApiError         = require('../utils/ApiError');
 const speechAssessment = require('./speechAssessmentService');
+
+// RC3 — echolalia detection thresholds (mirrors dialogueService.js)
+const ECHOLALIA_THRESHOLD_MS = 1500;
+const ECHOLALIA_EMA_ALPHA    = 0.3;
+const ECHOLALIA_MIC_DELAY_MS = 3000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -64,18 +70,19 @@ async function assertCat3WordExists(wordId) {
 }
 
 async function getOrCreateProgress(studentId, wordId) {
-  const [progress] = await ActionWordProgress.findOrCreate({
+  const [progress] = await DialogueWordProgress.findOrCreate({
     where: { student_id: studentId, word_id: wordId },
     defaults: {
-      student_id:         studentId,
-      word_id:            wordId,
-      status:             'not_started',
-      phase1_gate_passed: false,
-      session_pass_count: 0,
-      last_pass_date:     null,
-      fail_streak:        0,
-      total_sessions:     0,
-      non_verbal_count:   0,
+      student_id:             studentId,
+      word_id:                wordId,
+      status:                 'not_started',
+      phase1_gate_passed:     false,
+      session_pass_count:     0,
+      last_pass_date:         null,
+      last_session_date:      null,
+      consecutive_fail_count: 0,
+      total_sessions:         0,
+      non_verbal_count:       0,
     },
   });
   return progress;
@@ -86,7 +93,7 @@ async function fetchCat3WordsWithProgress(studentId) {
   const words = await DialogueWord.findAll({
     where: { category: 'abilities', difficulty: 1 },
     include: [{
-      model: ActionWordProgress,
+      model: DialogueWordProgress,
       as: 'cat3Progress',
       where: { student_id: studentId },
       required: false,
@@ -208,7 +215,10 @@ async function recordDragToLine(teacherId, studentId, wordId, { result, session_
  * Runs STT + fuzzy matching on the child's spoken word.
  * score >= 2 → advance to Phase 3.  score === 0 three times → non-verbal fallback.
  */
-async function assessPhase2Speech(teacherId, studentId, wordId, { audio_base64, mime_type, session_id }) {
+async function assessPhase2Speech(teacherId, studentId, wordId, {
+  audio_base64, mime_type, session_id,
+  avatar_audio_end_ts, recording_start_ts,
+}) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
   const word = await assertCat3WordExists(wordId);
 
@@ -221,25 +231,56 @@ async function assessPhase2Speech(teacherId, studentId, wordId, { audio_base64, 
     activeSessionId = session.id;
   }
 
-  const { score, transcript, match_type } = await speechAssessment.assessSpeech(
+  const {
+    score, transcript, match_type, phoneme_error_class, phoneme_accuracy, first_word_offset_ms,
+  } = await speechAssessment.assessSpeech(
     audio_base64, mime_type, word.keyword_triggers
   );
 
+  // ── RC3 — echolalia detection (mirrors dialogueService.assessPhase2Speech) ─
+  let response_latency_ms = null;
+  let echolalia_flag = false;
+  if (avatar_audio_end_ts && recording_start_ts) {
+    const childSpeechOnsetTs = recording_start_ts + (first_word_offset_ms ?? 0);
+    response_latency_ms = Math.max(0, childSpeechOnsetTs - avatar_audio_end_ts);
+    echolalia_flag = response_latency_ms < ECHOLALIA_THRESHOLD_MS;
+  }
+
   const progress = await getOrCreateProgress(studentId, wordId);
-  const newFailStreak = score === 0 ? progress.fail_streak + 1 : 0;
-  await progress.update({ fail_streak: newFailStreak, status: 'in_progress', updated_at: new Date() });
+  const newConsecFails = score === 0 ? progress.consecutive_fail_count + 1 : 0;
+
+  // RC3 — running echolalia rate (same EMA approach as dialogueService.js)
+  const newEcholaliaRate = progress.echolalia_rate
+    + ECHOLALIA_EMA_ALPHA * ((echolalia_flag ? 1 : 0) - progress.echolalia_rate);
+
+  await progress.update({
+    consecutive_fail_count: newConsecFails,
+    status: 'in_progress',
+    echolalia_rate: newEcholaliaRate,
+    updated_at: new Date(),
+  });
 
   const existing = await ActionWordAttempt.findOne({
     where: { student_id: studentId, word_id: wordId, session_id: activeSessionId },
     order: [['attempted_at', 'DESC']],
   });
 
+  const attemptFields = {
+    phase2_speech_score:        score,
+    phase2_transcript:          transcript,
+    phase2_match_type:          match_type,
+    phase2_phoneme_error_class: phoneme_error_class,
+    phase2_phoneme_accuracy:    phoneme_accuracy,
+    phase2_response_latency_ms: response_latency_ms,
+    phase2_echolalia_flag:      echolalia_flag,
+  };
+
   if (existing) {
-    await existing.update({ phase2_speech_score: score, phase2_transcript: transcript, phase2_match_type: match_type });
+    await existing.update(attemptFields);
   } else {
     await ActionWordAttempt.create({
       student_id: studentId, word_id: wordId, session_id: activeSessionId,
-      phase2_speech_score: score, phase2_transcript: transcript, phase2_match_type: match_type,
+      ...attemptFields,
     });
   }
 
@@ -247,8 +288,9 @@ async function assessPhase2Speech(teacherId, studentId, wordId, { audio_base64, 
     score, transcript, match_type,
     session_id:        activeSessionId,
     advance_to_phase3: score >= 2,
-    trigger_nonverbal: score === 0 && newFailStreak >= 3,
-    fail_streak:       newFailStreak,
+    trigger_nonverbal:      score === 0 && newConsecFails >= 3,
+    consecutive_fail_count: newConsecFails,
+    mic_delay_ms:           newEcholaliaRate > 0.5 ? ECHOLALIA_MIC_DELAY_MS : 0,
   };
 }
 
@@ -293,6 +335,10 @@ async function recordPhase2NonVerbal(teacherId, studentId, wordId, { tap_correct
  */
 async function recordPhase3Check(teacherId, studentId, wordId, {
   correct_on_first, second_attempt_correct, session_id,
+  attempt1_latency_ms, attempt2_latency_ms,
+  attempt1_first_tap_correct, attempt2_first_tap_correct,
+  attempt1_selection_change_count, attempt2_selection_change_count,
+  attempt1_prompt_count, attempt2_prompt_count,
 }) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
   await assertCat3WordExists(wordId);
@@ -316,6 +362,33 @@ async function recordPhase3Check(teacherId, studentId, wordId, {
     });
   }
 
+  // ── RC2 feature logging into dialogue_phase3_attempts ─────────────────
+  await DialoguePhase3Attempt.create({
+    student_id:             studentId,
+    word_id:                wordId,
+    session_id:             session_id ?? null,
+    scenario_label:         'A',
+    phase3_correct:         correct_on_first,
+    response_latency_ms:    attempt1_latency_ms ?? null,
+    selection_change_count: attempt1_selection_change_count ?? 0,
+    prompt_count:           attempt1_prompt_count ?? 1,
+    first_tap_correct:      attempt1_first_tap_correct ?? null,
+  });
+
+  if (second_attempt_correct !== undefined) {
+    await DialoguePhase3Attempt.create({
+      student_id:             studentId,
+      word_id:                wordId,
+      session_id:             session_id ?? null,
+      scenario_label:         'B',
+      phase3_correct:         second_attempt_correct,
+      response_latency_ms:    attempt2_latency_ms ?? null,
+      selection_change_count: attempt2_selection_change_count ?? 0,
+      prompt_count:           attempt2_prompt_count ?? 1,
+      first_tap_correct:      attempt2_first_tap_correct ?? null,
+    });
+  }
+
   return { phase3_correct: phase3Correct, attempts };
 }
 
@@ -324,7 +397,7 @@ async function recordPhase3Check(teacherId, studentId, wordId, {
  * Finalises the word teaching session and applies the mastery algorithm.
  * Session passes when: Phase 2 speech score >= 2 AND phase3_passed = true.
  * Mastery: 2+ passing sessions on different calendar days.
- * Struggling: fail_streak reaches 3.
+ * Struggling: consecutive_fail_count reaches 3.
  */
 async function completeWordSession(teacherId, studentId, wordId, { phase3_passed, session_id }) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
@@ -342,22 +415,27 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
         order: [['attempted_at', 'DESC']],
       });
 
-  const phase2Score   = lastAttempt?.phase2_speech_score ?? 0;
-  const sessionPassed = phase2Score >= 2 && phase3_passed;
+  const phase2Score     = lastAttempt?.phase2_speech_score ?? 0;
+  const phase2Echolalic = lastAttempt?.phase2_echolalia_flag === true; // RC3
+  const sessionPassed   = phase2Score >= 2 && phase3_passed;
 
   const today             = todayString();
   let newStatus           = progress.status;
   let newSessionPassCount = progress.session_pass_count;
   let newLastPassDate     = progress.last_pass_date;
-  let newFailStreak       = progress.fail_streak;
+  let newConsecFails      = progress.consecutive_fail_count;
   const newTotalSessions  = progress.total_sessions + 1;
   let mastered            = false;
 
-  if (sessionPassed) {
+  if (sessionPassed && phase2Echolalic) {
+    // RC3 — echolalic pass: stays in_progress, no mastery credit, no fail penalty
+    newStatus      = 'in_progress';
+    newConsecFails = 0;
+  } else if (sessionPassed) {
     const differentDay  = progress.last_pass_date && progress.last_pass_date !== today;
     newSessionPassCount = progress.session_pass_count + 1;
     newLastPassDate     = today;
-    newFailStreak       = 0;
+    newConsecFails      = 0;
     if (newSessionPassCount >= 2 && differentDay) {
       newStatus = 'mastered';
       mastered  = true;
@@ -365,15 +443,15 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
       newStatus = 'in_progress';
     }
   } else {
-    newFailStreak = progress.fail_streak + 1;
-    if (newFailStreak >= 3) newStatus = 'struggling';
+    newConsecFails = progress.consecutive_fail_count + 1;
+    if (newConsecFails >= 3) newStatus = 'struggling';
   }
 
   await progress.update({
     status: newStatus, phase1_gate_passed: false,
     session_pass_count: newSessionPassCount, last_pass_date: newLastPassDate,
     last_session_date: today,
-    fail_streak: newFailStreak, total_sessions: newTotalSessions, updated_at: new Date(),
+    consecutive_fail_count: newConsecFails, total_sessions: newTotalSessions, updated_at: new Date(),
   });
 
   if (lastAttempt) await lastAttempt.update({ session_passed: sessionPassed });
