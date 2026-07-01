@@ -30,6 +30,10 @@ const LetterProgress = sequelize.define('LetterProgress', {
     allowNull:    false,
     defaultValue: 0,
   },
+  attempt_data: {
+    type:      DataTypes.JSONB,
+    allowNull: true,   // null on rows written by old clients
+  },
 }, {
   tableName: 'letter_progress',
   timestamps: false,

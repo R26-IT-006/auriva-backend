@@ -13,6 +13,8 @@ const Stroke                  = require('./Stroke');
 const ExplanationResult       = require('./ExplanationResult');
 const RecommendationHistory   = require('./RecommendationHistory');
 const StudentMotorFeature     = require('./StudentMotorFeature');
+const ShapeFeature            = require('./ShapeFeature');
+const LetterAttempt           = require('./LetterAttempt');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -68,8 +70,20 @@ ExplanationResult.belongsTo(HandwritingAssessment, { foreignKey: 'assessment_id'
 Student.hasMany(RecommendationHistory, { foreignKey: 'student_id', as: 'recommendationHistory' });
 RecommendationHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// HandwritingAssessment → ShapeFeature (one row per shape per assessment)
+HandwritingAssessment.hasMany(ShapeFeature, { foreignKey: 'assessment_id', as: 'shapeFeatures' });
+ShapeFeature.belongsTo(HandwritingAssessment, { foreignKey: 'assessment_id', as: 'assessment' });
+
+// Student → ShapeFeature
+Student.hasMany(ShapeFeature, { foreignKey: 'student_id', as: 'shapeFeatures' });
+ShapeFeature.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Student → LetterAttempt (append-only; one row per attempt per POST call)
+Student.hasMany(LetterAttempt, { foreignKey: 'student_id', as: 'letterAttempts' });
+LetterAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
-  HandwritingAssessment, LetterProgress, Stroke,
+  HandwritingAssessment, LetterProgress, Stroke, ShapeFeature, LetterAttempt,
   ExplanationResult, RecommendationHistory, StudentMotorFeature,
 };

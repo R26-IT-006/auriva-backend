@@ -38,6 +38,12 @@ const HandwritingAssessment = sequelize.define('HandwritingAssessment', {
     type: DataTypes.JSON,
     allowNull: true,
   },
+  // true when this assessment was part of a fixed research protocol session
+  collection_mode: {
+    type:         DataTypes.BOOLEAN,
+    allowNull:    false,
+    defaultValue: false,
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

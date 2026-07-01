@@ -1,5 +1,7 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
+
 const {
   HandwritingAssessment,
   LetterProgress,
@@ -7,6 +9,8 @@ const {
   ExplanationResult,
   RecommendationHistory,
   StudentMotorFeature,
+  ShapeFeature,
+  LetterAttempt,
 } = require('../models');
 const ApiError = require('../utils/ApiError');
 const logger   = require('../utils/logger');
@@ -83,7 +87,7 @@ function deriveReason(shapes) {
 }
 
 async function submitAssessment(req, res) {
-  const { student_id, session_start, session_end, shapes } = req.body;
+  const { student_id, session_start, session_end, shapes, collection_mode } = req.body;
 
   if (!student_id || !session_start || !session_end || !Array.isArray(shapes) || shapes.length === 0) {
     throw new ApiError(422, 'student_id, session_start, session_end, and shapes are required');
@@ -98,7 +102,27 @@ async function submitAssessment(req, res) {
     session_end,
     shapes,
     is_initial,
+    collection_mode: collection_mode ?? false,
   });
+
+  // ML: persist per-shape features + raw strokes — additive, does not replace shapes JSON
+  try {
+    if (Array.isArray(shapes) && shapes.length > 0) {
+      await ShapeFeature.bulkCreate(
+        shapes.map(shape => ({
+          assessment_id:   assessment.id,
+          student_id,
+          shape_type:      shape.shape_id,
+          attempt_number:  1,
+          features:        shape.features ?? {},
+          stroke_points:   shape.strokes  ?? [],
+          collection_mode: collection_mode ?? false,
+        }))
+      );
+    }
+  } catch (dbErr) {
+    console.error('ShapeFeature save error (non-fatal):', dbErr.message);
+  }
 
   try {
     const featureSummary = buildMotorFeatureSummary(shapes);
@@ -139,14 +163,58 @@ async function getProgress(req, res) {
   });
 }
 
+// ML: bulk-insert one immutable row per attempt element from a single POST call.
+// All rows share the same session_key so the full session is always queryable.
+// Never updates existing rows — true append-only store.
+function saveLetterAttempts(attempts, { student_id, letter, case_type, sessionKey, passed, bestScore, threshold, collection_mode }) {
+  if (!Array.isArray(attempts) || attempts.length === 0) return Promise.resolve();
+  return LetterAttempt.bulkCreate(
+    attempts.map(a => ({
+      student_id,
+      letter,
+      case_type,
+      session_key:     sessionKey,
+      attempt_number:  a.attempt_number ?? 1,
+      passed,
+      best_score:      bestScore ?? null,
+      threshold:       threshold ?? null,
+      features:        a.features ?? null,
+      stroke_points:   a.strokes  ?? null,
+      collection_mode: collection_mode ?? false,
+    }))
+  );
+}
+
 async function recordLetterCompletion(req, res) {
-  const { student_id, letter, case_type, attempt_scores, quality_threshold, wrote_correctly } = req.body;
+  const { student_id, letter, case_type, attempt_scores, quality_threshold, wrote_correctly,
+          attempts, collection_mode } = req.body;   // ML: attempts is optional — old clients omit it
 
   if (!student_id || !letter || !case_type) {
     throw new ApiError(422, 'student_id, letter, and case_type are required');
   }
   if (!['lowercase', 'uppercase'].includes(case_type)) {
     throw new ApiError(422, 'case_type must be lowercase or uppercase');
+  }
+
+  // ML: one UUID groups all attempt rows from this single POST call
+  const sessionKey = randomUUID();
+
+  // Collection mode: skip all threshold/blocking logic, always complete
+  if (collection_mode === true) {
+    const colBestScore = Array.isArray(attempt_scores) && attempt_scores.length > 0
+      ? Math.max(...attempt_scores)
+      : null;
+    const colThreshold = typeof quality_threshold === 'number' ? quality_threshold : null;
+    try {
+      await saveLetterAttempts(attempts, {
+        student_id, letter, case_type, sessionKey,
+        passed: true, bestScore: colBestScore, threshold: colThreshold,
+        collection_mode: true,
+      });
+    } catch (dbErr) {
+      console.error('LetterAttempt save error (non-fatal):', dbErr.message);
+    }
+    return res.status(200).json({ completed: true, collection_mode: true });
   }
 
   let bestScore = null;
@@ -177,6 +245,20 @@ async function recordLetterCompletion(req, res) {
         logger.info(`Auto-lowered threshold: student=${student_id} ` +
           `letter=${letter} ${currentVal} → ${newVal} ` +
           `(blocked_attempts=${updatedRec.blocked_attempts})`);
+      }
+      // ML: persist attempt_data for failed attempts — latest-attempt convenience field.
+      // Note: overwrites on retry; immutable records below are the ML source of truth.
+      if (Array.isArray(attempts) && attempts.length > 0) {
+        await rec.update({ attempt_data: attempts });
+      }
+      // ML: immutable per-attempt records — append-only, survive every retry
+      try {
+        await saveLetterAttempts(attempts, {
+          student_id, letter, case_type, sessionKey, passed: false, bestScore, threshold,
+          collection_mode: false,
+        });
+      } catch (dbErr) {
+        console.error('LetterAttempt save error (non-fatal):', dbErr.message);
       }
       logger.info(`Letter blocked: student=${student_id} ` +
         `letter=${letter} bestScore=${bestScore} ` +
@@ -211,6 +293,20 @@ async function recordLetterCompletion(req, res) {
       logger.info(`Auto-raised default threshold: student=${student_id} ` +
         `${currentDefault} → ${newDefault} (5 clean consecutive passes)`);
     }
+  }
+
+  // ML: persist per-attempt raw data when the new client sends it (latest-attempt convenience)
+  if (Array.isArray(attempts) && attempts.length > 0) {
+    await record.update({ attempt_data: attempts });
+  }
+  // ML: immutable per-attempt records — append-only, survive every retry
+  try {
+    await saveLetterAttempts(attempts, {
+      student_id, letter, case_type, sessionKey, passed: true, bestScore, threshold,
+      collection_mode: false,
+    });
+  } catch (dbErr) {
+    console.error('LetterAttempt save error (non-fatal):', dbErr.message);
   }
 
   logger.info(`Letter complete: student=${student_id} ` +

@@ -36,6 +36,9 @@ function buildFeatureVector(assessmentData, letterMetrics) {
   const overallSmoothnessNorm= avg(shapes.map(s => (s.features?.smoothness ?? 0.5) * 100));
 
   // Deviation in px → normalised 0-100 (50 px = 100)
+  // TODO(ML): ?? 0 zero-fills null accuracy/avg_deviation, biasing downstream
+  // clustering. Once the ML pipeline consumes dtw_distance for zigzag/curve_wave,
+  // replace ?? 0 with proper null-aware averaging (skip nulls, don't zero-fill).
   const lineDeviationNorm   = Math.min(100, avg(lineShapes.map(s => (s.features?.avg_deviation ?? 0) * 2)));
   const curveDeviationNorm  = Math.min(100, avg(curveShapes.map(s => (s.features?.avg_deviation ?? 0) * 2)));
   const overallDeviationNorm= Math.min(100, avg(shapes.map(s => (s.features?.avg_deviation ?? 0) * 2)));
