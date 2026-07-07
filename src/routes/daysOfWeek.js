@@ -1,5 +1,6 @@
 'use strict';
 
+// RETIRED 2026-07 — Days of the Week removed from Level 1 (R-10). Route unregistered; file retained for data integrity.
 const router          = require('express').Router();
 const { verifyToken } = require('../middleware/auth');
 const { isTeacher }   = require('../middleware/roleGuard');

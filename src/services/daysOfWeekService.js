@@ -1,5 +1,6 @@
 'use strict';
 
+// RETIRED 2026-07 — Days of the Week removed from Level 1 (R-10). Route unregistered; file retained for data integrity.
 const { Op } = require('sequelize');
 const { DialogueWord, DialogueWordProgress, DaysWheelAttempt, Student } = require('../models');
 const ApiError = require('../utils/ApiError');

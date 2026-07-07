@@ -1,5 +1,6 @@
 'use strict';
 
+// RETIRED 2026-07 — Days of the Week removed from Level 1 (R-10). Route unregistered; file retained for data integrity.
 const { validationResult } = require('express-validator');
 const daysService = require('../services/daysOfWeekService');
 const ApiError    = require('../utils/ApiError');

@@ -109,7 +109,7 @@ async function getLevel1Overview(teacherId, studentId) {
 async function getNextWord(teacherId, studentId, { category = null, exclude_word_id = null, session_passed = null, status = null } = {}) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
 
-  const whereClause = category ? { category } : {};
+  const whereClause = category ? { category } : { category: { [Op.ne]: 'days_of_week' } };
 
   const words = await DialogueWord.findAll({
     where: whereClause,
@@ -133,14 +133,6 @@ async function getNextWord(teacherId, studentId, { category = null, exclude_word
   function allLowerDifficultyMastered(targetWord) {
     if (targetWord.difficulty === 1) return true;
 
-    // days_of_week phrases (D2) unlock after ≥3 day names mastered
-    if (targetWord.category === 'days_of_week' && targetWord.difficulty === 2) {
-      const dayEntries = entries.filter(
-        (e) => e.word.category === 'days_of_week' && e.word.difficulty === 1
-      );
-      return dayEntries.filter((e) => e.progress?.status === 'mastered').length >= 3;
-    }
-
     for (let d = 1; d < targetWord.difficulty; d++) {
       const lowerWords = entries.filter(
         (e) => e.word.category === targetWord.category && e.word.difficulty === d
@@ -153,13 +145,6 @@ async function getNextWord(teacherId, studentId, { category = null, exclude_word
   // Relaxed gate: at least one lower-difficulty word has a session pass
   function isSessionUnlocked(word) {
     if (word.difficulty === 1) return true;
-
-    if (word.category === 'days_of_week' && word.difficulty === 2) {
-      const dayD1 = entries.filter(
-        (e) => e.word.category === 'days_of_week' && e.word.difficulty === 1
-      );
-      return dayD1.filter((e) => (e.progress?.session_pass_count ?? 0) >= 1).length >= 3;
-    }
 
     for (let d = 1; d < word.difficulty; d++) {
       const lowerWords = entries.filter(
