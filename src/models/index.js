@@ -1,12 +1,14 @@
 'use strict';
 
-const sequelize          = require('../config/database');
-const Principal          = require('./Principal');
-const Teacher            = require('./Teacher');
-const Student            = require('./Student');
-const Session            = require('./Session');
-const StudentAvatar      = require('./StudentAvatar');
-const PasswordResetOtp   = require('./PasswordResetOtp');
+const sequelize                = require('../config/database');
+const Principal                = require('./Principal');
+const Teacher                  = require('./Teacher');
+const Student                  = require('./Student');
+const Session                  = require('./Session');
+const StudentAvatar            = require('./StudentAvatar');
+const PasswordResetOtp         = require('./PasswordResetOtp');
+const StudentConceptProgress   = require('./StudentConceptProgress');
+const ConceptInteractionLog    = require('./ConceptInteractionLog');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -28,4 +30,21 @@ Session.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 Student.hasOne(StudentAvatar, { foreignKey: 'student_id', as: 'avatarRecord' });
 StudentAvatar.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
-module.exports = { sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp };
+// Student → concept learning
+Student.hasMany(StudentConceptProgress, { foreignKey: 'student_id', as: 'conceptProgress' });
+StudentConceptProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+Student.hasMany(ConceptInteractionLog, { foreignKey: 'student_id', as: 'conceptLogs' });
+ConceptInteractionLog.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+module.exports = {
+  sequelize,
+  Principal,
+  Teacher,
+  Student,
+  Session,
+  StudentAvatar,
+  PasswordResetOtp,
+  StudentConceptProgress,
+  ConceptInteractionLog,
+};
