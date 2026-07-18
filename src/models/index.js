@@ -24,6 +24,7 @@ const ActionWordAttempt          = require('./ActionWordAttempt');
 const CanYouGameRound            = require('./CanYouGameRound');
 const ActionIdentificationRound  = require('./ActionIdentificationRound');
 const VerbQAProductionRound      = require('./VerbQAProductionRound');
+const DialogueEvaluationAttempt  = require('./DialogueEvaluationAttempt');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -172,6 +173,10 @@ VerbQAProductionRound.belongsTo(Student, { foreignKey: 'student_id', as: 'studen
 Session.hasMany(VerbQAProductionRound, { foreignKey: 'session_id', as: 'verbQARounds' });
 VerbQAProductionRound.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
 
+// DialogueEvaluationAttempt associations (Level 1 evaluations, TASK-14)
+Student.hasMany(DialogueEvaluationAttempt, { foreignKey: 'student_id', as: 'evaluationAttempts' });
+DialogueEvaluationAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize,
   Principal,
@@ -197,4 +202,5 @@ module.exports = {
   CanYouGameRound,
   ActionIdentificationRound,
   VerbQAProductionRound,
+  DialogueEvaluationAttempt,
 };

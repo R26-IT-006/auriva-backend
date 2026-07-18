@@ -8,5 +8,6 @@ router.use('/teacher',   require('./teacher'));
 router.use('/teacher',   require('./dialogue'));
 router.use('/teacher',   require('./level2'));
 router.use('/teacher',   require('./category3'));
+router.use('/teacher',   require('./evaluation'));
 
 module.exports = router;
