@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const swaggerJsdoc = require('swagger-jsdoc');
 
 const options = {
@@ -248,7 +249,11 @@ const options = {
     },
     security: [],
   },
-  apis: ['./src/routes/*.js'],
+  apis: [
+    path.join(__dirname, '../routes/auth.js'),
+    path.join(__dirname, '../routes/principal.js'),
+    path.join(__dirname, '../routes/teacher.js'),
+  ],
 };
 
 const swaggerSpec = swaggerJsdoc(options);

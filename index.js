@@ -95,6 +95,14 @@ app.use((err, req, res, next) => {
     });
   }
 
+  if (err.code === 'AUDIO_QUALITY_FAILED') {
+    return res.status(422).json({
+      error: err.message,
+      code: err.code,
+      ...(err.details && { details: err.details }),
+    });
+  }
+
   if (err.name === 'SequelizeUniqueConstraintError') {
     return res.status(409).json({ error: 'A record with that value already exists' });
   }
@@ -111,11 +119,13 @@ app.use((err, req, res, next) => {
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 async function start() {
+  logger.info(`Connecting to database at ${process.env.DB_HOST}:${process.env.DB_PORT || 5432}`);
   await sequelize.authenticate();
   logger.info('Database connection established');
 
   if (process.env.NODE_ENV === 'development') {
-    await sequelize.sync({ alter: true });
+    logger.info('Syncing database schema');
+    await sequelize.sync({ alter: { drop: false } });
     logger.info('Database schema synced');
   }
 

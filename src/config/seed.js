@@ -9,8 +9,8 @@ async function seed() {
   await sequelize.authenticate();
   console.log('Connected to database');
 
-  // Sync schema (creates tables if they don't exist)
-  await sequelize.sync({ alter: true });
+  // Sync schema without dropping existing constraints/columns.
+  await sequelize.sync({ alter: { drop: false } });
   console.log('Schema synced');
 
   const username = process.env.PRINCIPAL_USERNAME;

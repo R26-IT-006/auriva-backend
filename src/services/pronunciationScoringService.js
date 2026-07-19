@@ -1,5 +1,9 @@
 'use strict';
 
+const {
+  scoreCatPronunciationAttempt,
+} = require('./mfccDtwPronunciationService');
+
 const PHONEME_CUES = {
   'æ': 'Open the mouth wide for the short /a/ sound.',
   'ɒ': 'Round the lips gently for the short /o/ sound.',
@@ -69,6 +73,177 @@ const WORD_PROFILES = {
 
 function clampScore(value) {
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function roundNumber(value, digits = 3) {
+  if (!Number.isFinite(value)) return 0;
+  return Number(value.toFixed(digits));
+}
+
+function sigmoid(value) {
+  return 1 / (1 + Math.exp(-value));
+}
+
+function softmax(logits) {
+  const entries = Object.entries(logits);
+  const maxLogit = Math.max(...entries.map(([, value]) => value));
+  const exponentials = entries.map(([key, value]) => [key, Math.exp(value - maxLogit)]);
+  const total = exponentials.reduce((sum, [, value]) => sum + value, 0) || 1;
+
+  return exponentials.reduce((probabilities, [key, value]) => ({
+    ...probabilities,
+    [key]: roundNumber(value / total, 4),
+  }), {});
+}
+
+function average(values) {
+  if (!values.length) return 0;
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function standardDeviation(values) {
+  if (values.length <= 1) return 0;
+  const mean = average(values);
+  const variance = average(values.map((value) => (value - mean) ** 2));
+  return Math.sqrt(variance);
+}
+
+function getAudioQualityScore(audioQuality = {}) {
+  const snrScore = sigmoid(((Number(audioQuality.snr_db) || 0) - 12) / 4) * 100;
+  const silenceScore = (1 - Math.min(1, Math.max(0, Number(audioQuality.silence_ratio) || 0))) * 100;
+  const clippingScore = (1 - Math.min(1, Math.max(0, Number(audioQuality.clipping_ratio) || 0) / 0.05)) * 100;
+  const voicedScore = sigmoid(((Number(audioQuality.voiced_duration) || 0) - 0.22) / 0.08) * 100;
+
+  return clampScore(
+    snrScore * 0.4 +
+    silenceScore * 0.25 +
+    clippingScore * 0.2 +
+    voicedScore * 0.15
+  );
+}
+
+function buildCatAdaptiveModel({
+  pronunciationSimilarity,
+  phonemeScores,
+  historyCounts,
+  weakSound,
+  hesitationTime,
+  attemptNumber,
+  difficulty,
+  audioQuality,
+}) {
+  const scores = phonemeScores.map((sound) => Number(sound.score || 0));
+  const phonemeMean = clampScore(average(scores));
+  const phonemeMin = clampScore(Math.min(...scores, pronunciationSimilarity));
+  const phonemeStdDev = standardDeviation(scores);
+  const phonemeConsistency = clampScore(100 - phonemeStdDev);
+  const repeatedWeakCount = weakSound?.text ? historyCounts[weakSound.text] || 0 : 0;
+  const hesitationScore = clampScore(100 * Math.exp(-Math.max(0, Number(hesitationTime) || 0) / 3));
+  const attemptScore = clampScore(100 * Math.exp(-Math.max(0, Number(attemptNumber || 1) - 1) * 0.35));
+  const difficultyScore = clampScore(100 - Math.max(0, Number(difficulty || 1) - 1) * 12);
+  const historyScore = clampScore(100 * Math.exp(-repeatedWeakCount * 0.38));
+  const audioQualityScore = getAudioQualityScore(audioQuality);
+  const phonemeErrorScore = clampScore(100 - phonemeMin);
+
+  const features = {
+    pronunciation_similarity: clampScore(pronunciationSimilarity),
+    phoneme_mean: phonemeMean,
+    phoneme_min: phonemeMin,
+    phoneme_consistency: phonemeConsistency,
+    phoneme_error_score: phonemeErrorScore,
+    hesitation_score: hesitationScore,
+    attempt_score: attemptScore,
+    difficulty_score: difficultyScore,
+    history_score: historyScore,
+    repeated_weak_phoneme_count: repeatedWeakCount,
+    audio_quality_score: audioQualityScore,
+  };
+  const weights = {
+    pronunciation_similarity: 0.45,
+    phoneme_mean: 0.15,
+    phoneme_min: 0.1,
+    hesitation_score: 0.1,
+    attempt_score: 0.07,
+    difficulty_score: 0.05,
+    history_score: 0.03,
+    audio_quality_score: 0.05,
+  };
+  const adaptiveScore = clampScore(
+    Object.entries(weights).reduce(
+      (score, [feature, weight]) => score + features[feature] * weight,
+      0
+    )
+  );
+
+  const normalized = Object.fromEntries(
+    Object.entries(features).map(([key, value]) => [key, Number(value || 0) / 100])
+  );
+  const supportNeed =
+    (1 - normalized.pronunciation_similarity) * 0.34 +
+    (1 - normalized.phoneme_min) * 0.22 +
+    (1 - normalized.hesitation_score) * 0.13 +
+    (1 - normalized.attempt_score) * 0.12 +
+    (1 - normalized.history_score) * 0.09 +
+    (1 - normalized.audio_quality_score) * 0.1;
+  const logits = {
+    continue:
+      normalized.pronunciation_similarity * 2.4 +
+      normalized.phoneme_mean * 1.2 +
+      normalized.phoneme_consistency * 0.45 +
+      normalized.audio_quality_score * 0.45 -
+      supportNeed * 1.9,
+    reinforce:
+      normalized.pronunciation_similarity * 0.9 +
+      normalized.phoneme_error_score * 1.6 +
+      (1 - normalized.phoneme_consistency) * 0.5 +
+      supportNeed * 1.4,
+    remediate:
+      (1 - normalized.pronunciation_similarity) * 2.1 +
+      (1 - normalized.phoneme_min) * 1.5 +
+      (1 - normalized.hesitation_score) * 0.7 +
+      (1 - normalized.attempt_score) * 0.6 +
+      (1 - normalized.history_score) * 0.4,
+  };
+  const probabilities = softmax(logits);
+  const sortedProbabilities = Object.entries(probabilities)
+    .sort((a, b) => b[1] - a[1]);
+  const [recommendationType, topProbability] = sortedProbabilities[0];
+  const secondProbability = sortedProbabilities[1]?.[1] || 0;
+  const probabilityMargin = topProbability - secondProbability;
+  const confidenceScore = clampScore(
+    topProbability * 62 +
+    probabilityMargin * 28 +
+    normalized.audio_quality_score * 10
+  );
+  const confidenceLevel = confidenceScore >= 75
+    ? 'high'
+    : confidenceScore >= 55
+      ? 'medium'
+      : 'low';
+  const uncertaintyReasons = [
+    probabilityMargin < 0.16 ? 'adaptive probabilities are close' : null,
+    normalized.audio_quality_score < 0.68 ? 'audio quality lowers score reliability' : null,
+    Math.abs(normalized.pronunciation_similarity - normalized.phoneme_mean) > 0.22
+      ? 'overall similarity and phoneme scores disagree'
+      : null,
+    normalized.phoneme_min < 0.55 ? 'one phoneme is much weaker than the full-word score' : null,
+  ].filter(Boolean);
+
+  return {
+    version: 'cat_adaptive_linear_softmax_v1',
+    word_id: 'cat',
+    features,
+    weights,
+    adaptive_score: adaptiveScore,
+    class_logits: Object.fromEntries(
+      Object.entries(logits).map(([key, value]) => [key, roundNumber(value, 4)])
+    ),
+    class_probabilities: probabilities,
+    predicted_recommendation_type: recommendationType,
+    confidence_score: confidenceScore,
+    confidence_level: confidenceLevel,
+    uncertainty_reasons: uncertaintyReasons,
+  };
 }
 
 function getSoundPosition(index, total) {
@@ -223,7 +398,16 @@ function chooseNextWordDetails({ wordId, weakSound, overallScore, historyCounts 
   };
 }
 
-function buildRecommendation({ overallScore, weakSound, nextWordId, historyCounts, nextWordDecision, hesitationTime, difficulty }) {
+function buildRecommendation({
+  overallScore,
+  weakSound,
+  nextWordId,
+  historyCounts,
+  nextWordDecision,
+  hesitationTime,
+  difficulty,
+  adaptiveModel = null,
+}) {
   const repeatedCount = weakSound?.text ? historyCounts[weakSound.text] || 0 : 0;
   const positionText = weakSound?.position ? `${weakSound.position} ` : '';
   const soundText = weakSound?.text ? `/${weakSound.text}/` : 'the target sound';
@@ -237,8 +421,9 @@ function buildRecommendation({ overallScore, weakSound, nextWordId, historyCount
     difficulty >= 4 ? 'current word is high difficulty' : null,
     selectedReason ? `next word ${nextWordId} ${selectedReason}` : null,
   ].filter(Boolean);
+  const recommendationType = adaptiveModel?.predicted_recommendation_type || null;
 
-  if (overallScore >= 80) {
+  if (recommendationType === 'continue' || (!recommendationType && overallScore >= 80)) {
     return {
       recommendation_type: 'continue',
       recommendation_message: nextWordId
@@ -254,7 +439,7 @@ function buildRecommendation({ overallScore, weakSound, nextWordId, historyCount
     };
   }
 
-  if (overallScore >= 60) {
+  if (recommendationType === 'reinforce' || (!recommendationType && overallScore >= 60)) {
     return {
       recommendation_type: 'reinforce',
       recommendation_message: repeatedCount > 0
@@ -283,7 +468,7 @@ function buildRecommendation({ overallScore, weakSound, nextWordId, historyCount
   };
 }
 
-function scorePronunciationAttemptData(data, previousResults = []) {
+function scorePrototypePronunciationAttemptData(data, previousResults = []) {
   const profile = WORD_PROFILES[data.word_id] || {};
   const sounds = normalizeSounds(data);
   const historyCounts = buildHistoryCounts(previousResults);
@@ -369,6 +554,132 @@ function scorePronunciationAttemptData(data, previousResults = []) {
     scoring_method: 'prototype_signal_rule_v1',
     ...recommendation,
   };
+}
+
+async function scorePronunciationAttemptData(data, previousResults = []) {
+  const wordId = String(data.word_id || '').toLowerCase();
+
+  if (wordId === 'cat') {
+    try {
+      const profile = WORD_PROFILES.cat;
+      const sounds = normalizeSounds({ ...data, word_id: wordId });
+      const historyCounts = buildHistoryCounts(previousResults);
+      const attemptNumber = Math.max(1, Number(data.attempt_number || 1));
+      const difficulty = Number(data.difficulty || profile.difficulty || 1);
+      const mfccDtwScore = await scoreCatPronunciationAttempt(data);
+      const phonemeScores = sounds.map((sound, index) => ({
+        text: sound.text,
+        type: sound.type,
+        position: sound.position,
+        cue: sound.cue,
+        score: clampScore(
+          mfccDtwScore.phoneme_boundary_alignment?.[index]?.score ??
+          mfccDtwScore.segment_scores[index] ??
+          mfccDtwScore.overall_score
+        ),
+        similarity_score:
+          mfccDtwScore.phoneme_boundary_alignment?.[index]?.similarity_score ?? null,
+        timing_score:
+          mfccDtwScore.phoneme_boundary_alignment?.[index]?.timing_score ?? null,
+        reference_start:
+          mfccDtwScore.phoneme_boundary_alignment?.[index]?.reference_start ?? null,
+        reference_end:
+          mfccDtwScore.phoneme_boundary_alignment?.[index]?.reference_end ?? null,
+        student_start:
+          mfccDtwScore.phoneme_boundary_alignment?.[index]?.student_start ?? null,
+        student_end:
+          mfccDtwScore.phoneme_boundary_alignment?.[index]?.student_end ?? null,
+        duration_ratio:
+          mfccDtwScore.phoneme_boundary_alignment?.[index]?.duration_ratio ?? null,
+      }));
+      const weakSound = phonemeScores
+        .slice()
+        .sort((a, b) => a.score - b.score)[0] || null;
+      const overallScore = mfccDtwScore.overall_score;
+      const nextWordDecision = chooseNextWordDetails({
+        wordId,
+        weakSound,
+        overallScore,
+        historyCounts,
+      });
+      const nextWordId = nextWordDecision.nextWordId;
+      const hesitationTime = data.hesitation_time ?? Number(
+        Math.max(0.2, Math.min(6, 0.4 + attemptNumber * 0.28 + (overallScore < 65 ? 0.8 : 0.15))).toFixed(1)
+      );
+      const adaptiveModel = buildCatAdaptiveModel({
+        pronunciationSimilarity: overallScore,
+        phonemeScores,
+        historyCounts,
+        weakSound,
+        hesitationTime,
+        attemptNumber,
+        difficulty,
+        audioQuality: mfccDtwScore.audio_quality,
+      });
+      const recommendation = buildRecommendation({
+        overallScore,
+        weakSound,
+        nextWordId,
+        historyCounts,
+        nextWordDecision,
+        hesitationTime,
+        difficulty,
+        adaptiveModel,
+      });
+
+      return {
+        mode: data.mode || 'word',
+        category_id: data.category_id || null,
+        word_id: wordId,
+        word_label: data.word_label || data.word_id,
+        overall_score: overallScore,
+        pronunciation_similarity: overallScore,
+        adaptive_score: adaptiveModel.adaptive_score,
+        confidence_score: adaptiveModel.confidence_score,
+        confidence_level: adaptiveModel.confidence_level,
+        uncertainty_reasons: adaptiveModel.uncertainty_reasons,
+        phoneme_scores: phonemeScores,
+        response_duration: Number(data.response_duration || 0) || null,
+        hesitation_time: hesitationTime,
+        weak_phoneme: weakSound?.text || null,
+        weak_position: weakSound?.position || null,
+        recurring_weak_phoneme_count: weakSound?.text ? historyCounts[weakSound.text] || 0 : 0,
+        next_word_id: nextWordId,
+        attempt_number: attemptNumber,
+        scoring_method: mfccDtwScore.scoring_method,
+        dtw_distance: mfccDtwScore.dtw_distance,
+        reference_word_id: mfccDtwScore.reference_word_id,
+        mfcc_config: mfccDtwScore.mfcc_config,
+        ...recommendation,
+        recommendation_details: {
+          ...(recommendation.recommendation_details || {}),
+          adaptive_model: adaptiveModel,
+          confidence: {
+            score: adaptiveModel.confidence_score,
+            level: adaptiveModel.confidence_level,
+            uncertainty_reasons: adaptiveModel.uncertainty_reasons,
+          },
+          scoring_evidence: {
+            method: mfccDtwScore.scoring_method,
+            dtw_distance: mfccDtwScore.dtw_distance,
+            segment_scores: mfccDtwScore.segment_scores,
+            phoneme_boundary_alignment: mfccDtwScore.phoneme_boundary_alignment,
+            audio_quality: mfccDtwScore.audio_quality,
+            mfcc_config: mfccDtwScore.mfcc_config,
+          },
+        },
+      };
+    } catch (error) {
+      if (error.code === 'AUDIO_QUALITY_FAILED') {
+        throw error;
+      }
+
+      error.code = error.code || 'ACOUSTIC_SCORING_FAILED';
+      throw error;
+    }
+  }
+
+  return scorePrototypePronunciationAttemptData(data, previousResults);
 }
 
 module.exports = {
