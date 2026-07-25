@@ -11,6 +11,11 @@ const FILLERS = /\b(um|uh|er|ah|like|you know)\b/gi;
 const MICROSERVICE_URL = process.env.PHONEME_MICROSERVICE_URL || 'http://localhost:5001';
 const MICROSERVICE_TIMEOUT_MS = 2000;
 
+// TASK-26 — fires once per process lifetime, the first time the microservice
+// turns out to be unreachable, so a missing RC1 microservice is obvious at a
+// glance in the logs instead of requiring a CSV audit to notice (see TASK-23).
+let hasWarnedMicroserviceUnreachable = false;
+
 function normalise(text) {
   return text
     .toLowerCase()
@@ -42,6 +47,10 @@ async function phonemeScore(normalisedTranscript, rawTranscript, triggers) {
     // in real data), with no way to tell why. Logging so the actual cause (can't
     // connect vs. timeout vs. a 4xx/5xx from the microservice) becomes visible.
     console.warn('[phonemeScore] RC1 microservice call failed, falling back to fuzzball:', MICROSERVICE_URL, err?.code || err?.response?.status || err?.message);
+    if (!hasWarnedMicroserviceUnreachable) {
+      hasWarnedMicroserviceUnreachable = true;
+      console.warn(`[RC1] WARNING: phoneme microservice unreachable at startup (${MICROSERVICE_URL}) — RC1 scoring will silently fall back to fuzzball for this entire session`);
+    }
     const norm3 = triggers.score3.map(normalise);
     const bestFuzzy = Math.max(...norm3.map((t) => fuzz.token_sort_ratio(normalisedTranscript, t)));
     if (bestFuzzy >= 80) return { score: 3, match_type: 'fuzzy', phoneme_error_class: null, phoneme_accuracy: null };
