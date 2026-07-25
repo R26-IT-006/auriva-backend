@@ -224,11 +224,29 @@ async function assessPhase2Speech(teacherId, studentId, wordId, {
 
   let activeSessionId = session_id ?? null;
   if (!activeSessionId) {
+    // No session yet — this is a word's first Phase 2 attempt, immediately after
+    // drag-to-line, which itself ran with no session and wrote a row with
+    // session_id=null. Without this, minting a session here and only ever looking
+    // for a row under the NEW id later would silently orphan that drag-to-line row,
+    // splitting one interaction across two disconnected ActionWordAttempt rows
+    // (confirmed against real pilot data — see STATE.md 2026-07-21). Adopt the most
+    // recent orphaned row for this (student, word) by backfilling its session_id, so
+    // the "existing" lookup below finds and merges into it instead of creating a
+    // second row.
+    const orphanRow = await ActionWordAttempt.findOne({
+      where: { student_id: studentId, word_id: wordId, session_id: null },
+      order: [['attempted_at', 'DESC']],
+    });
+
     const session = await Session.create({
       teacher_id: teacherId, student_id: studentId,
       started_at: new Date(), is_active: true,
     });
     activeSessionId = session.id;
+
+    if (orphanRow) {
+      await orphanRow.update({ session_id: activeSessionId });
+    }
   }
 
   const {

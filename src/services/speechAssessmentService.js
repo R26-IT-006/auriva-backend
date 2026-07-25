@@ -3,6 +3,7 @@
 const speech  = require('@google-cloud/speech');
 const fuzz    = require('fuzzball');
 const axios   = require('axios');
+const { transcodeToLinear16 } = require('../utils/audioTranscode');
 
 const client = new speech.SpeechClient();
 
@@ -35,7 +36,12 @@ async function phonemeScore(normalisedTranscript, rawTranscript, triggers) {
       phoneme_error_class: data.error_class,
       phoneme_accuracy: data.phoneme_accuracy,
     };
-  } catch {
+  } catch (err) {
+    // Was a silent catch — every real pilot interaction checked so far has fallen
+    // through here (phoneme_accuracy/phoneme_error_class are null 100% of the time
+    // in real data), with no way to tell why. Logging so the actual cause (can't
+    // connect vs. timeout vs. a 4xx/5xx from the microservice) becomes visible.
+    console.warn('[phonemeScore] RC1 microservice call failed, falling back to fuzzball:', MICROSERVICE_URL, err?.code || err?.response?.status || err?.message);
     const norm3 = triggers.score3.map(normalise);
     const bestFuzzy = Math.max(...norm3.map((t) => fuzz.token_sort_ratio(normalisedTranscript, t)));
     if (bestFuzzy >= 80) return { score: 3, match_type: 'fuzzy', phoneme_error_class: null, phoneme_accuracy: null };
@@ -50,17 +56,23 @@ async function phonemeScore(normalisedTranscript, rawTranscript, triggers) {
 }
 
 async function assessSpeech(audioBase64, mimeType, triggers) {
-  const encodingMap = {
-    'audio/wav':  'LINEAR16',
-    'audio/wave': 'LINEAR16',
-    'audio/ogg':  'OGG_OPUS',
-    'audio/webm': 'WEBM_OPUS',
-    'audio/mp4':  'MP3',
-    'audio/m4a':  'MP3',
-    'audio/mpeg': 'MP3',
-  };
-  const encoding = encodingMap[mimeType] ?? 'LINEAR16';
-  const audioBytes = Buffer.from(audioBase64, 'base64');
+  const audioBytesRaw = Buffer.from(audioBase64, 'base64');
+
+  const needsTranscode = ['audio/mp4', 'audio/m4a', 'audio/mpeg'].includes(mimeType);
+  let audioBytes = audioBytesRaw;
+  let encoding   = 'LINEAR16';
+
+  if (needsTranscode) {
+    audioBytes = await transcodeToLinear16(audioBytesRaw, 'mp4');
+  } else {
+    const encodingMap = {
+      'audio/wav':  'LINEAR16',
+      'audio/wave': 'LINEAR16',
+      'audio/ogg':  'OGG_OPUS',
+      'audio/webm': 'WEBM_OPUS',
+    };
+    encoding = encodingMap[mimeType] ?? 'LINEAR16';
+  }
 
   const [response] = await client.recognize({
     audio: { content: audioBytes.toString('base64') },

@@ -27,6 +27,12 @@ router.put('/student/:studentId/level2/questionnaire', [
     .withMessage(`favourite_activities items must be one of: ${VALID_ACTIVITIES.join(', ')}`),
 ], ctrl.saveQuestionnaire);
 
+// ── Portrait (self-portrait drawing, TASK-17 Fix 2) ──────────────────────
+
+router.patch('/level2/questionnaire/:studentId/portrait', [
+  body('portrait_strokes').optional({ nullable: true }).isObject().withMessage('portrait_strokes must be an object'),
+], ctrl.savePortraitStrokes);
+
 // ── Session management ────────────────────────────────────────────────────
 
 router.get('/student/:studentId/level2/progress', ctrl.getProgress);

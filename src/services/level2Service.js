@@ -185,8 +185,26 @@ function detectParagraphElements(transcript, q) {
 
 // ── Questionnaire ─────────────────────────────────────────────────────────
 
+const MAX_PORTRAIT_STROKES = 500;
+const MAX_PORTRAIT_BYTES   = 1024 * 1024; // ~1 MB
+
+/** Reject unbounded client data on the optional portrait_strokes field. */
+function validatePortraitStrokes(portraitStrokes) {
+  if (portraitStrokes === undefined || portraitStrokes === null) return;
+
+  if (!Array.isArray(portraitStrokes.strokes) || portraitStrokes.strokes.length > MAX_PORTRAIT_STROKES) {
+    throw new ApiError(422, `portrait_strokes.strokes must not exceed ${MAX_PORTRAIT_STROKES} strokes`);
+  }
+
+  const byteLength = Buffer.byteLength(JSON.stringify(portraitStrokes), 'utf8');
+  if (byteLength > MAX_PORTRAIT_BYTES) {
+    throw new ApiError(422, 'portrait_strokes payload exceeds the 1 MB limit');
+  }
+}
+
 async function saveQuestionnaire(teacherId, studentId, data) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
+  validatePortraitStrokes(data.portrait_strokes);
 
   const [record, created] = await SentenceQuestionnaire.findOrCreate({
     where: { student_id: studentId },
@@ -206,6 +224,25 @@ async function getQuestionnaire(teacherId, studentId) {
   const q = await SentenceQuestionnaire.findOne({ where: { student_id: studentId } });
   if (!q) throw new ApiError(404, 'Questionnaire not found. Please complete the questionnaire first.');
   return q;
+}
+
+/**
+ * Persist ONLY the portrait_strokes column (TASK-17 Fix 2). Creates the
+ * questionnaire row if none exists yet — a portrait must be savable before
+ * the demographic questionnaire is filled in — leaving every other field at
+ * its model default/null until that questionnaire is completed separately.
+ */
+async function savePortraitStrokes(teacherId, studentId, portraitStrokes) {
+  await assertStudentBelongsToTeacher(teacherId, studentId);
+  validatePortraitStrokes(portraitStrokes);
+
+  const [record] = await SentenceQuestionnaire.findOrCreate({
+    where:    { student_id: studentId },
+    defaults: { student_id: studentId, teacher_id: teacherId, portrait_strokes: portraitStrokes },
+  });
+
+  await record.update({ portrait_strokes: portraitStrokes, updated_at: new Date() });
+  return record;
 }
 
 // ── Session start ─────────────────────────────────────────────────────────
@@ -685,6 +722,7 @@ async function getProgress(teacherId, studentId) {
 module.exports = {
   saveQuestionnaire,
   getQuestionnaire,
+  savePortraitStrokes,
   startSession,
   recordStep3,
   assessStep4,

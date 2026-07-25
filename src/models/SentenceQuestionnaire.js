@@ -18,24 +18,30 @@ const SentenceQuestionnaire = sequelize.define('SentenceQuestionnaire', {
     allowNull: false,
   },
   child_first_name: {
+    // nullable (TASK-17 Fix 2): a portrait-only row can exist before the
+    // demographic questionnaire is filled in.
     type: DataTypes.STRING(100),
-    allowNull: false,
+    allowNull: true,
   },
   child_age: {
     type: DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
   },
   child_hometown: {
     type: DataTypes.STRING(100),
-    allowNull: false,
+    allowNull: true,
   },
   child_gender: {
     type: DataTypes.ENUM('boy', 'girl'),
-    allowNull: false,
+    allowNull: true,
   },
   favourite_activities: {
     type: DataTypes.JSON,
-    allowNull: false,
+    allowNull: true,
+  },
+  portrait_strokes: {
+    type: DataTypes.JSON,
+    allowNull: true,
   },
   created_at: {
     type: DataTypes.DATE,

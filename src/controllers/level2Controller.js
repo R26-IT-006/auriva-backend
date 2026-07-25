@@ -26,6 +26,16 @@ async function getQuestionnaire(req, res) {
   res.json({ data: q });
 }
 
+async function savePortraitStrokes(req, res) {
+  validate(req);
+  const q = await level2Service.savePortraitStrokes(
+    req.user.id,
+    req.params.studentId,
+    req.body.portrait_strokes ?? null
+  );
+  res.status(200).json({ message: 'Portrait saved', data: q });
+}
+
 // ── Session ───────────────────────────────────────────────────────────────
 
 async function startSession(req, res) {
@@ -159,6 +169,7 @@ async function recordNonVerbalWordMatch(req, res) {
 module.exports = {
   saveQuestionnaire,
   getQuestionnaire,
+  savePortraitStrokes,
   startSession,
   completeSession,
   getProgress,
