@@ -5,6 +5,7 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const { promisify } = require('util');
+const FFT = require('fft.js');
 
 const { WORD_PROFILES } = require('./wordProfiles');
 
@@ -310,18 +311,21 @@ function createMelFilterBank() {
 
 const MEL_FILTER_BANK = createMelFilterBank();
 
+const fftInstance = new FFT(FRAME_SIZE);
+const fftOutput = fftInstance.createComplexArray();
+const fftInput = new Array(FRAME_SIZE).fill(0);
+
 function powerSpectrum(frame) {
   const bins = Math.floor(FRAME_SIZE / 2) + 1;
   const spectrum = new Float32Array(bins);
 
+  for (let i = 0; i < FRAME_SIZE; i += 1) fftInput[i] = frame[i];
+  fftInstance.realTransform(fftOutput, fftInput);
+  fftInstance.completeSpectrum(fftOutput);
+
   for (let k = 0; k < bins; k += 1) {
-    let real = 0;
-    let imaginary = 0;
-    for (let n = 0; n < FRAME_SIZE; n += 1) {
-      const angle = (2 * Math.PI * k * n) / FRAME_SIZE;
-      real += frame[n] * Math.cos(angle);
-      imaginary -= frame[n] * Math.sin(angle);
-    }
+    const real = fftOutput[2 * k];
+    const imaginary = fftOutput[2 * k + 1];
     spectrum[k] = (real * real + imaginary * imaginary) / FRAME_SIZE;
   }
 
@@ -341,7 +345,27 @@ function applyDct(logEnergies) {
   return coefficients;
 }
 
-function cepstralMeanNormalize(frames) {
+const DELTA_WINDOW = 2;
+const DELTA_DENOMINATOR = 2 * Array.from({ length: DELTA_WINDOW }, (_, i) => (i + 1) ** 2)
+  .reduce((total, value) => total + value, 0);
+
+function computeDeltaCoefficients(frames) {
+  if (!frames.length) return frames;
+
+  return frames.map((_, frameIndex) => {
+    const delta = new Array(frames[0].length).fill(0);
+    for (let n = 1; n <= DELTA_WINDOW; n += 1) {
+      const next = frames[Math.min(frames.length - 1, frameIndex + n)];
+      const previous = frames[Math.max(0, frameIndex - n)];
+      for (let c = 0; c < delta.length; c += 1) {
+        delta[c] += (n * (next[c] - previous[c])) / DELTA_DENOMINATOR;
+      }
+    }
+    return delta;
+  });
+}
+
+function cepstralMeanVarianceNormalize(frames) {
   if (!frames.length) return frames;
 
   const means = new Array(MFCC_COUNT).fill(0);
@@ -352,7 +376,19 @@ function cepstralMeanNormalize(frames) {
   });
   for (let i = 0; i < means.length; i += 1) means[i] /= frames.length;
 
-  return frames.map((frame) => frame.map((value, index) => value - means[index]));
+  const variances = new Array(MFCC_COUNT).fill(0);
+  frames.forEach((frame) => {
+    frame.forEach((value, index) => {
+      variances[index] += (value - means[index]) ** 2;
+    });
+  });
+  const deviations = variances.map((variance) =>
+    Math.max(1e-4, Math.sqrt(variance / frames.length))
+  );
+
+  return frames.map((frame) =>
+    frame.map((value, index) => (value - means[index]) / deviations[index])
+  );
 }
 
 function extractMfccAnalysis(samples) {
@@ -385,10 +421,17 @@ function extractMfccAnalysis(samples) {
     });
   }
 
-  const normalizedFrames = cepstralMeanNormalize(analysis.map((entry) => entry.mfcc));
+  const staticFrames = cepstralMeanVarianceNormalize(analysis.map((entry) => entry.mfcc));
+  const deltaFrames = computeDeltaCoefficients(staticFrames);
+  const deltaDeltaFrames = computeDeltaCoefficients(deltaFrames);
+
   return analysis.map((entry, index) => ({
     ...entry,
-    mfcc: normalizedFrames[index],
+    mfcc: [
+      ...staticFrames[index],
+      ...deltaFrames[index],
+      ...deltaDeltaFrames[index],
+    ],
   }));
 }
 
@@ -454,8 +497,15 @@ function calculateDtw(referenceFrames, attemptFrames) {
   };
 }
 
+// Provisional constants for CMVN-normalized 39-dim features; Phase 4
+// calibration refits both from labeled correct/incorrect attempts.
+const DISTANCE_SCORE_MIDPOINT = 0.85;
+const DISTANCE_SCORE_SLOPE = 0.18;
+
 function distanceToScore(distance) {
-  return clampScore(100 * Math.exp(-distance / 18));
+  return clampScore(
+    100 / (1 + Math.exp((distance - DISTANCE_SCORE_MIDPOINT) / DISTANCE_SCORE_SLOPE))
+  );
 }
 
 function getBoundaryPath({ boundary, path }) {
@@ -729,6 +779,10 @@ async function scoreWordPronunciationAttempt(data) {
       hop_size: HOP_SIZE,
       mfcc_count: MFCC_COUNT,
       mel_filter_count: MEL_FILTER_COUNT,
+      features: 'mfcc+delta+delta2',
+      normalization: 'cmvn',
+      feature_dimension: MFCC_COUNT * 3,
+      delta_window: DELTA_WINDOW,
       reference_frames: referenceFrames.length,
       attempt_frames: attemptFrames.length,
     },
