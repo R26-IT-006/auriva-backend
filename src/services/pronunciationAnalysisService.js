@@ -6,6 +6,8 @@ const os = require('os');
 const path = require('path');
 const { promisify } = require('util');
 
+const { WORD_PROFILES } = require('./wordProfiles');
+
 const execFileAsync = promisify(execFile);
 
 const SAMPLE_RATE = 16000;
@@ -22,13 +24,12 @@ const MIN_PEAK_AMPLITUDE = 0.015;
 const MIN_VOICED_RMS = 0.012;
 const MIN_SNR_DB = 8;
 const MAX_CLIPPING_RATIO = 0.04;
-const CAT_REFERENCE_AUDIO = path.resolve(
+const REFERENCE_AUDIO_DIR = path.resolve(
   __dirname,
-  '../../../auriva-frontend/assets/pronounciation-audios/cat.mp3'
+  '../../../auriva-frontend/assets/pronounciation-audios'
 );
 
-let cachedCatReferenceFrames = null;
-let cachedCatReferenceAnalysis = null;
+const referenceAnalysisCache = new Map();
 
 class AudioQualityError extends Error {
   constructor(message, details = {}) {
@@ -37,6 +38,23 @@ class AudioQualityError extends Error {
     this.code = 'AUDIO_QUALITY_FAILED';
     this.details = details;
   }
+}
+
+class ReferenceAudioError extends Error {
+  constructor(message, wordId) {
+    super(message);
+    this.name = 'ReferenceAudioError';
+    this.code = 'REFERENCE_AUDIO_NOT_FOUND';
+    this.wordId = wordId;
+  }
+}
+
+function getReferenceAudioPath(wordId) {
+  const normalized = String(wordId || '').toLowerCase().trim();
+  if (!/^[a-z]+$/.test(normalized)) {
+    throw new ReferenceAudioError(`Invalid word id "${wordId}" for reference audio lookup`, wordId);
+  }
+  return path.join(REFERENCE_AUDIO_DIR, `${normalized}.mp3`);
 }
 
 function clampScore(value) {
@@ -474,56 +492,104 @@ function framesToBoundary({ phoneme, frameStart, frameEnd }) {
   };
 }
 
-function findCatVowelBounds(referenceAnalysis) {
-  const frameCount = referenceAnalysis.length;
-  const rmsValues = referenceAnalysis.map((entry) => entry.rms);
-  const maxRms = Math.max(...rmsValues);
-  const peakIndex = rmsValues.indexOf(maxRms);
-  const threshold = maxRms * 0.38;
-  let vowelStart = peakIndex;
-  let vowelEnd = peakIndex + 1;
-
-  while (vowelStart > 1 && rmsValues[vowelStart - 1] >= threshold) {
-    vowelStart -= 1;
-  }
-  while (vowelEnd < frameCount - 1 && rmsValues[vowelEnd] >= threshold) {
-    vowelEnd += 1;
-  }
-
-  const minVowelFrames = Math.max(3, Math.round(frameCount * 0.22));
-  if (vowelEnd - vowelStart < minVowelFrames) {
-    const padding = Math.ceil((minVowelFrames - (vowelEnd - vowelStart)) / 2);
-    vowelStart = Math.max(1, vowelStart - padding);
-    vowelEnd = Math.min(frameCount - 1, vowelEnd + padding);
-  }
-
-  return {
-    vowelStart: Math.max(1, Math.min(vowelStart, frameCount - 3)),
-    vowelEnd: Math.max(3, Math.min(vowelEnd, frameCount - 1)),
-  };
+function resolveTargetPhonemes(wordId, data = {}) {
+  const provided = Array.isArray(data.target_phonemes)
+    ? data.target_phonemes
+      .map((sound) => (typeof sound === 'string' ? sound : sound?.text))
+      .filter(Boolean)
+    : [];
+  if (provided.length) return provided;
+  return WORD_PROFILES[wordId]?.sounds || [];
 }
 
-function detectCatReferenceBoundaries(referenceAnalysis) {
-  const frameCount = referenceAnalysis.length;
-  const { vowelStart, vowelEnd } = findCatVowelBounds(referenceAnalysis);
+function smoothValues(values, radius = 2) {
+  return values.map((_, index) => {
+    const start = Math.max(0, index - radius);
+    const end = Math.min(values.length - 1, index + radius);
+    let total = 0;
+    for (let i = start; i <= end; i += 1) total += values[i];
+    return total / (end - start + 1);
+  });
+}
 
-  return [
+function normalizeValues(values) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  if (range <= 0) return values.map(() => 0);
+  return values.map((value) => (value - min) / range);
+}
+
+function getBoundaryStrengths(referenceAnalysis) {
+  const flux = referenceAnalysis.map((entry, index) =>
+    index === 0 ? 0 : frameDistance(entry.mfcc, referenceAnalysis[index - 1].mfcc)
+  );
+  const smoothedFlux = normalizeValues(smoothValues(flux));
+  const smoothedEnergy = normalizeValues(smoothValues(referenceAnalysis.map((entry) => entry.rms)));
+
+  // Phoneme transitions show high spectral change (flux peak) and low energy (valley).
+  return referenceAnalysis.map(
+    (_, index) => smoothedFlux[index] * 0.65 + (1 - smoothedEnergy[index]) * 0.35
+  );
+}
+
+function proportionalCuts(frameCount, segmentCount) {
+  return Array.from({ length: segmentCount - 1 }, (_, index) =>
+    Math.round(((index + 1) * frameCount) / segmentCount)
+  );
+}
+
+function detectReferenceBoundaries(referenceAnalysis, phonemes) {
+  const frameCount = referenceAnalysis.length;
+  const segmentCount = phonemes.length;
+  if (!segmentCount || frameCount < 3) return [];
+
+  if (segmentCount === 1) {
+    return [framesToBoundary({ phoneme: phonemes[0], frameStart: 0, frameEnd: frameCount })];
+  }
+
+  const minSegmentFrames = Math.max(2, Math.floor(frameCount / (segmentCount * 3)));
+  const cuts = frameCount < segmentCount * 2
+    ? proportionalCuts(frameCount, segmentCount)
+    : (() => {
+      const strengths = getBoundaryStrengths(referenceAnalysis);
+      const searchRadius = Math.max(2, Math.round(frameCount * 0.12));
+      const snapped = [];
+      let previousCut = 0;
+
+      for (let k = 1; k < segmentCount; k += 1) {
+        const target = Math.round((k * frameCount) / segmentCount);
+        const minCut = previousCut + minSegmentFrames;
+        const maxCut = frameCount - (segmentCount - k) * minSegmentFrames;
+        const searchStart = Math.max(minCut, target - searchRadius);
+        const searchEnd = Math.min(maxCut, target + searchRadius);
+        let cut = Math.max(minCut, Math.min(maxCut, target));
+
+        if (searchStart <= searchEnd) {
+          let bestStrength = -Infinity;
+          for (let index = searchStart; index <= searchEnd; index += 1) {
+            if (strengths[index] > bestStrength) {
+              bestStrength = strengths[index];
+              cut = index;
+            }
+          }
+        }
+
+        snapped.push(cut);
+        previousCut = cut;
+      }
+
+      return snapped;
+    })();
+
+  const edges = [0, ...cuts, frameCount];
+  return phonemes.map((phoneme, index) =>
     framesToBoundary({
-      phoneme: 'k',
-      frameStart: 0,
-      frameEnd: vowelStart,
-    }),
-    framesToBoundary({
-      phoneme: 'æ',
-      frameStart: vowelStart,
-      frameEnd: vowelEnd,
-    }),
-    framesToBoundary({
-      phoneme: 't',
-      frameStart: vowelEnd,
-      frameEnd: frameCount,
-    }),
-  ];
+      phoneme,
+      frameStart: edges[index],
+      frameEnd: Math.max(edges[index] + 1, edges[index + 1]),
+    })
+  );
 }
 
 function mapBoundaryToAttempt({ boundary, path, attemptFrameCount }) {
@@ -557,10 +623,10 @@ function mapBoundaryToAttempt({ boundary, path, attemptFrameCount }) {
   };
 }
 
-function buildCatPhonemeBoundaryAlignment({ referenceAnalysis, attemptAnalysis, path }) {
+function buildPhonemeBoundaryAlignment({ phonemes, referenceAnalysis, attemptAnalysis, path }) {
   const referenceFrames = referenceAnalysis.map((entry) => entry.mfcc);
   const attemptFrames = attemptAnalysis.map((entry) => entry.mfcc);
-  const referenceBoundaries = detectCatReferenceBoundaries(referenceAnalysis);
+  const referenceBoundaries = detectReferenceBoundaries(referenceAnalysis, phonemes);
 
   return referenceBoundaries.map((boundary) => {
     const studentBoundary = mapBoundaryToAttempt({
@@ -594,27 +660,37 @@ function buildCatPhonemeBoundaryAlignment({ referenceAnalysis, attemptAnalysis, 
   });
 }
 
-async function getCatReferenceAnalysis() {
-  if (cachedCatReferenceAnalysis) return cachedCatReferenceAnalysis;
-  const samples = await decodeAudioFileToPcm(CAT_REFERENCE_AUDIO);
-  cachedCatReferenceAnalysis = extractMfccAnalysis(samples);
-  cachedCatReferenceFrames = cachedCatReferenceAnalysis.map((entry) => entry.mfcc);
-  return cachedCatReferenceAnalysis;
+async function getReferenceAnalysis(wordId) {
+  const normalized = String(wordId || '').toLowerCase().trim();
+  if (referenceAnalysisCache.has(normalized)) {
+    return referenceAnalysisCache.get(normalized);
+  }
+
+  const referencePath = getReferenceAudioPath(normalized);
+  try {
+    await fs.access(referencePath);
+  } catch {
+    throw new ReferenceAudioError(
+      `No reference audio found for word "${normalized}"`,
+      normalized
+    );
+  }
+
+  const samples = await decodeAudioFileToPcm(referencePath);
+  const analysis = extractMfccAnalysis(samples);
+  referenceAnalysisCache.set(normalized, analysis);
+  return analysis;
 }
 
-async function getCatReferenceFrames() {
-  if (cachedCatReferenceFrames) return cachedCatReferenceFrames;
-  const analysis = await getCatReferenceAnalysis();
-  return analysis.map((entry) => entry.mfcc);
-}
-
-async function scoreCatPronunciationAttempt(data) {
+async function scoreWordPronunciationAttempt(data) {
   if (!data.raw_audio_base64) {
     throw new Error('MFCC-DTW scoring requires raw_audio_base64');
   }
 
+  const wordId = String(data.word_id || '').toLowerCase().trim();
+  const phonemes = resolveTargetPhonemes(wordId, data);
   const [referenceAnalysis, attemptSamples] = await Promise.all([
-    getCatReferenceAnalysis(),
+    getReferenceAnalysis(wordId),
     decodeBase64AudioToPcm(data.raw_audio_base64, data.raw_audio_mime_type),
   ]);
   const quality = analyzeAudioQuality(attemptSamples);
@@ -631,7 +707,8 @@ async function scoreCatPronunciationAttempt(data) {
   }
 
   const dtw = calculateDtw(referenceFrames, attemptFrames);
-  const phonemeAlignment = buildCatPhonemeBoundaryAlignment({
+  const phonemeAlignment = buildPhonemeBoundaryAlignment({
+    phonemes,
     referenceAnalysis,
     attemptAnalysis,
     path: dtw.path,
@@ -645,7 +722,7 @@ async function scoreCatPronunciationAttempt(data) {
     phoneme_boundary_alignment: phonemeAlignment,
     audio_quality: quality,
     scoring_method: 'mfcc_dtw_v1',
-    reference_word_id: 'cat',
+    reference_word_id: wordId,
     mfcc_config: {
       sample_rate: SAMPLE_RATE,
       frame_size: FRAME_SIZE,
@@ -659,10 +736,12 @@ async function scoreCatPronunciationAttempt(data) {
 }
 
 module.exports = {
-  scoreCatPronunciationAttempt,
+  scoreWordPronunciationAttempt,
+  getReferenceAnalysis,
   extractMfccFrames,
   extractMfccAnalysis,
   calculateDtw,
   analyzeAudioQuality,
   AudioQualityError,
+  ReferenceAudioError,
 };

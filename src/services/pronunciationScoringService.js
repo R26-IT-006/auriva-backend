@@ -1,8 +1,9 @@
 'use strict';
 
 const {
-  scoreCatPronunciationAttempt,
-} = require('./mfccDtwPronunciationService');
+  scoreWordPronunciationAttempt,
+} = require('./pronunciationAnalysisService');
+const { WORD_PROFILES } = require('./wordProfiles');
 
 const PHONEME_CUES = {
   'æ': 'Open the mouth wide for the short /a/ sound.',
@@ -32,43 +33,6 @@ const PHONEME_CUES = {
   'ʃ': 'Round the lips slightly and push quiet air.',
   'tʃ': 'Start with a tongue tap, then release air.',
   'dʒ': 'Start with a tongue tap, then release with voice.',
-};
-
-const WORD_PROFILES = {
-  cat: { difficulty: 1, sounds: ['k', 'æ', 't'], easierWords: ['ant'], relatedWords: ['kangaroo', 'crab'] },
-  dog: { difficulty: 1, sounds: ['d', 'ɒ', 'g'], easierWords: ['deer'], relatedWords: ['goose'] },
-  fish: { difficulty: 2, sounds: ['f', 'ɪ', 'ʃ'], easierWords: ['fox'], relatedWords: ['chick', 'jellyfish'] },
-  bird: { difficulty: 2, sounds: ['b', 'ɜː', 'd'], easierWords: ['book'], relatedWords: ['buffalo', 'butterfly'] },
-  worm: { difficulty: 2, sounds: ['w', 'ɜː', 'm'], relatedWords: ['whale', 'walk'] },
-  whale: { difficulty: 2, sounds: ['w', 'eɪ', 'l'], easierWords: ['worm'], relatedWords: ['walk'] },
-  turtle: { difficulty: 3, sounds: ['t', 'ɜː', 't', 'əl'], easierWords: ['cat', 'ant'], relatedWords: ['tiger'] },
-  tiger: { difficulty: 3, sounds: ['t', 'aɪ', 'gə'], easierWords: ['dog'], relatedWords: ['turtle'] },
-  snail: { difficulty: 3, sounds: ['s', 'n', 'eɪ', 'l'], easierWords: ['goose'], relatedWords: ['desk'] },
-  pigeon: { difficulty: 3, sounds: ['p', 'ɪ', 'dʒ', 'ən'], easierWords: ['hippo'], relatedWords: ['penguin'] },
-  penguin: { difficulty: 4, sounds: ['p', 'e', 'ŋ', 'gwɪn'], easierWords: ['pigeon'], relatedWords: ['mango'] },
-  mosquito: { difficulty: 5, sounds: ['m', 'ɒ', 'sk', 'iː', 'təʊ'], easierWords: ['worm'], relatedWords: ['desk'] },
-  leopard: { difficulty: 3, sounds: ['l', 'e', 'p', 'əd'], easierWords: ['apple'], relatedWords: ['hippo'] },
-  kangaroo: { difficulty: 5, sounds: ['k', 'æ', 'ŋg', 'ə', 'ruː'], easierWords: ['cat'], relatedWords: ['crab'] },
-  jellyfish: { difficulty: 5, sounds: ['dʒ', 'e', 'l', 'i', 'f', 'ɪʃ'], easierWords: ['fish'], relatedWords: ['jump'] },
-  horse: { difficulty: 2, sounds: ['h', 'ɔː', 's'], easierWords: ['goose'], relatedWords: ['hippo'] },
-  hippo: { difficulty: 3, sounds: ['h', 'ɪ', 'p', 'əʊ'], easierWords: ['horse'], relatedWords: ['pigeon'] },
-  goose: { difficulty: 2, sounds: ['g', 'uː', 's'], easierWords: ['dog'], relatedWords: ['horse'] },
-  fox: { difficulty: 2, sounds: ['f', 'ɒ', 'ks'], easierWords: ['fish'], relatedWords: ['book'] },
-  elephant: { difficulty: 5, sounds: ['e', 'l', 'ə', 'f', 'ənt'], easierWords: ['eagle', 'ant'], relatedWords: ['buffalo'] },
-  eagle: { difficulty: 3, sounds: ['iː', 'g', 'əl'], easierWords: ['goose'], relatedWords: ['deer'] },
-  deer: { difficulty: 1, sounds: ['d', 'ɪə'], easierWords: ['dog'], relatedWords: ['desk'] },
-  crab: { difficulty: 3, sounds: ['k', 'r', 'æ', 'b'], easierWords: ['cat'], relatedWords: ['kangaroo'] },
-  cow: { difficulty: 1, sounds: ['k', 'aʊ'], easierWords: ['cat'], relatedWords: ['crab'] },
-  chick: { difficulty: 2, sounds: ['tʃ', 'ɪ', 'k'], easierWords: ['cat'], relatedWords: ['fish'] },
-  butterfly: { difficulty: 5, sounds: ['b', 'ʌ', 't', 'ə', 'flaɪ'], easierWords: ['bird', 'buffalo'], relatedWords: ['buffalo'] },
-  buffalo: { difficulty: 5, sounds: ['b', 'ʌ', 'f', 'ə', 'ləʊ'], easierWords: ['bird'], relatedWords: ['butterfly'] },
-  ant: { difficulty: 1, sounds: ['æ', 'n', 't'], easierWords: ['cat'], relatedWords: ['elephant'] },
-  book: { difficulty: 1, sounds: ['b', 'ʊ', 'k'], easierWords: ['bird'], relatedWords: ['desk'] },
-  desk: { difficulty: 2, sounds: ['d', 'e', 'sk'], easierWords: ['deer'], relatedWords: ['snail'] },
-  apple: { difficulty: 2, sounds: ['a', 'p', 'əl'], easierWords: ['ant'], relatedWords: ['leopard'] },
-  mango: { difficulty: 3, sounds: ['m', 'æ', 'ŋgəʊ'], easierWords: ['worm'], relatedWords: ['penguin'] },
-  walk: { difficulty: 2, sounds: ['w', 'ɔː', 'k'], easierWords: ['worm'], relatedWords: ['whale'] },
-  jump: { difficulty: 3, sounds: ['dʒ', 'ʌ', 'mp'], easierWords: ['jellyfish'], relatedWords: ['butterfly'] },
 };
 
 function clampScore(value) {
@@ -122,7 +86,8 @@ function getAudioQualityScore(audioQuality = {}) {
   );
 }
 
-function buildCatAdaptiveModel({
+function buildAdaptiveModel({
+  wordId,
   pronunciationSimilarity,
   phonemeScores,
   historyCounts,
@@ -230,8 +195,8 @@ function buildCatAdaptiveModel({
   ].filter(Boolean);
 
   return {
-    version: 'cat_adaptive_linear_softmax_v1',
-    word_id: 'cat',
+    version: 'adaptive_linear_softmax_v1',
+    word_id: wordId,
     features,
     weights,
     adaptive_score: adaptiveScore,
@@ -556,130 +521,140 @@ function scorePrototypePronunciationAttemptData(data, previousResults = []) {
   };
 }
 
+async function scoreAcousticPronunciationAttemptData(data, previousResults, wordId) {
+  const profile = WORD_PROFILES[wordId] || {};
+  const sounds = normalizeSounds({ ...data, word_id: wordId });
+  const historyCounts = buildHistoryCounts(previousResults);
+  const attemptNumber = Math.max(1, Number(data.attempt_number || 1));
+  const difficulty = Number(data.difficulty || profile.difficulty || 2);
+  const mfccDtwScore = await scoreWordPronunciationAttempt({ ...data, word_id: wordId });
+  const phonemeScores = sounds.map((sound, index) => ({
+    text: sound.text,
+    type: sound.type,
+    position: sound.position,
+    cue: sound.cue,
+    score: clampScore(
+      mfccDtwScore.phoneme_boundary_alignment?.[index]?.score ??
+      mfccDtwScore.segment_scores[index] ??
+      mfccDtwScore.overall_score
+    ),
+    similarity_score:
+      mfccDtwScore.phoneme_boundary_alignment?.[index]?.similarity_score ?? null,
+    timing_score:
+      mfccDtwScore.phoneme_boundary_alignment?.[index]?.timing_score ?? null,
+    reference_start:
+      mfccDtwScore.phoneme_boundary_alignment?.[index]?.reference_start ?? null,
+    reference_end:
+      mfccDtwScore.phoneme_boundary_alignment?.[index]?.reference_end ?? null,
+    student_start:
+      mfccDtwScore.phoneme_boundary_alignment?.[index]?.student_start ?? null,
+    student_end:
+      mfccDtwScore.phoneme_boundary_alignment?.[index]?.student_end ?? null,
+    duration_ratio:
+      mfccDtwScore.phoneme_boundary_alignment?.[index]?.duration_ratio ?? null,
+  }));
+  const weakSound = phonemeScores
+    .slice()
+    .sort((a, b) => a.score - b.score)[0] || null;
+  const overallScore = mfccDtwScore.overall_score;
+  const nextWordDecision = chooseNextWordDetails({
+    wordId,
+    weakSound,
+    overallScore,
+    historyCounts,
+  });
+  const nextWordId = nextWordDecision.nextWordId;
+  const hesitationTime = data.hesitation_time ?? Number(
+    Math.max(0.2, Math.min(6, 0.4 + attemptNumber * 0.28 + (overallScore < 65 ? 0.8 : 0.15))).toFixed(1)
+  );
+  const adaptiveModel = buildAdaptiveModel({
+    wordId,
+    pronunciationSimilarity: overallScore,
+    phonemeScores,
+    historyCounts,
+    weakSound,
+    hesitationTime,
+    attemptNumber,
+    difficulty,
+    audioQuality: mfccDtwScore.audio_quality,
+  });
+  const recommendation = buildRecommendation({
+    overallScore,
+    weakSound,
+    nextWordId,
+    historyCounts,
+    nextWordDecision,
+    hesitationTime,
+    difficulty,
+    adaptiveModel,
+  });
+
+  return {
+    mode: data.mode || 'word',
+    category_id: data.category_id || null,
+    word_id: wordId,
+    word_label: data.word_label || data.word_id,
+    overall_score: overallScore,
+    pronunciation_similarity: overallScore,
+    adaptive_score: adaptiveModel.adaptive_score,
+    confidence_score: adaptiveModel.confidence_score,
+    confidence_level: adaptiveModel.confidence_level,
+    uncertainty_reasons: adaptiveModel.uncertainty_reasons,
+    phoneme_scores: phonemeScores,
+    response_duration: Number(data.response_duration || 0) || null,
+    hesitation_time: hesitationTime,
+    weak_phoneme: weakSound?.text || null,
+    weak_position: weakSound?.position || null,
+    recurring_weak_phoneme_count: weakSound?.text ? historyCounts[weakSound.text] || 0 : 0,
+    next_word_id: nextWordId,
+    attempt_number: attemptNumber,
+    scoring_method: mfccDtwScore.scoring_method,
+    dtw_distance: mfccDtwScore.dtw_distance,
+    reference_word_id: mfccDtwScore.reference_word_id,
+    mfcc_config: mfccDtwScore.mfcc_config,
+    ...recommendation,
+    recommendation_details: {
+      ...(recommendation.recommendation_details || {}),
+      adaptive_model: adaptiveModel,
+      confidence: {
+        score: adaptiveModel.confidence_score,
+        level: adaptiveModel.confidence_level,
+        uncertainty_reasons: adaptiveModel.uncertainty_reasons,
+      },
+      scoring_evidence: {
+        method: mfccDtwScore.scoring_method,
+        dtw_distance: mfccDtwScore.dtw_distance,
+        segment_scores: mfccDtwScore.segment_scores,
+        phoneme_boundary_alignment: mfccDtwScore.phoneme_boundary_alignment,
+        audio_quality: mfccDtwScore.audio_quality,
+        mfcc_config: mfccDtwScore.mfcc_config,
+      },
+    },
+  };
+}
+
 async function scorePronunciationAttemptData(data, previousResults = []) {
   const wordId = String(data.word_id || '').toLowerCase();
 
-  if (wordId === 'cat') {
-    try {
-      const profile = WORD_PROFILES.cat;
-      const sounds = normalizeSounds({ ...data, word_id: wordId });
-      const historyCounts = buildHistoryCounts(previousResults);
-      const attemptNumber = Math.max(1, Number(data.attempt_number || 1));
-      const difficulty = Number(data.difficulty || profile.difficulty || 1);
-      const mfccDtwScore = await scoreCatPronunciationAttempt(data);
-      const phonemeScores = sounds.map((sound, index) => ({
-        text: sound.text,
-        type: sound.type,
-        position: sound.position,
-        cue: sound.cue,
-        score: clampScore(
-          mfccDtwScore.phoneme_boundary_alignment?.[index]?.score ??
-          mfccDtwScore.segment_scores[index] ??
-          mfccDtwScore.overall_score
-        ),
-        similarity_score:
-          mfccDtwScore.phoneme_boundary_alignment?.[index]?.similarity_score ?? null,
-        timing_score:
-          mfccDtwScore.phoneme_boundary_alignment?.[index]?.timing_score ?? null,
-        reference_start:
-          mfccDtwScore.phoneme_boundary_alignment?.[index]?.reference_start ?? null,
-        reference_end:
-          mfccDtwScore.phoneme_boundary_alignment?.[index]?.reference_end ?? null,
-        student_start:
-          mfccDtwScore.phoneme_boundary_alignment?.[index]?.student_start ?? null,
-        student_end:
-          mfccDtwScore.phoneme_boundary_alignment?.[index]?.student_end ?? null,
-        duration_ratio:
-          mfccDtwScore.phoneme_boundary_alignment?.[index]?.duration_ratio ?? null,
-      }));
-      const weakSound = phonemeScores
-        .slice()
-        .sort((a, b) => a.score - b.score)[0] || null;
-      const overallScore = mfccDtwScore.overall_score;
-      const nextWordDecision = chooseNextWordDetails({
-        wordId,
-        weakSound,
-        overallScore,
-        historyCounts,
-      });
-      const nextWordId = nextWordDecision.nextWordId;
-      const hesitationTime = data.hesitation_time ?? Number(
-        Math.max(0.2, Math.min(6, 0.4 + attemptNumber * 0.28 + (overallScore < 65 ? 0.8 : 0.15))).toFixed(1)
-      );
-      const adaptiveModel = buildCatAdaptiveModel({
-        pronunciationSimilarity: overallScore,
-        phonemeScores,
-        historyCounts,
-        weakSound,
-        hesitationTime,
-        attemptNumber,
-        difficulty,
-        audioQuality: mfccDtwScore.audio_quality,
-      });
-      const recommendation = buildRecommendation({
-        overallScore,
-        weakSound,
-        nextWordId,
-        historyCounts,
-        nextWordDecision,
-        hesitationTime,
-        difficulty,
-        adaptiveModel,
-      });
-
-      return {
-        mode: data.mode || 'word',
-        category_id: data.category_id || null,
-        word_id: wordId,
-        word_label: data.word_label || data.word_id,
-        overall_score: overallScore,
-        pronunciation_similarity: overallScore,
-        adaptive_score: adaptiveModel.adaptive_score,
-        confidence_score: adaptiveModel.confidence_score,
-        confidence_level: adaptiveModel.confidence_level,
-        uncertainty_reasons: adaptiveModel.uncertainty_reasons,
-        phoneme_scores: phonemeScores,
-        response_duration: Number(data.response_duration || 0) || null,
-        hesitation_time: hesitationTime,
-        weak_phoneme: weakSound?.text || null,
-        weak_position: weakSound?.position || null,
-        recurring_weak_phoneme_count: weakSound?.text ? historyCounts[weakSound.text] || 0 : 0,
-        next_word_id: nextWordId,
-        attempt_number: attemptNumber,
-        scoring_method: mfccDtwScore.scoring_method,
-        dtw_distance: mfccDtwScore.dtw_distance,
-        reference_word_id: mfccDtwScore.reference_word_id,
-        mfcc_config: mfccDtwScore.mfcc_config,
-        ...recommendation,
-        recommendation_details: {
-          ...(recommendation.recommendation_details || {}),
-          adaptive_model: adaptiveModel,
-          confidence: {
-            score: adaptiveModel.confidence_score,
-            level: adaptiveModel.confidence_level,
-            uncertainty_reasons: adaptiveModel.uncertainty_reasons,
-          },
-          scoring_evidence: {
-            method: mfccDtwScore.scoring_method,
-            dtw_distance: mfccDtwScore.dtw_distance,
-            segment_scores: mfccDtwScore.segment_scores,
-            phoneme_boundary_alignment: mfccDtwScore.phoneme_boundary_alignment,
-            audio_quality: mfccDtwScore.audio_quality,
-            mfcc_config: mfccDtwScore.mfcc_config,
-          },
-        },
-      };
-    } catch (error) {
-      if (error.code === 'AUDIO_QUALITY_FAILED') {
-        throw error;
-      }
-
-      error.code = error.code || 'ACOUSTIC_SCORING_FAILED';
+  try {
+    return await scoreAcousticPronunciationAttemptData(data, previousResults, wordId);
+  } catch (error) {
+    if (error.code === 'AUDIO_QUALITY_FAILED') {
       throw error;
     }
-  }
 
-  return scorePrototypePronunciationAttemptData(data, previousResults);
+    if (error.code === 'REFERENCE_AUDIO_NOT_FOUND') {
+      return {
+        ...scorePrototypePronunciationAttemptData(data, previousResults),
+        scoring_fallback_reason: 'reference_audio_missing',
+      };
+    }
+
+    if (typeof error.code !== 'string' || !error.code) {
+      error.code = 'ACOUSTIC_SCORING_FAILED';
+    }
+    throw error;
+  }
 }
 
 module.exports = {
