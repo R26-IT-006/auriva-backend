@@ -39,6 +39,10 @@ const DialogueWordProgress = sequelize.define('DialogueWordProgress', {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
   },
+  phase1_exposure_ratio_snapshot: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+  },
   session_pass_count: {
     type: DataTypes.INTEGER,
     defaultValue: 0,

@@ -287,12 +287,24 @@ async function recordPhase1Gate(teacherId, studentId, wordId, gatePassed) {
   const progress = await getOrCreateProgress(studentId, wordId);
 
   if (gatePassed) {
-    await progress.update({
+    const updates = {
       phase1_gate_passed: true,
       current_phase: 2,
       status: 'in_progress',
       updated_at: new Date(),
-    });
+    };
+
+    // Point-in-time baseline snapshot (TASK-25): written ONCE, on this word's
+    // first-ever gate pass. Rule 3 re-introduction can reset phase1_gate_passed
+    // and cause this branch to run again later for the same word — the
+    // === null check (not a truthy check) ensures a later pass never
+    // overwrites the original baseline, since 0.0 is itself a valid ratio.
+    if (progress.phase1_exposure_ratio_snapshot === null) {
+      updates.phase1_exposure_ratio_snapshot =
+        progress.phase1_exposure_count / progress.phase1_required_exposures;
+    }
+
+    await progress.update(updates);
   }
 
   return { gate_passed: gatePassed, current_phase: gatePassed ? 2 : 1 };

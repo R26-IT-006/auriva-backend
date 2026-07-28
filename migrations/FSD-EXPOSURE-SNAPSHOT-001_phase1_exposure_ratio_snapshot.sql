@@ -1,0 +1,1 @@
+ALTER TABLE dialogue_word_progress ADD COLUMN phase1_exposure_ratio_snapshot FLOAT NULL;
