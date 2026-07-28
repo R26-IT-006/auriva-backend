@@ -73,6 +73,10 @@ const scorePronunciationAttemptValidation = [
     .optional({ nullable: true })
     .isFloat({ min: 0 })
     .withMessage('hesitation_time must be a positive number'),
+  body('pre_record_delay_seconds')
+    .optional({ nullable: true })
+    .isFloat({ min: 0 })
+    .withMessage('pre_record_delay_seconds must be a positive number'),
   body('attempt_number')
     .optional()
     .isInt({ min: 1 })

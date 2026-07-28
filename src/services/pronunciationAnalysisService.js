@@ -151,6 +151,7 @@ function analyzeAudioQuality(samples) {
   const peakFrameRms = percentile(frameStats, 0.95);
   const voiceThreshold = Math.max(0.008, noiseFloorRms * 3.2, peakFrameRms * 0.16);
   const voicedFrames = frameStats.filter((rms) => rms >= voiceThreshold);
+  const firstVoicedFrame = frameStats.findIndex((rms) => rms >= voiceThreshold);
   const voicedDuration = voicedFrames.length * QUALITY_FRAME_SECONDS;
   const voicedRms = voicedFrames.length
     ? voicedFrames.reduce((total, rms) => total + rms, 0) / voicedFrames.length
@@ -183,6 +184,9 @@ function analyzeAudioQuality(samples) {
     failures,
     total_duration: Number(totalDuration.toFixed(3)),
     voiced_duration: Number(voicedDuration.toFixed(3)),
+    speech_onset_seconds: firstVoicedFrame >= 0
+      ? Number((firstVoicedFrame * QUALITY_FRAME_SECONDS).toFixed(3))
+      : null,
     silence_ratio: Number(silenceRatio.toFixed(3)),
     peak_amplitude: Number(maxAbs.toFixed(4)),
     voiced_rms: Number(voicedRms.toFixed(4)),
@@ -704,8 +708,10 @@ function buildPhonemeBoundaryAlignment({ phonemes, referenceAnalysis, attemptAna
       student_duration: Number(studentDuration.toFixed(3)),
       duration_ratio: Number((studentDuration / referenceDuration).toFixed(2)),
       similarity_score: similarityScore,
+      // Timing is reported as an observation only. ASD speech commonly shows
+      // atypical rate and prosody, so duration never lowers the accuracy score.
       timing_score: timingScore,
-      score: clampScore(similarityScore * 0.82 + timingScore * 0.18),
+      score: similarityScore,
     };
   });
 }
@@ -764,14 +770,31 @@ async function scoreWordPronunciationAttempt(data) {
     path: dtw.path,
   });
   const segmentScores = phonemeAlignment.map((entry) => entry.score);
+  const referenceDuration = referenceFrames.length * (HOP_SIZE / SAMPLE_RATE);
+  const attemptDuration = attemptFrames.length * (HOP_SIZE / SAMPLE_RATE);
+  const segmentalAccuracy = distanceToScore(dtw.normalizedDistance);
 
   return {
-    overall_score: distanceToScore(dtw.normalizedDistance),
+    overall_score: segmentalAccuracy,
+    segmental_accuracy: segmentalAccuracy,
+    timing_observation: {
+      informational_only: true,
+      speech_onset_seconds: quality.speech_onset_seconds,
+      reference_duration: Number(referenceDuration.toFixed(3)),
+      attempt_duration: Number(attemptDuration.toFixed(3)),
+      duration_ratio: Number((attemptDuration / Math.max(0.01, referenceDuration)).toFixed(2)),
+      timing_score: getTimingScore(referenceDuration, attemptDuration),
+      per_phoneme: phonemeAlignment.map((entry) => ({
+        phoneme: entry.phoneme,
+        duration_ratio: entry.duration_ratio,
+        timing_score: entry.timing_score,
+      })),
+    },
     dtw_distance: Number(dtw.normalizedDistance.toFixed(4)),
     segment_scores: segmentScores,
     phoneme_boundary_alignment: phonemeAlignment,
     audio_quality: quality,
-    scoring_method: 'mfcc_dtw_v1',
+    scoring_method: 'mfcc_dtw_v2',
     reference_word_id: wordId,
     mfcc_config: {
       sample_rate: SAMPLE_RATE,

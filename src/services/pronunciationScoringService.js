@@ -489,9 +489,7 @@ function scorePrototypePronunciationAttemptData(data, previousResults = []) {
     historyCounts,
   });
   const nextWordId = nextWordDecision.nextWordId;
-  const hesitationTime = data.hesitation_time ?? Number(
-    Math.max(0.2, Math.min(6, 0.4 + attemptNumber * 0.28 + (overallScore < 65 ? 0.8 : 0.15))).toFixed(1)
-  );
+  const hesitationTime = data.hesitation_time ?? null;
   const recommendation = buildRecommendation({
     overallScore,
     weakSound,
@@ -564,9 +562,20 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     historyCounts,
   });
   const nextWordId = nextWordDecision.nextWordId;
-  const hesitationTime = data.hesitation_time ?? Number(
-    Math.max(0.2, Math.min(6, 0.4 + attemptNumber * 0.28 + (overallScore < 65 ? 0.8 : 0.15))).toFixed(1)
-  );
+  const preRecordDelay = Math.max(0, Math.min(30, Number(data.pre_record_delay_seconds) || 0));
+  const speechOnset = Number(mfccDtwScore.audio_quality?.speech_onset_seconds) || 0;
+  const hesitationTime = data.hesitation_time != null
+    ? Number(data.hesitation_time)
+    : Number((speechOnset + preRecordDelay).toFixed(2));
+  const timingObservation = {
+    ...mfccDtwScore.timing_observation,
+    hesitation: {
+      speech_onset_seconds: speechOnset,
+      pre_record_delay_seconds: preRecordDelay,
+      hesitation_time: hesitationTime,
+      source: data.hesitation_time != null ? 'client_provided' : 'measured',
+    },
+  };
   const adaptiveModel = buildAdaptiveModel({
     wordId,
     pronunciationSimilarity: overallScore,
@@ -596,6 +605,8 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     word_label: data.word_label || data.word_id,
     overall_score: overallScore,
     pronunciation_similarity: overallScore,
+    segmental_accuracy: mfccDtwScore.segmental_accuracy,
+    timing_observation: timingObservation,
     adaptive_score: adaptiveModel.adaptive_score,
     confidence_score: adaptiveModel.confidence_score,
     confidence_level: adaptiveModel.confidence_level,
@@ -626,6 +637,7 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
         dtw_distance: mfccDtwScore.dtw_distance,
         segment_scores: mfccDtwScore.segment_scores,
         phoneme_boundary_alignment: mfccDtwScore.phoneme_boundary_alignment,
+        timing_observation: timingObservation,
         audio_quality: mfccDtwScore.audio_quality,
         mfcc_config: mfccDtwScore.mfcc_config,
       },
