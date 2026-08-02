@@ -95,7 +95,7 @@ app.use((err, req, res, next) => {
     });
   }
 
-  if (err.code === 'AUDIO_QUALITY_FAILED') {
+  if (err.code === 'AUDIO_QUALITY_FAILED' || err.code === 'WORD_MISMATCH') {
     return res.status(422).json({
       error: err.message,
       code: err.code,

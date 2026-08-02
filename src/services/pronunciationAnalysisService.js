@@ -8,6 +8,7 @@ const { promisify } = require('util');
 const FFT = require('fft.js');
 
 const { WORD_PROFILES } = require('./wordProfiles');
+const { verifySpokenWord } = require('./speechRecognitionService');
 
 const execFileAsync = promisify(execFile);
 
@@ -754,6 +755,15 @@ async function scoreWordPronunciationAttempt(data) {
     throw new AudioQualityError(getQualityFailureMessage(quality.failures), quality);
   }
 
+  // ASR gate: reject the attempt when a different word was clearly spoken,
+  // so acoustic similarity is never scored against the wrong word.
+  const speechVerification = await verifySpokenWord({
+    rawAudioBase64: data.raw_audio_base64,
+    mimeType: data.raw_audio_mime_type,
+    targetWord: wordId,
+    wordLabel: data.word_label,
+  });
+
   const referenceFrames = referenceAnalysis.map((entry) => entry.mfcc);
   const attemptAnalysis = extractMfccAnalysis(attemptSamples);
   const attemptFrames = attemptAnalysis.map((entry) => entry.mfcc);
@@ -777,6 +787,7 @@ async function scoreWordPronunciationAttempt(data) {
   return {
     overall_score: segmentalAccuracy,
     segmental_accuracy: segmentalAccuracy,
+    speech_verification: speechVerification,
     timing_observation: {
       informational_only: true,
       speech_onset_seconds: quality.speech_onset_seconds,

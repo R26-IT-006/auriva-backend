@@ -608,6 +608,8 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     word_label: data.word_label || data.word_id,
     overall_score: overallScore,
     pronunciation_similarity: overallScore,
+    speech_verification: mfccDtwScore.speech_verification || null,
+    recognized_text: mfccDtwScore.speech_verification?.recognized_text || null,
     segmental_accuracy: mfccDtwScore.segmental_accuracy,
     timing_observation: timingObservation,
     adaptive_score: adaptiveModel.adaptive_score,
