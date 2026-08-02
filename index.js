@@ -16,6 +16,21 @@ const swaggerSpec  = require('./src/config/swagger');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// ─── Process-level safety nets ─────────────────────────────────────────────────
+// Without these, a rejection escaping request scope (e.g. inside a subprocess
+// 'exit' handler) or any uncaught exception crashes the whole server, ending
+// every teacher/student session in progress with no trace of why.
+process.on('unhandledRejection', (reason) => {
+  logger.error(`Unhandled promise rejection: ${reason?.message || reason}`, {
+    stack: reason?.stack,
+  });
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught exception: ${err.message}`, { stack: err.stack });
+  process.exit(1);
+});
+
 function getPositiveIntegerEnv(name, fallback) {
   const value = Number.parseInt(process.env[name], 10);
   return Number.isFinite(value) && value > 0 ? value : fallback;
@@ -89,9 +104,16 @@ app.use((err, req, res, next) => {
   }
 
   if (err instanceof ApiError) {
+    // express-validator's error array includes the raw submitted `value` per
+    // field, which for this API can be an 8MB base64 audio blob of a child's
+    // recording — never echo submitted values back in the response.
+    const details = Array.isArray(err.details)
+      ? err.details.map(({ value, ...rest }) => rest)
+      : err.details;
+
     return res.status(err.statusCode).json({
-      error:   err.message,
-      ...(err.details && { details: err.details }),
+      error: err.message,
+      ...(details && { details }),
     });
   }
 

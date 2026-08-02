@@ -1,6 +1,7 @@
 'use strict';
 
 const router          = require('express').Router();
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { verifyToken } = require('../middleware/auth');
 const { isTeacher }   = require('../middleware/roleGuard');
 const { body }        = require('express-validator');
@@ -12,6 +13,18 @@ const {
 
 // All routes require JWT + teacher role + first-login gate
 router.use(verifyToken, isTeacher);
+
+// Scoring spawns ffmpeg, whisper-cli, and a Python wav2vec2 worker per call —
+// far heavier than the rest of the API, so it gets its own tighter cap keyed
+// by teacher rather than the shared IP-based /api limit.
+const pronunciationScoreLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user?.id ? `user:${req.user.id}` : ipKeyGenerator(req.ip)),
+  message: { error: 'Too many pronunciation scoring requests, please slow down and try again shortly.' },
+});
 
 /**
  * @swagger
@@ -185,6 +198,7 @@ router.get('/students/:id/pronunciation-results', ctrl.getPronunciationResults);
 router.get('/pronunciation-results/:resultId/audio', ctrl.getPronunciationResultAudio);
 router.post(
   '/students/:id/pronunciation-score',
+  pronunciationScoreLimiter,
   scorePronunciationAttemptValidation,
   ctrl.scorePronunciationAttempt
 );

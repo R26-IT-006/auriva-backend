@@ -19,6 +19,7 @@ const HF_CACHE_DIR = process.env.HF_HOME ||
   path.resolve(__dirname, '../../models/hf-cache');
 const REQUEST_TIMEOUT_MS = Number(process.env.PHONEME_GOP_TIMEOUT_MS || 30000);
 const STARTUP_TIMEOUT_MS = Number(process.env.PHONEME_GOP_STARTUP_TIMEOUT_MS || 120000);
+const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 20000);
 const FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 
 let worker = null;
@@ -162,7 +163,7 @@ async function assessPhonemeGop({ rawAudioBase64, mimeType, targetSounds }) {
       '-ac', '1',
       '-ar', '16000',
       wavPath,
-    ]);
+    ], { timeout: FFMPEG_TIMEOUT_MS });
 
     return await sendRequest({ wav_path: wavPath, target_sounds: targetSounds });
   } catch (error) {

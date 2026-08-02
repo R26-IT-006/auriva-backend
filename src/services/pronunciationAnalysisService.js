@@ -14,6 +14,7 @@ const { assessPhonemeGop } = require('./phonemeGopService');
 const execFileAsync = promisify(execFile);
 
 const SAMPLE_RATE = 16000;
+const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 20000);
 const FRAME_SIZE = 512;
 const HOP_SIZE = 160;
 const MEL_FILTER_COUNT = 26;
@@ -90,6 +91,7 @@ async function decodeAudioFileToPcm(filePath) {
   ], {
     encoding: 'buffer',
     maxBuffer: 32 * 1024 * 1024,
+    timeout: FFMPEG_TIMEOUT_MS,
   });
 
   const sampleCount = Math.floor(stdout.length / 4);
@@ -439,10 +441,6 @@ function extractMfccAnalysis(samples) {
       ...deltaDeltaFrames[index],
     ],
   }));
-}
-
-function extractMfccFrames(samples) {
-  return extractMfccAnalysis(samples).map((entry) => entry.mfcc);
 }
 
 function frameDistance(a, b) {
@@ -904,7 +902,6 @@ module.exports = {
   scoreWordPronunciationAttempt,
   scoreWordPronunciationAttemptWithoutReference,
   getReferenceAnalysis,
-  extractMfccFrames,
   extractMfccAnalysis,
   calculateDtw,
   analyzeAudioQuality,

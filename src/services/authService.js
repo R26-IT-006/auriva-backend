@@ -6,6 +6,7 @@ const { Op }  = require('sequelize');
 const { Principal, Teacher, PasswordResetOtp } = require('../models');
 const { sendOtpEmail } = require('./emailService');
 const ApiError = require('../utils/ApiError');
+const { JWT_SECRET, JWT_EXPIRES_IN } = require('../config/jwt');
 
 const SALT_ROUNDS = 12;
 const OTP_EXPIRY_MINUTES = 10;
@@ -19,8 +20,8 @@ async function loginPrincipal(username, password) {
 
   return jwt.sign(
     { id: principal.id, role: 'principal' },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN }
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
   );
 }
 
@@ -33,8 +34,8 @@ async function loginTeacher(email, password) {
 
   return jwt.sign(
     { id: teacher.tid, role: 'teacher', is_first_login: teacher.is_first_login },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN }
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
   );
 }
 
@@ -52,8 +53,8 @@ async function setTeacherPassword(teacherId, newPassword) {
 
   return jwt.sign(
     { id: teacher.tid, role: 'teacher', is_first_login: false },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN }
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
   );
 }
 
@@ -104,7 +105,7 @@ async function verifyOtp(email, otp) {
   // Issue a short-lived reset token (15 min, scoped)
   return jwt.sign(
     { id: teacher.tid, role: 'teacher', scope: 'password_reset' },
-    process.env.JWT_SECRET,
+    JWT_SECRET,
     { expiresIn: '15m' }
   );
 }
