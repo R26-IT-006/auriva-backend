@@ -597,6 +597,9 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     difficulty,
     adaptiveModel,
   });
+  // Low-confidence results suppress child-facing evaluative feedback and are
+  // flagged for the teacher instead of risking an unreliable negative score.
+  const needsTeacherReview = adaptiveModel.confidence_level === 'low';
 
   return {
     mode: data.mode || 'word',
@@ -611,6 +614,7 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     confidence_score: adaptiveModel.confidence_score,
     confidence_level: adaptiveModel.confidence_level,
     uncertainty_reasons: adaptiveModel.uncertainty_reasons,
+    needs_teacher_review: needsTeacherReview,
     phoneme_scores: phonemeScores,
     response_duration: Number(data.response_duration || 0) || null,
     hesitation_time: hesitationTime,
@@ -627,6 +631,7 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     recommendation_details: {
       ...(recommendation.recommendation_details || {}),
       adaptive_model: adaptiveModel,
+      needs_teacher_review: needsTeacherReview,
       confidence: {
         score: adaptiveModel.confidence_score,
         level: adaptiveModel.confidence_level,
