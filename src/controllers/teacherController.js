@@ -44,6 +44,18 @@ async function setAvatar(req, res) {
   res.status(201).json(record);
 }
 
+async function setSensorySettings(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const record = await teacherService.setSensorySettings(
+    req.user.id,
+    req.params.id,
+    req.body.reduce_stimulation
+  );
+  res.json(record);
+}
+
 async function savePronunciationResult(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
@@ -96,6 +108,7 @@ module.exports = {
   startSession,
   endSession,
   setAvatar,
+  setSensorySettings,
   scorePronunciationAttempt,
   savePronunciationResult,
   getPronunciationResults,

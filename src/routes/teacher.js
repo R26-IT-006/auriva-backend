@@ -194,6 +194,12 @@ router.post('/students/:id/avatar', [
     .withMessage('avatar_key must be one of: boba, glitter, lily, megatron'),
 ], ctrl.setAvatar);
 
+router.put('/students/:id/sensory-settings', [
+  body('reduce_stimulation')
+    .isBoolean()
+    .withMessage('reduce_stimulation must be a boolean'),
+], ctrl.setSensorySettings);
+
 router.get('/students/:id/pronunciation-results', ctrl.getPronunciationResults);
 router.get('/pronunciation-results/:resultId/audio', ctrl.getPronunciationResultAudio);
 router.post(

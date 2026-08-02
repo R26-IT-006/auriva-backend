@@ -112,6 +112,14 @@ async function setAvatar(teacherId, studentId, avatarKey) {
   return record;
 }
 
+async function setSensorySettings(teacherId, studentId, reduceStimulation) {
+  const student = await findTeacherStudent(teacherId, studentId);
+  if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+
+  await student.update({ reduce_stimulation: reduceStimulation });
+  return { sid: student.sid, reduce_stimulation: student.reduce_stimulation };
+}
+
 async function startSession(teacherId, studentId) {
   const student = await Student.findOne({
     where: { sid: studentId, teacher_id: teacherId },
@@ -252,6 +260,7 @@ module.exports = {
   getOwnStudents,
   getOwnStudentById,
   setAvatar,
+  setSensorySettings,
   startSession,
   endSession,
   scorePronunciationAttempt,
