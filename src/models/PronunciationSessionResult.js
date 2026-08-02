@@ -66,6 +66,27 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     type: DataTypes.JSONB,
     allowNull: true,
   },
+  scoring_method: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  recognized_text: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  speech_verification: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+  },
+  confidence_level: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  needs_teacher_review: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
   next_word_id: {
     type: DataTypes.STRING,
     allowNull: true,

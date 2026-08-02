@@ -184,6 +184,23 @@ const savePronunciationResultValidation = [
     .optional({ nullable: true })
     .isObject()
     .withMessage('recommendation_details must be an object'),
+  body('scoring_method')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('recognized_text')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('speech_verification')
+    .optional({ nullable: true })
+    .isObject()
+    .withMessage('speech_verification must be an object'),
+  body('confidence_level')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim(),
+  body('needs_teacher_review')
+    .optional()
+    .isBoolean()
+    .withMessage('needs_teacher_review must be a boolean'),
   body('next_word_id')
     .optional({ nullable: true, checkFalsy: true })
     .trim(),
