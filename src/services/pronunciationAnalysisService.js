@@ -7,7 +7,7 @@ const path = require('path');
 const { promisify } = require('util');
 const FFT = require('fft.js');
 
-const { WORD_PROFILES } = require('./wordProfiles');
+const { WORD_PROFILES, LETTER_SOUNDS } = require('./wordProfiles');
 const { verifySpokenWord } = require('./speechRecognitionService');
 const { assessPhonemeGop } = require('./phonemeGopService');
 
@@ -555,7 +555,7 @@ function resolveTargetPhonemes(wordId, data = {}) {
       .filter(Boolean)
     : [];
   if (provided.length) return provided;
-  return WORD_PROFILES[wordId]?.sounds || [];
+  return WORD_PROFILES[wordId]?.sounds || LETTER_SOUNDS[wordId] || [];
 }
 
 function smoothValues(values, radius = 2) {
@@ -833,8 +833,76 @@ async function scoreWordPronunciationAttempt(data) {
   };
 }
 
+async function scoreWordPronunciationAttemptWithoutReference(data) {
+  if (!data.raw_audio_base64) {
+    throw new Error('GOP scoring requires raw_audio_base64');
+  }
+
+  const wordId = String(data.word_id || '').toLowerCase().trim();
+  const phonemes = resolveTargetPhonemes(wordId, data);
+  const attemptSamples = await decodeBase64AudioToPcm(
+    data.raw_audio_base64,
+    data.raw_audio_mime_type
+  );
+  const quality = analyzeAudioQuality(attemptSamples);
+  if (!quality.passed) {
+    throw new AudioQualityError(getQualityFailureMessage(quality.failures), quality);
+  }
+
+  const speechVerification = await verifySpokenWord({
+    rawAudioBase64: data.raw_audio_base64,
+    mimeType: data.raw_audio_mime_type,
+    targetWord: wordId,
+    wordLabel: data.word_label,
+  });
+
+  const gopAssessment = await assessPhonemeGop({
+    rawAudioBase64: data.raw_audio_base64,
+    mimeType: data.raw_audio_mime_type,
+    targetSounds: phonemes,
+  });
+  if (!gopAssessment || gopAssessment.overall_gop_score == null) {
+    const error = new Error('GOP engine unavailable for reference-free scoring');
+    error.code = 'GOP_UNAVAILABLE';
+    throw error;
+  }
+
+  const segmentScores = gopAssessment.per_sound.map(
+    (entry) => entry.score ?? gopAssessment.overall_gop_score
+  );
+  const attemptDuration = attemptSamples.length / SAMPLE_RATE;
+
+  return {
+    overall_score: gopAssessment.overall_gop_score,
+    segmental_accuracy: gopAssessment.overall_gop_score,
+    speech_verification: speechVerification,
+    gop_assessment: gopAssessment,
+    timing_observation: {
+      informational_only: true,
+      speech_onset_seconds: quality.speech_onset_seconds,
+      reference_duration: null,
+      attempt_duration: Number(attemptDuration.toFixed(3)),
+      duration_ratio: null,
+      timing_score: null,
+      per_phoneme: gopAssessment.per_sound.map((entry) => ({
+        phoneme: entry.sound,
+        duration_ratio: null,
+        timing_score: null,
+      })),
+    },
+    dtw_distance: null,
+    segment_scores: segmentScores,
+    phoneme_boundary_alignment: null,
+    audio_quality: quality,
+    scoring_method: 'wav2vec2_gop_v1',
+    reference_word_id: null,
+    mfcc_config: null,
+  };
+}
+
 module.exports = {
   scoreWordPronunciationAttempt,
+  scoreWordPronunciationAttemptWithoutReference,
   getReferenceAnalysis,
   extractMfccFrames,
   extractMfccAnalysis,

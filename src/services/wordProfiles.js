@@ -37,4 +37,35 @@ const WORD_PROFILES = {
   jump: { difficulty: 3, sounds: ['dʒ', 'ʌ', 'mp'], easierWords: ['jellyfish'], relatedWords: ['butterfly'] },
 };
 
-module.exports = { WORD_PROFILES };
+// Phoneme sequences of spoken letter names, for alphabet mode where the
+// word_id is a single letter ("b" is pronounced "bee"). British letter names.
+const LETTER_SOUNDS = {
+  a: ['eɪ'],
+  b: ['b', 'iː'],
+  c: ['s', 'iː'],
+  d: ['d', 'iː'],
+  e: ['iː'],
+  f: ['e', 'f'],
+  g: ['dʒ', 'iː'],
+  h: ['eɪ', 'tʃ'],
+  i: ['aɪ'],
+  j: ['dʒ', 'eɪ'],
+  k: ['k', 'eɪ'],
+  l: ['e', 'l'],
+  m: ['e', 'm'],
+  n: ['e', 'n'],
+  o: ['əʊ'],
+  p: ['p', 'iː'],
+  q: ['k', 'j', 'uː'],
+  r: ['ɑː'],
+  s: ['e', 's'],
+  t: ['t', 'iː'],
+  u: ['j', 'uː'],
+  v: ['v', 'iː'],
+  w: ['d', 'ʌ', 'b', 'əl', 'j', 'uː'],
+  x: ['e', 'k', 's'],
+  y: ['w', 'aɪ'],
+  z: ['z', 'e', 'd'],
+};
+
+module.exports = { WORD_PROFILES, LETTER_SOUNDS };

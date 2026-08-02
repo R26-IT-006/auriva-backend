@@ -46,6 +46,27 @@ const LETTER_NAMES = {
   z: ['zee', 'zed'],
 };
 
+// Voicing-pair letter confusions ASR commonly makes on isolated letters
+// ("bee" heard as "p"). For these the phoneme-level GOP scorer is the better
+// judge, so the word gate defers instead of hard-rejecting.
+const CONFUSABLE_LETTER_PAIRS = {
+  b: 'p', p: 'b',
+  d: 't', t: 'd',
+  g: 'k', k: 'g',
+  v: 'f', f: 'v',
+  s: 'z', z: 's',
+};
+
+function transcriptAsLetter(transcript) {
+  const tokens = transcript.split(' ').filter(Boolean);
+  if (tokens.length !== 1) return null;
+  const token = tokens[0];
+  if (/^[a-z]$/.test(token)) return token;
+  const match = Object.entries(LETTER_NAMES)
+    .find(([, names]) => names.includes(token));
+  return match ? match[0] : null;
+}
+
 class WordMismatchError extends Error {
   constructor({ targetWord, wordLabel, recognizedText }) {
     const label = wordLabel || targetWord;
@@ -184,6 +205,14 @@ async function verifySpokenWord({ rawAudioBase64, mimeType, targetWord, wordLabe
 
   if (matchesTargetWord(transcript, targetWord)) {
     return { status: 'verified', recognized_text: transcript };
+  }
+
+  const target = normalizeTranscript(targetWord);
+  if (target.length === 1) {
+    const spokenLetter = transcriptAsLetter(transcript);
+    if (spokenLetter && CONFUSABLE_LETTER_PAIRS[target] === spokenLetter) {
+      return { status: 'inconclusive_confusable', recognized_text: transcript };
+    }
   }
 
   throw new WordMismatchError({

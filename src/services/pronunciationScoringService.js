@@ -2,8 +2,9 @@
 
 const {
   scoreWordPronunciationAttempt,
+  scoreWordPronunciationAttemptWithoutReference,
 } = require('./pronunciationAnalysisService');
-const { WORD_PROFILES } = require('./wordProfiles');
+const { WORD_PROFILES, LETTER_SOUNDS } = require('./wordProfiles');
 
 const PHONEME_CUES = {
   'æ': 'Open the mouth wide for the short /a/ sound.',
@@ -222,7 +223,7 @@ function normalizeSounds(data) {
   const profile = WORD_PROFILES[data.word_id] || {};
   const sourceSounds = Array.isArray(data.target_phonemes) && data.target_phonemes.length
     ? data.target_phonemes
-    : profile.sounds || [];
+    : profile.sounds || LETTER_SOUNDS[data.word_id] || [];
 
   return sourceSounds.map((sound, index) => {
     const text = typeof sound === 'string' ? sound : sound.text;
@@ -519,15 +520,23 @@ function scorePrototypePronunciationAttemptData(data, previousResults = []) {
   };
 }
 
-async function scoreAcousticPronunciationAttemptData(data, previousResults, wordId) {
+async function scoreAcousticPronunciationAttemptData(
+  data,
+  previousResults,
+  wordId,
+  scoreEngine = scoreWordPronunciationAttempt
+) {
   const profile = WORD_PROFILES[wordId] || {};
   const sounds = normalizeSounds({ ...data, word_id: wordId });
   const historyCounts = buildHistoryCounts(previousResults);
   const attemptNumber = Math.max(1, Number(data.attempt_number || 1));
   const difficulty = Number(data.difficulty || profile.difficulty || 2);
-  const mfccDtwScore = await scoreWordPronunciationAttempt({ ...data, word_id: wordId });
+  const mfccDtwScore = await scoreEngine({ ...data, word_id: wordId });
   const gopAssessment = mfccDtwScore.gop_assessment || null;
   const gopBySound = gopAssessment?.per_sound || [];
+  const scoringMethod = gopAssessment
+    ? (mfccDtwScore.dtw_distance != null ? 'wav2vec2_gop+mfcc_dtw_v1' : 'wav2vec2_gop_v1')
+    : mfccDtwScore.scoring_method;
   const phonemeScores = sounds.map((sound, index) => ({
     text: sound.text,
     type: sound.type,
@@ -636,9 +645,7 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     recurring_weak_phoneme_count: weakSound?.text ? historyCounts[weakSound.text] || 0 : 0,
     next_word_id: nextWordId,
     attempt_number: attemptNumber,
-    scoring_method: gopAssessment
-      ? 'wav2vec2_gop+mfcc_dtw_v1'
-      : mfccDtwScore.scoring_method,
+    scoring_method: scoringMethod,
     dtw_distance: mfccDtwScore.dtw_distance,
     reference_word_id: mfccDtwScore.reference_word_id,
     mfcc_config: mfccDtwScore.mfcc_config,
@@ -653,9 +660,7 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
         uncertainty_reasons: adaptiveModel.uncertainty_reasons,
       },
       scoring_evidence: {
-        method: gopAssessment
-          ? 'wav2vec2_gop+mfcc_dtw_v1'
-          : mfccDtwScore.scoring_method,
+        method: scoringMethod,
         gop_assessment: gopAssessment,
         dtw_distance: mfccDtwScore.dtw_distance,
         segment_scores: mfccDtwScore.segment_scores,
@@ -674,15 +679,30 @@ async function scorePronunciationAttemptData(data, previousResults = []) {
   try {
     return await scoreAcousticPronunciationAttemptData(data, previousResults, wordId);
   } catch (error) {
-    if (error.code === 'AUDIO_QUALITY_FAILED') {
+    if (error.code === 'AUDIO_QUALITY_FAILED' || error.code === 'WORD_MISMATCH') {
       throw error;
     }
 
     if (error.code === 'REFERENCE_AUDIO_NOT_FOUND') {
-      return {
-        ...scorePrototypePronunciationAttemptData(data, previousResults),
-        scoring_fallback_reason: 'reference_audio_missing',
-      };
+      // No reference recording (alphabet mode, words without mp3s): GOP does
+      // not need one — score phoneme identity directly. The signal-heuristic
+      // prototype scorer is the last resort only when the GOP engine is down.
+      try {
+        return await scoreAcousticPronunciationAttemptData(
+          data,
+          previousResults,
+          wordId,
+          scoreWordPronunciationAttemptWithoutReference
+        );
+      } catch (gopError) {
+        if (gopError.code === 'AUDIO_QUALITY_FAILED' || gopError.code === 'WORD_MISMATCH') {
+          throw gopError;
+        }
+        return {
+          ...scorePrototypePronunciationAttemptData(data, previousResults),
+          scoring_fallback_reason: 'reference_audio_missing_gop_unavailable',
+        };
+      }
     }
 
     if (typeof error.code !== 'string' || !error.code) {
