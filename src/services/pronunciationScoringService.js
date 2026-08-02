@@ -526,16 +526,21 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
   const attemptNumber = Math.max(1, Number(data.attempt_number || 1));
   const difficulty = Number(data.difficulty || profile.difficulty || 2);
   const mfccDtwScore = await scoreWordPronunciationAttempt({ ...data, word_id: wordId });
+  const gopAssessment = mfccDtwScore.gop_assessment || null;
+  const gopBySound = gopAssessment?.per_sound || [];
   const phonemeScores = sounds.map((sound, index) => ({
     text: sound.text,
     type: sound.type,
     position: sound.position,
     cue: sound.cue,
     score: clampScore(
+      gopBySound[index]?.score ??
       mfccDtwScore.phoneme_boundary_alignment?.[index]?.score ??
       mfccDtwScore.segment_scores[index] ??
       mfccDtwScore.overall_score
     ),
+    gop: gopBySound[index]?.gop ?? null,
+    gop_score: gopBySound[index]?.score ?? null,
     similarity_score:
       mfccDtwScore.phoneme_boundary_alignment?.[index]?.similarity_score ?? null,
     timing_score:
@@ -554,7 +559,11 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
   const weakSound = phonemeScores
     .slice()
     .sort((a, b) => a.score - b.score)[0] || null;
-  const overallScore = mfccDtwScore.overall_score;
+  // GOP carries phoneme-identity evidence, DTW only acoustic closeness, so
+  // GOP dominates the blend whenever the engine produced a score.
+  const overallScore = gopAssessment?.overall_gop_score != null
+    ? clampScore(gopAssessment.overall_gop_score * 0.7 + mfccDtwScore.overall_score * 0.3)
+    : mfccDtwScore.overall_score;
   const nextWordDecision = chooseNextWordDetails({
     wordId,
     weakSound,
@@ -610,6 +619,8 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     pronunciation_similarity: overallScore,
     speech_verification: mfccDtwScore.speech_verification || null,
     recognized_text: mfccDtwScore.speech_verification?.recognized_text || null,
+    gop_assessment: gopAssessment,
+    decoded_phonemes: gopAssessment?.decoded_phonemes || null,
     segmental_accuracy: mfccDtwScore.segmental_accuracy,
     timing_observation: timingObservation,
     adaptive_score: adaptiveModel.adaptive_score,
@@ -625,7 +636,9 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
     recurring_weak_phoneme_count: weakSound?.text ? historyCounts[weakSound.text] || 0 : 0,
     next_word_id: nextWordId,
     attempt_number: attemptNumber,
-    scoring_method: mfccDtwScore.scoring_method,
+    scoring_method: gopAssessment
+      ? 'wav2vec2_gop+mfcc_dtw_v1'
+      : mfccDtwScore.scoring_method,
     dtw_distance: mfccDtwScore.dtw_distance,
     reference_word_id: mfccDtwScore.reference_word_id,
     mfcc_config: mfccDtwScore.mfcc_config,
@@ -640,7 +653,10 @@ async function scoreAcousticPronunciationAttemptData(data, previousResults, word
         uncertainty_reasons: adaptiveModel.uncertainty_reasons,
       },
       scoring_evidence: {
-        method: mfccDtwScore.scoring_method,
+        method: gopAssessment
+          ? 'wav2vec2_gop+mfcc_dtw_v1'
+          : mfccDtwScore.scoring_method,
+        gop_assessment: gopAssessment,
         dtw_distance: mfccDtwScore.dtw_distance,
         segment_scores: mfccDtwScore.segment_scores,
         phoneme_boundary_alignment: mfccDtwScore.phoneme_boundary_alignment,

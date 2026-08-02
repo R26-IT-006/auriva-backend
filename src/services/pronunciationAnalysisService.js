@@ -9,6 +9,7 @@ const FFT = require('fft.js');
 
 const { WORD_PROFILES } = require('./wordProfiles');
 const { verifySpokenWord } = require('./speechRecognitionService');
+const { assessPhonemeGop } = require('./phonemeGopService');
 
 const execFileAsync = promisify(execFile);
 
@@ -764,6 +765,14 @@ async function scoreWordPronunciationAttempt(data) {
     wordLabel: data.word_label,
   });
 
+  // Phoneme-level GOP via wav2vec2; null when the engine is unavailable and
+  // scoring then falls back to acoustic (MFCC-DTW) evidence only.
+  const gopAssessment = await assessPhonemeGop({
+    rawAudioBase64: data.raw_audio_base64,
+    mimeType: data.raw_audio_mime_type,
+    targetSounds: phonemes,
+  });
+
   const referenceFrames = referenceAnalysis.map((entry) => entry.mfcc);
   const attemptAnalysis = extractMfccAnalysis(attemptSamples);
   const attemptFrames = attemptAnalysis.map((entry) => entry.mfcc);
@@ -788,6 +797,7 @@ async function scoreWordPronunciationAttempt(data) {
     overall_score: segmentalAccuracy,
     segmental_accuracy: segmentalAccuracy,
     speech_verification: speechVerification,
+    gop_assessment: gopAssessment,
     timing_observation: {
       informational_only: true,
       speech_onset_seconds: quality.speech_onset_seconds,
