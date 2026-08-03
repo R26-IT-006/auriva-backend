@@ -265,12 +265,30 @@ async function startSession(teacherId, studentId, parentSessionId = null) {
   const paragraph  = buildParagraph(q);
   const distractors = buildDistractors(q);
 
-  // BR-02: TTS must complete before session is created
-  const { sentenceAudios, paragraphAudio } = await ttsService.generateSessionAudio(
-    sentences,
-    paragraph,
-    q.child_gender
-  );
+  // Per-request dynamic proper nouns (TASK-30): the child's own name, if a
+  // teacher-confirmed Sinhala spelling exists. Omit the key entirely when
+  // null/empty — the existing unmatched-proper-noun fallback (plain English
+  // + console.warn) already handles that case, no separate degradation path.
+  const dynamicNames = q.child_first_name_sinhala
+    ? { [q.child_first_name]: q.child_first_name_sinhala }
+    : {};
+
+  // BR-02: TTS must complete before session is created.
+  // SSML + district/dynamic-name voice routing (TASK-21/29/30): each
+  // sentence/paragraph is tokenised so Sinhala proper nouns (name/hometown)
+  // render via a native si-LK voice segment instead of plain-text synthesis.
+  let sentenceAudios;
+  let paragraphAudio;
+  try {
+    const buffers = await Promise.all([
+      ...sentences.map((s) => ttsService.generateSentenceAudioSSML(ttsService.tokeniseSentence(s, undefined, dynamicNames), q.child_gender, dynamicNames)),
+      ttsService.generateSentenceAudioSSML(ttsService.tokeniseSentence(paragraph, undefined, dynamicNames), q.child_gender, dynamicNames),
+    ]);
+    sentenceAudios = buffers.slice(0, 5).map((b) => b.toString('base64'));
+    paragraphAudio = buffers[5].toString('base64');
+  } catch (err) {
+    throw new ApiError(502, 'Could not prepare the lesson audio. Please check your connection and try again.');
+  }
 
   const level2Session = await Level2Session.create({
     teacher_id:  teacherId,

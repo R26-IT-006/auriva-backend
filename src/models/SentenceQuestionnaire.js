@@ -31,6 +31,13 @@ const SentenceQuestionnaire = sequelize.define('SentenceQuestionnaire', {
     type: DataTypes.STRING(100),
     allowNull: true,
   },
+  child_first_name_sinhala: {
+    // Sinhala-script spelling of child_first_name, confirmed by the teacher
+    // via SinhalaNameInput (TASK-30). Nullable: name pronunciation falls
+    // back to the existing unmatched-proper-noun contract when absent.
+    type: DataTypes.STRING(100),
+    allowNull: true,
+  },
   child_gender: {
     type: DataTypes.ENUM('boy', 'girl'),
     allowNull: true,
