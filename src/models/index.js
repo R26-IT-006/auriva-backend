@@ -15,6 +15,8 @@ const RecommendationHistory   = require('./RecommendationHistory');
 const StudentMotorFeature     = require('./StudentMotorFeature');
 const ShapeFeature            = require('./ShapeFeature');
 const LetterAttempt           = require('./LetterAttempt');
+const CollectionSession       = require('./CollectionSession');
+const TeacherValidation       = require('./TeacherValidation');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -82,8 +84,17 @@ ShapeFeature.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 Student.hasMany(LetterAttempt, { foreignKey: 'student_id', as: 'letterAttempts' });
 LetterAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → CollectionSession
+Student.hasMany(CollectionSession, { foreignKey: 'student_id', as: 'collectionSessions' });
+CollectionSession.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Student → TeacherValidation
+Student.hasMany(TeacherValidation, { foreignKey: 'student_id', as: 'teacherValidations' });
+TeacherValidation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
   HandwritingAssessment, LetterProgress, Stroke, ShapeFeature, LetterAttempt,
   ExplanationResult, RecommendationHistory, StudentMotorFeature,
+  CollectionSession, TeacherValidation,
 };

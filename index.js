@@ -1,6 +1,6 @@
 'use strict';
 
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 
 const express   = require('express');
 const helmet    = require('helmet');
@@ -100,9 +100,30 @@ async function start() {
   await sequelize.authenticate();
   logger.info('Database connection established');
 
-  if (process.env.NODE_ENV === 'development') {
-    await sequelize.sync({ alter: true });
-    logger.info('Database schema synced');
+  const [[info]] = await sequelize.query(
+    `SELECT current_database() AS db, current_schema() AS schema,
+            (SELECT count(*) FROM information_schema.columns
+              WHERE table_name='students' AND column_name='personal_thresholds') AS has_col`
+  );
+  logger.info(`DB → ${info.db} schema=${info.schema} personal_thresholds=${info.has_col}`);
+
+  // Schema changes belong in migrations (see migrations/) from here on.
+  // sync({ alter: true }) is disabled by default — it runs ALTER TABLE
+  // against the live schema on every boot with no confirmation, which is
+  // unsafe once real data exists. NODE_ENV=development is not a safe proxy
+  // for "ok to auto-alter," since this backend can point at a real
+  // database even in development. Opt in explicitly and only on a
+  // disposable local/dev database — never against the school data.
+  const allowSync = process.env.ALLOW_DB_SYNC === 'true' && process.env.NODE_ENV !== 'production';
+  if (allowSync) {
+    // alter: { drop: false } — never let an out-of-date local model definition
+    // drop a live column. This DB is shared across dev machines, and alter:true's
+    // default (drop: true) has repeatedly dropped students.personal_thresholds
+    // out from under other developers whose Student model already had it.
+    await sequelize.sync({ alter: { drop: false } });
+    logger.warn('Database schema synced via ALLOW_DB_SYNC=true (alter: true, drop: false) — should only happen on a local/dev database');
+  } else {
+    logger.info('Schema sync skipped (set ALLOW_DB_SYNC=true on a non-production, disposable database to enable) — use migrations for schema changes');
   }
 
   app.listen(PORT, () => {

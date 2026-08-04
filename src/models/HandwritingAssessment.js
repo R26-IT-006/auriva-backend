@@ -44,6 +44,23 @@ const HandwritingAssessment = sequelize.define('HandwritingAssessment', {
     allowNull:    false,
     defaultValue: false,
   },
+  collection_session_id: {
+    type:      DataTypes.UUID,
+    allowNull: true,
+  },
+  protocol_version: {
+    type:      DataTypes.STRING(20),
+    allowNull: true,
+  },
+  task_order: {
+    type:      DataTypes.INTEGER,
+    allowNull: true,
+  },
+  capture_status: {
+    type:         DataTypes.ENUM('complete', 'incomplete', 'abandoned', 'network_failed'),
+    allowNull:    false,
+    defaultValue: 'complete',
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
