@@ -9,13 +9,26 @@ const ShapeFeature = sequelize.define('ShapeFeature', {
     primaryKey:    true,
     autoIncrement: true,
   },
+  // Nullable: pre-writing warm-up rows (source: 'pre_writing_warmup') have no
+  // handwriting_assessments parent — see migration
+  // 20260804000001-relax-shape-features-for-prewriting.
   assessment_id: {
     type:      DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
   },
   student_id: {
     type:      DataTypes.INTEGER,
     allowNull: false,
+  },
+  // Which population this row belongs to: 'initial_assessment' (the 6-shape
+  // battery, via submitAssessment) or 'pre_writing_warmup' (via
+  // submitPreWritingActivity). Query by this before aggregating shape_type
+  // across rows — the two populations use different, non-overlapping
+  // shape_type vocabularies but nothing else marks them apart.
+  source: {
+    type:         DataTypes.STRING(30),
+    allowNull:    false,
+    defaultValue: 'initial_assessment',
   },
   shape_type: {
     type:      DataTypes.STRING(50),

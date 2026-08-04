@@ -190,6 +190,72 @@ async function submitAssessment(req, res) {
   res.status(201).json({ id: assessment.id, is_initial, message: 'Assessment saved' });
 }
 
+// Pre-writing warm-up activities (shown before a letter set that shares a
+// motor primitive — see frontend constants/preWritingActivities.js and
+// PreWritingActivityScreen.js). Same shape_features row shape and the same
+// normalizeShapeFeatures/computeMotorScore pipeline as submitAssessment, but
+// deliberately does NOT create a handwriting_assessments or
+// student_motor_features row — warm-up attempts are not part of the initial
+// 6-shape battery and must not feed the adaptive-sequencing motor profile.
+async function submitPreWritingActivity(req, res) {
+  const {
+    student_id, results, collection_mode,
+    device_type, app_version, feature_version, template_version, normalization_version,
+    canvas_width, canvas_height,
+  } = req.body;
+
+  if (!student_id || !Array.isArray(results) || results.length === 0) {
+    throw new ApiError(422, 'student_id and a non-empty results array are required');
+  }
+
+  // Warm-ups are additive practice, never part of the fixed research
+  // protocol — reject rather than silently mislabeling collection-mode data.
+  if (collection_mode === true) {
+    throw new ApiError(422, 'Pre-writing warm-ups are not part of collection mode');
+  }
+
+  const rows = results.map((result, index) => {
+    const { normalized, validity } = normalizeShapeFeatures(
+      { duration_ms: result.duration_ms, smoothness: result.smoothness, dtw_distance: result.dtw_distance },
+      { strokeCount: result.strokes?.length, strokePoints: result.strokes },
+    );
+    const { motor_score, quality_score, score_version } = computeMotorScore(normalized);
+
+    return {
+      assessment_id:   null,
+      student_id,
+      source:          'pre_writing_warmup',
+      shape_type:      result.activity_id,
+      attempt_number:  result.attempt_count ?? 1,
+      features:        { duration_ms: result.duration_ms, smoothness: result.smoothness, dtw_distance: result.dtw_distance },
+      stroke_points:   result.strokes ?? [],
+      collection_mode: false,
+
+      task_order:      index,
+      capture_status:  rowCaptureStatus({ strokePoints: result.strokes, features: { dtw_distance: result.dtw_distance } }),
+
+      canvas_width:    canvas_width  ?? null,
+      canvas_height:   canvas_height ?? null,
+      device_type,
+      app_version,
+      feature_version,
+      template_version,
+      normalization_version,
+
+      normalized_features: normalized,
+      feature_validity:    validity,
+      motor_score,
+      quality_score,
+      score_version,
+      collection_accepted: !result.skipped,
+      threshold_passed:    result.skipped ? null : !!result.passed,
+    };
+  });
+
+  const created = await ShapeFeature.bulkCreate(rows);
+  res.status(201).json({ count: created.length, message: 'Pre-writing activity results saved' });
+}
+
 async function getProgress(req, res) {
   const studentId = parseInt(req.params.studentId, 10);
   if (!studentId) throw new ApiError(422, 'Invalid student ID');
@@ -751,4 +817,4 @@ async function getLetterProgressReport(req, res) {
   res.json({ letters, motorPatterns });
 }
 
-module.exports = { submitAssessment, getProgress, recordLetterCompletion, explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport, getLetterProgressReport };
+module.exports = { submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion, explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport, getLetterProgressReport };

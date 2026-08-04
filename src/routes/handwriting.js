@@ -9,6 +9,7 @@ const collectionCtrl  = require('../controllers/collectionController');
 router.use(verifyToken, isTeacher);
 
 router.post('/assessment',                  ctrl.submitAssessment);
+router.post('/pre-writing-activity',        ctrl.submitPreWritingActivity);
 router.post('/letter-complete',             ctrl.recordLetterCompletion);
 router.get('/progress/:studentId',          ctrl.getProgress);
 
