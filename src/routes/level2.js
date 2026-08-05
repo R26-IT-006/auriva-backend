@@ -3,7 +3,7 @@
 const router          = require('express').Router();
 const { verifyToken } = require('../middleware/auth');
 const { isTeacher }   = require('../middleware/roleGuard');
-const { body, param } = require('express-validator');
+const { body, param, query } = require('express-validator');
 const ctrl            = require('../controllers/level2Controller');
 
 router.use(verifyToken, isTeacher);
@@ -35,10 +35,15 @@ router.patch('/level2/questionnaire/:studentId/portrait', [
 
 // ── Session management ────────────────────────────────────────────────────
 
-router.get('/student/:studentId/level2/progress', ctrl.getProgress);
+router.get('/student/:studentId/level2/progress', [
+  query('topic').optional().isIn(['self_introduction', 'describe_friend', 'describe_pet'])
+    .withMessage('topic must be one of: self_introduction, describe_friend, describe_pet'),
+], ctrl.getProgress);
 
 router.post('/student/:studentId/level2/session/start', [
   body('session_id').optional().isInt({ min: 1 }).withMessage('session_id must be a positive integer'),
+  body('topic').optional().isIn(['self_introduction', 'describe_friend', 'describe_pet'])
+    .withMessage('topic must be one of: self_introduction, describe_friend, describe_pet'),
 ], ctrl.startSession);
 
 router.post('/student/:studentId/level2/session/:sessionId/complete', ctrl.completeSession);

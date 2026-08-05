@@ -39,10 +39,13 @@ async function savePortraitStrokes(req, res) {
 // ── Session ───────────────────────────────────────────────────────────────
 
 async function startSession(req, res) {
+  validate(req);
   const parentSessionId = req.body.session_id ?? null;
+  const topic = req.body.topic ?? 'self_introduction';
   const data = await level2Service.startSession(
     req.user.id,
     req.params.studentId,
+    topic,
     parentSessionId
   );
   res.status(201).json({ message: 'Level 2 session started', data });
@@ -58,7 +61,9 @@ async function completeSession(req, res) {
 }
 
 async function getProgress(req, res) {
-  const data = await level2Service.getProgress(req.user.id, req.params.studentId);
+  validate(req);
+  const topic = req.query.topic ?? 'self_introduction';
+  const data = await level2Service.getProgress(req.user.id, req.params.studentId, topic);
   res.json({ data });
 }
 

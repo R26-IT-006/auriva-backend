@@ -23,7 +23,7 @@ const Level2Session = sequelize.define('Level2Session', {
     allowNull: true,
   },
   topic: {
-    type: DataTypes.ENUM('self_introduction'),
+    type: DataTypes.ENUM('self_introduction', 'describe_friend', 'describe_pet'),
     allowNull: false,
     defaultValue: 'self_introduction',
   },

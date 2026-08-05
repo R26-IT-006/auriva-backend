@@ -14,7 +14,7 @@ const Level2TopicProgress = sequelize.define('Level2TopicProgress', {
     allowNull: false,
   },
   topic: {
-    type: DataTypes.ENUM('self_introduction'),
+    type: DataTypes.ENUM('self_introduction', 'describe_friend', 'describe_pet'),
     allowNull: false,
     defaultValue: 'self_introduction',
   },

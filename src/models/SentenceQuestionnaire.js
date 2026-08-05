@@ -46,6 +46,49 @@ const SentenceQuestionnaire = sequelize.define('SentenceQuestionnaire', {
     type: DataTypes.JSON,
     allowNull: true,
   },
+  friend_name: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+  },
+  friend_name_sinhala: {
+    // Sinhala-script spelling of friend_name, confirmed by the teacher via
+    // SinhalaNameInput (TASK-30), same nullable/fallback contract as
+    // child_first_name_sinhala.
+    type: DataTypes.STRING(100),
+    allowNull: true,
+  },
+  friend_gender: {
+    // Plain VARCHAR ('boy'|'girl'), matching this migration's own snippet —
+    // not promoted to a Postgres ENUM like child_gender (see STATE.md for
+    // the rationale: no other column in this task's scope needed ENUM-level
+    // guarantees, and app-level validation already enforces the same set).
+    type: DataTypes.STRING(10),
+    allowNull: true,
+  },
+  friend_age: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  friend_grade: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  friend_personality: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+  },
+  pet_type: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+  },
+  pet_name: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+  },
+  pet_name_sinhala: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+  },
   portrait_strokes: {
     type: DataTypes.JSON,
     allowNull: true,
