@@ -214,9 +214,9 @@ async function assignStudent(studentId, teacherId) {
         lock: t.LOCK.UPDATE,
       });
       const count = assigned.length;
-      if (count >= 3) {
+      if (count >= 5) {
         await t.rollback();
-        throw new ApiError(400, 'Teacher already has the maximum of 3 students assigned');
+        throw new ApiError(400, 'Teacher already has the maximum of 5 students assigned');
       }
       await Student.update(
         { teacher_id: teacherId },
