@@ -97,6 +97,15 @@ router.post('/students/:id/avatar', [
     .withMessage('avatar_key must be one of: boba, glitter, lily, megatron'),
 ], ctrl.setAvatar);
 
+router.patch('/students/:id/threshold', [
+  body('letter')
+    .isString().notEmpty()
+    .withMessage('letter must be a non-empty string'),
+  body('value')
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('value must be a number between 0 and 100'),
+], ctrl.setThreshold);
+
 router.use('/concepts', require('./concept'));
 
 module.exports = router;

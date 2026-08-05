@@ -58,6 +58,11 @@ const Student = sequelize.define('Student', {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
+  personal_thresholds: {
+    type:         DataTypes.JSONB,
+    allowNull:    false,
+    defaultValue: {},
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

@@ -27,4 +27,17 @@ async function setAvatar(req, res) {
   res.status(201).json(record);
 }
 
-module.exports = { getDashboard, getStudents, getStudentById, setAvatar };
+async function setThreshold(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await teacherService.setThreshold(
+    req.user.id,
+    req.params.id,
+    req.body.letter,
+    req.body.value,
+  );
+  res.json(result);
+}
+
+module.exports = { getDashboard, getStudents, getStudentById, setAvatar, setThreshold };
