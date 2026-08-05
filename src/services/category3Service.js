@@ -115,6 +115,7 @@ function formatWord(word, progress) {
     word:               word.word,
     word_type:          isStandalone(word) ? 'standalone' : 'action_verb',
     asset_key:          word.asset_key,
+    cue_grapheme:       word.cue_grapheme,
     animation_asset:    animationAsset(word),
     keyword_triggers:   word.keyword_triggers,
     status:             progress?.status ?? 'not_started',

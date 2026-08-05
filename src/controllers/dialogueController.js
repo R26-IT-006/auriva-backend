@@ -20,6 +20,11 @@ async function getNextWord(req, res) {
   res.json(word ?? { done: true });
 }
 
+async function getWordById(req, res) {
+  const word = await dialogueService.getWordById(req.params.wordId);
+  res.json(word);
+}
+
 async function recordPhase1Exposure(req, res) {
   const result = await dialogueService.recordPhase1Exposure(
     req.user.id,
@@ -97,6 +102,7 @@ async function recordPhase3Result(req, res) {
 module.exports = {
   getLevel1Overview,
   getNextWord,
+  getWordById,
   recordPhase1Exposure,
   recordPhase1Gate,
   assessPhase2Speech,

@@ -13,6 +13,10 @@ router.use(verifyToken, isTeacher);
 router.get('/student/:studentId/level1/overview',  ctrl.getLevel1Overview);
 router.get('/student/:studentId/level1/next-word', ctrl.getNextWord);
 
+// RC-PROMPT: minimal word lookup (id + cue_grapheme) — not student-scoped,
+// used by Phase 2 screens to fetch cue_grapheme by wordId at mount time.
+router.get('/word/:wordId', ctrl.getWordById);
+
 // ── Phase 1 ───────────────────────────────────────────────────────────────
 
 router.post('/student/:studentId/level1/word/:wordId/phase1-exposure', ctrl.recordPhase1Exposure);

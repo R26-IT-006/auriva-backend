@@ -12,6 +12,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 1,
     asset_key: 'hello',
+    cue_grapheme: 'H',
     keyword_triggers: {
       target: 'Hello',
       score3: ['hello', 'helo', 'hallo'],
@@ -25,6 +26,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 2,
     asset_key: 'goodbye',
+    cue_grapheme: 'G',
     keyword_triggers: {
       target: 'Goodbye',
       score3: ['goodbye', 'good bye', 'goodby'],
@@ -38,6 +40,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 3,
     asset_key: 'good_morning',
+    cue_grapheme: 'G',
     keyword_triggers: {
       target: 'Good morning',
       score3: ['good morning', 'good mornin'],
@@ -51,6 +54,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 4,
     asset_key: 'good_afternoon',
+    cue_grapheme: 'G',
     keyword_triggers: {
       target: 'Good afternoon',
       score3: ['good afternoon', 'good aftenoon'],
@@ -64,6 +68,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 5,
     asset_key: 'good_night',
+    cue_grapheme: 'GN',
     keyword_triggers: {
       target: 'Good night',
       score3: ['good night', 'good nite', 'gud night'],
@@ -77,6 +82,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 6,
     asset_key: 'happy_birthday',
+    cue_grapheme: 'TH',
     keyword_triggers: {
       target: 'Happy Birthday',
       score3: ['happy birthday', 'happy birtday', 'happy bithday'],
@@ -90,6 +96,7 @@ const WORDS = [
     difficulty: 3,
     teaching_order: 7,
     asset_key: 'how_are_you',
+    cue_grapheme: 'H',
     keyword_triggers: {
       target: 'How are you',
       score3: ['how are you', 'how r you', 'how are u'],
@@ -103,6 +110,7 @@ const WORDS = [
     difficulty: 3,
     teaching_order: 8,
     asset_key: 'im_fine',
+    cue_grapheme: 'F',
     keyword_triggers: {
       target: "I'm fine",
       score3: ["i'm fine", 'im fine', "i am fine"],
@@ -116,6 +124,7 @@ const WORDS = [
     difficulty: 3,
     teaching_order: 9,
     asset_key: 'happy_new_year',
+    cue_grapheme: 'H',
     keyword_triggers: {
       target: 'Happy New Year',
       score3: ['happy new year', 'happy new yeer', 'happy nu year'],
@@ -131,6 +140,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 1,
     asset_key: 'thank_you',
+    cue_grapheme: 'TH',
     keyword_triggers: {
       target: 'Thank you',
       score3: ['thank you', 'thank you very much', 'thankyou'],
@@ -144,6 +154,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 2,
     asset_key: 'youre_welcome',
+    cue_grapheme: 'W',
     keyword_triggers: {
       target: "You're welcome",
       score3: ["you're welcome", 'you are welcome', 'your welcome'],
@@ -157,6 +168,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 3,
     asset_key: 'im_sorry',
+    cue_grapheme: 'S',
     keyword_triggers: {
       target: "I'm Sorry",
       score3: ["i'm sorry", 'im sorry', 'i am sorry'],
@@ -170,6 +182,7 @@ const WORDS = [
     difficulty: 3,
     teaching_order: 4,
     asset_key: 'excuse_me',
+    cue_grapheme: 'X',
     keyword_triggers: {
       target: 'Excuse me',
       score3: ['excuse me', 'excus me', 'xcuse me'],
@@ -187,6 +200,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 0,
     asset_key: 'cat3_yes',
+    cue_grapheme: 'Y',
     keyword_triggers: {
       target: 'Yes',
       score3: ['yes', 'yeh', 'ya', 'yep'],
@@ -200,6 +214,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 0,
     asset_key: 'cat3_no',
+    cue_grapheme: 'N',
     keyword_triggers: {
       target: 'No',
       score3: ['no', 'noe', 'noh'],
@@ -214,6 +229,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 1,
     asset_key: 'clap',
+    cue_grapheme: 'CL',
     keyword_triggers: {
       target: 'Clap',
       score3: ['clap', 'claps', 'clapping'],
@@ -227,6 +243,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 2,
     asset_key: 'run',
+    cue_grapheme: 'R',
     keyword_triggers: {
       target: 'Run',
       score3: ['run', 'running', 'runs'],
@@ -240,6 +257,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 3,
     asset_key: 'walk',
+    cue_grapheme: 'W',
     keyword_triggers: {
       target: 'Walk',
       score3: ['walk', 'walking', 'walks'],
@@ -253,6 +271,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 4,
     asset_key: 'jump',
+    cue_grapheme: 'J',
     keyword_triggers: {
       target: 'Jump',
       score3: ['jump', 'jumping', 'jumps'],
@@ -266,6 +285,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 5,
     asset_key: 'talk',
+    cue_grapheme: 'T',
     keyword_triggers: {
       target: 'Talk',
       score3: ['talk', 'talking', 'talks'],
@@ -279,6 +299,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 6,
     asset_key: 'dance',
+    cue_grapheme: 'D',
     keyword_triggers: {
       target: 'Dance',
       score3: ['dance', 'dancing', 'dances'],
@@ -292,6 +313,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 7,
     asset_key: 'sing',
+    cue_grapheme: 'S',
     keyword_triggers: {
       target: 'Sing',
       score3: ['sing', 'singing', 'sings'],
@@ -305,6 +327,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 8,
     asset_key: 'can_you',
+    cue_grapheme: 'C',
     keyword_triggers: {
       target: 'Can you',
       score3: ['can you', 'can u', 'ken you'],
@@ -318,6 +341,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 9,
     asset_key: 'yes_i_can',
+    cue_grapheme: 'Y',
     keyword_triggers: {
       target: 'Yes I can',
       score3: ['yes i can', 'yes i ken', 'yes i kan'],
@@ -331,6 +355,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 10,
     asset_key: 'no_i_cant',
+    cue_grapheme: 'T',
     keyword_triggers: {
       target: "No I can't",
       score3: ["no i can't", "no i cant", 'no i cannot'],
@@ -344,6 +369,7 @@ const WORDS = [
     difficulty: 3,
     teaching_order: 11,
     asset_key: 'i_can',
+    cue_grapheme: 'C',
     keyword_triggers: {
       target: 'I can',
       score3: ['i can', 'i ken', 'i kan'],
@@ -359,6 +385,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 1,
     asset_key: 'monday',
+    cue_grapheme: 'M',
     keyword_triggers: {
       target: 'Monday',
       score3: ['monday', 'munday', 'mondy'],
@@ -372,6 +399,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 2,
     asset_key: 'tuesday',
+    cue_grapheme: 'TU',
     keyword_triggers: {
       target: 'Tuesday',
       score3: ['tuesday', 'tyoosdai', 'tueday'],
@@ -385,6 +413,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 3,
     asset_key: 'wednesday',
+    cue_grapheme: 'W',
     keyword_triggers: {
       target: 'Wednesday',
       score3: ['wednesday', 'wensday', 'wendsday'],
@@ -398,6 +427,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 4,
     asset_key: 'thursday',
+    cue_grapheme: 'TH',
     keyword_triggers: {
       target: 'Thursday',
       score3: ['thursday', 'thursdai', 'thursdy'],
@@ -411,6 +441,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 5,
     asset_key: 'friday',
+    cue_grapheme: 'FR',
     keyword_triggers: {
       target: 'Friday',
       score3: ['friday', 'fryday', 'fridai'],
@@ -424,6 +455,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 6,
     asset_key: 'saturday',
+    cue_grapheme: 'S',
     keyword_triggers: {
       target: 'Saturday',
       score3: ['saturday', 'saturdai', 'saturdy'],
@@ -437,6 +469,7 @@ const WORDS = [
     difficulty: 1,
     teaching_order: 7,
     asset_key: 'sunday',
+    cue_grapheme: 'S',
     keyword_triggers: {
       target: 'Sunday',
       score3: ['sunday', 'sundai', 'sundy'],
@@ -450,6 +483,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 8,
     asset_key: 'whats_the_day_today',
+    cue_grapheme: 'TH',
     keyword_triggers: {
       target: "What's the day today",
       score3: ["what's the day today", 'whats the day today', "what is the day today"],
@@ -463,6 +497,7 @@ const WORDS = [
     difficulty: 2,
     teaching_order: 9,
     asset_key: 'today_is',
+    cue_grapheme: 'T',
     keyword_triggers: {
       target: 'Today is',
       score3: ['today is', 'today iz', 'today it is'],

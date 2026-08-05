@@ -30,6 +30,10 @@ const DialogueWord = sequelize.define('DialogueWord', {
     allowNull: false,
     unique: true,
   },
+  cue_grapheme: {
+    type: DataTypes.STRING(10),
+    allowNull: true,
+  },
   keyword_triggers: {
     type: DataTypes.JSON,
     allowNull: false,

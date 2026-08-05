@@ -251,6 +251,7 @@ function formatNextWord(word, progress) {
     category:                  word.category,
     difficulty:                word.difficulty,
     asset_key:                 word.asset_key,
+    cue_grapheme:              word.cue_grapheme,
     keyword_triggers:          word.keyword_triggers,
     current_phase:             progress?.current_phase ?? 1,
     phase1_exposure_count:     progress?.phase1_exposure_count ?? 0,
@@ -258,6 +259,14 @@ function formatNextWord(word, progress) {
     phase1_gate_passed:        progress?.phase1_gate_passed ?? false,
     status:                    progress?.status ?? 'not_started',
   };
+}
+
+// RC-PROMPT: minimal single-word lookup so Phase 2 screens can fetch
+// cue_grapheme by wordId at mount time instead of relying on it being
+// threaded through the navigation params chain.
+async function getWordById(wordId) {
+  const word = await assertWordExists(wordId);
+  return { id: word.id, cue_grapheme: word.cue_grapheme };
 }
 
 async function recordPhase1Exposure(teacherId, studentId, wordId) {
@@ -571,6 +580,7 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
 module.exports = {
   getLevel1Overview,
   getNextWord,
+  getWordById,
   recordPhase1Exposure,
   recordPhase1Gate,
   assessPhase2Speech,
