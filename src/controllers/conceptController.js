@@ -2,6 +2,7 @@
 
 const { validationResult } = require('express-validator');
 const conceptService       = require('../services/conceptService');
+const activityService      = require('../services/activityService');
 const ApiError             = require('../utils/ApiError');
 
 async function getConceptItems(req, res) {
@@ -153,4 +154,44 @@ async function completeTier3(req, res) {
   res.json(result);
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getConfusions, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3 };
+// ─── Cross-concept activities ────────────────────────────────────────────────
+
+async function getActivityStatus(req, res) {
+  const { category } = req.params;
+  const studentId = parseInt(req.query.student_id, 10);
+  if (!studentId) throw new ApiError(422, 'student_id query param is required');
+
+  const result = await activityService.getActivityStatus(studentId, category);
+  res.json(result);
+}
+
+async function startActivity(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const { student_id, category_key, session_id } = req.body;
+  const result = await activityService.startActivity(student_id, category_key, session_id);
+  res.status(201).json(result);
+}
+
+async function logActivityAttempt(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const { student_id, session_id, ...payload } = req.body;
+  const result = await activityService.logActivityAttempt(student_id, session_id, payload);
+  res.status(201).json(result);
+}
+
+async function completeActivity(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const { student_id, activity_id, round_results, session_id } = req.body;
+  const result = await activityService.completeActivity(
+    student_id, activity_id, round_results || [], session_id,
+  );
+  res.json(result);
+}
+
+module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getConfusions, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getActivityStatus, startActivity, logActivityAttempt, completeActivity };

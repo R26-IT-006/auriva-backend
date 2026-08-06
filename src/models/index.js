@@ -9,6 +9,7 @@ const StudentAvatar            = require('./StudentAvatar');
 const PasswordResetOtp         = require('./PasswordResetOtp');
 const StudentConceptProgress   = require('./StudentConceptProgress');
 const ConceptInteractionLog    = require('./ConceptInteractionLog');
+const StudentActivity          = require('./StudentActivity');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -37,6 +38,10 @@ StudentConceptProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'stude
 Student.hasMany(ConceptInteractionLog, { foreignKey: 'student_id', as: 'conceptLogs' });
 ConceptInteractionLog.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → cross-concept activities
+Student.hasMany(StudentActivity, { foreignKey: 'student_id', as: 'activities' });
+StudentActivity.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize,
   Principal,
@@ -47,4 +52,5 @@ module.exports = {
   PasswordResetOtp,
   StudentConceptProgress,
   ConceptInteractionLog,
+  StudentActivity,
 };
