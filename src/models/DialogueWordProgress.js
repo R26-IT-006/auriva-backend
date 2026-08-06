@@ -71,6 +71,10 @@ const DialogueWordProgress = sequelize.define('DialogueWordProgress', {
     type: DataTypes.STRING(20),
     allowNull: true,
   },
+  last_probe_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+  },
   total_sessions: {
     type: DataTypes.INTEGER,
     defaultValue: 0,

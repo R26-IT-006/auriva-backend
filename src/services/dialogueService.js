@@ -10,6 +10,10 @@ const ECHOLALIA_THRESHOLD_MS = 1500;  // below this, treat as probable echolalia
 const ECHOLALIA_EMA_ALPHA    = 0.3;   // smoothing factor for the running echolalia_rate
 const ECHOLALIA_MIC_DELAY_MS = 3000;  // delay applied to the next attempt when echolalia_rate > 0.5
 
+// Rule 5 — periodic production probe. tunable default, not yet confirmed
+// with student/supervisor — adjust here.
+const PROBE_INTERVAL_DAYS = 14;
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 function todayString() {
@@ -414,18 +418,28 @@ async function assessPhase2Speech(teacherId, studentId, wordId, {
  * Increments non_verbal_count on the progress record.
  * Child always proceeds to Phase 3 after this activity regardless of result.
  */
-async function recordNonVerbalResult(teacherId, studentId, wordId, { image_selected_correct, session_id }) {
+async function recordNonVerbalResult(teacherId, studentId, wordId, { image_selected_correct, session_id, is_probe = false }) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
   await assertWordExists(wordId);
 
   const progress = await getOrCreateProgress(studentId, wordId);
 
-  await progress.update({
-    non_verbal_count: progress.non_verbal_count + 1,
-    current_phase:    3,
-    status:           'in_progress',
-    updated_at:       new Date(),
-  });
+  if (is_probe) {
+    // Rule 5 retention-check fallback: never touches current_phase/status —
+    // a probe's non-verbal result must never move the word off its mastered state.
+    await progress.update({
+      non_verbal_count: progress.non_verbal_count + 1,
+      last_probe_date:  todayString(),
+      updated_at:       new Date(),
+    });
+  } else {
+    await progress.update({
+      non_verbal_count: progress.non_verbal_count + 1,
+      current_phase:    3,
+      status:           'in_progress',
+      updated_at:       new Date(),
+    });
+  }
 
   await DialogueWordAttempt.create({
     student_id:   studentId,
@@ -435,12 +449,13 @@ async function recordNonVerbalResult(teacherId, studentId, wordId, { image_selec
     speech_score: image_selected_correct ? 1 : 0,
     match_type:   'non_verbal',
     phase3_correct: null,
+    is_probe,
   });
 
   return {
     image_selected_correct,
     non_verbal_count: progress.non_verbal_count + 1,
-    advance_to_phase3: true,
+    advance_to_phase3: !is_probe,
   };
 }
 
@@ -535,6 +550,8 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
     if (newSessionPassCount >= 2 && differentDay) {
       newStatus = 'mastered';
       mastered  = true;
+      // mastery_path is otherwise only ever written by recordProbeResult() (Rule 5's
+      // probe-driven non_verbal → mixed upgrade when emerged speech clears the bar).
       newMasteryPath =
         newVerbalPassCount > 0 && newNonVerbalPassCount > 0 ? 'mixed'
         : newNonVerbalPassCount > 0 ? 'non_verbal'
@@ -595,6 +612,120 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
   };
 }
 
+/**
+ * GET /probe-candidate
+ * Rule 5 — periodic production probe. Read-only: picks the single
+ * non-verbal-mastered word most overdue for a probe (never-probed words
+ * count as most overdue), or null if none are due. Never writes anything —
+ * this is explicitly outside Rules 1-4's transition logic.
+ */
+async function getProbeCandidate(teacherId, studentId, category = null) {
+  await assertStudentBelongsToTeacher(teacherId, studentId);
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - PROBE_INTERVAL_DAYS);
+  const cutoffString = cutoff.toISOString().split('T')[0];
+
+  const candidates = await DialogueWordProgress.findAll({
+    where: {
+      student_id: studentId,
+      mastery_path: 'non_verbal',
+      [Op.or]: [
+        { last_probe_date: null },
+        { last_probe_date: { [Op.lte]: cutoffString } },
+      ],
+    },
+    include: [{
+      model: DialogueWord,
+      as: 'word',
+      where: category ? { category } : {},
+      required: true,
+    }],
+  });
+
+  if (candidates.length === 0) return null;
+
+  // Oldest-probed (or never-probed) first: a null last_probe_date always
+  // outranks any dated one, since it has never been checked at all.
+  const chosen = candidates.reduce((oldest, current) => {
+    if (!oldest) return current;
+    if (oldest.last_probe_date === null) return oldest;
+    if (current.last_probe_date === null) return current;
+    return current.last_probe_date < oldest.last_probe_date ? current : oldest;
+  }, null);
+
+  const word = chosen.word;
+  return {
+    word_id:            word.id,
+    word:                word.word,
+    category:            word.category,
+    cue_grapheme:        word.cue_grapheme,
+    keyword_triggers:    word.keyword_triggers,
+    mastery_path:        chosen.mastery_path,
+    last_probe_date:     chosen.last_probe_date,
+  };
+}
+
+/**
+ * POST /probe-result
+ * Rule 5 — records a periodic production probe attempt on an already
+ * non-verbal-mastered word. Deliberately narrow: unlike assessPhase2Speech(),
+ * this never writes status/current_phase/session_pass_count/
+ * consecutive_fail_count/phase2_zero_streak — a probe must never risk the
+ * word's mastery status. Only last_probe_date is always updated; mastery_path
+ * and verbal_pass_count are upgraded only when speech has genuinely emerged
+ * (score >= 2, the same bar a normal verbal pass requires).
+ */
+async function recordProbeResult(teacherId, studentId, wordId, { audio_base64, mime_type, session_id }) {
+  await assertStudentBelongsToTeacher(teacherId, studentId);
+  const word = await assertWordExists(wordId);
+  const progress = await getOrCreateProgress(studentId, wordId);
+
+  if (progress.mastery_path !== 'non_verbal') {
+    throw new ApiError(422, 'Word is not on the non-verbal mastery path; probe is not applicable.');
+  }
+
+  const { score, transcript, match_type, phoneme_error_class, phoneme_accuracy } = await speechAssessment.assessSpeech(
+    audio_base64,
+    mime_type,
+    word.keyword_triggers
+  );
+
+  await DialogueWordAttempt.create({
+    student_id:   studentId,
+    word_id:      wordId,
+    session_id:   session_id ?? null,
+    phase:        2,
+    speech_score: score,
+    transcript,
+    match_type,
+    phoneme_error_class,
+    phoneme_accuracy,
+    is_probe:     true,
+  });
+
+  const speechEmerged = score >= 2;
+  const updates = {
+    last_probe_date: todayString(),
+    updated_at:       new Date(),
+  };
+
+  let newMasteryPath = progress.mastery_path;
+  if (speechEmerged) {
+    newMasteryPath          = 'mixed';
+    updates.mastery_path    = newMasteryPath;
+    updates.verbal_pass_count = progress.verbal_pass_count + 1;
+  }
+
+  await progress.update(updates);
+
+  return {
+    score,
+    speech_emerged: speechEmerged,
+    mastery_path:   newMasteryPath,
+  };
+}
+
 module.exports = {
   getLevel1Overview,
   getNextWord,
@@ -605,4 +736,6 @@ module.exports = {
   recordNonVerbalResult,
   recordPhase3Scenario,
   recordPhase3Result,
+  getProbeCandidate,
+  recordProbeResult,
 };

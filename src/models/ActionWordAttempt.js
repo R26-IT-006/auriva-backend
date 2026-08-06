@@ -73,6 +73,11 @@ const ActionWordAttempt = sequelize.define('ActionWordAttempt', {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+  is_probe: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false,
+  },
 }, {
   tableName: 'action_word_attempts',
   timestamps: false,

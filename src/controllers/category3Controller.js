@@ -142,6 +142,18 @@ async function recordVerbQANonVerbal(req, res) {
   res.json(result);
 }
 
+async function recordProbeResult(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+  const result = await cat3Service.recordProbeResult(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId,
+    req.body
+  );
+  res.json(result);
+}
+
 module.exports = {
   getCat3Overview,
   getNextWord,
@@ -158,4 +170,5 @@ module.exports = {
   getVerbQASession,
   assessVerbQARound,
   recordVerbQANonVerbal,
+  recordProbeResult,
 };

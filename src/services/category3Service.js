@@ -317,15 +317,26 @@ async function assessPhase2Speech(teacherId, studentId, wordId, {
  * POST /phase2-nonverbal
  * Word-to-Action Matching fallback. Child always advances to Phase 3 after this.
  */
-async function recordPhase2NonVerbal(teacherId, studentId, wordId, { tap_correct, session_id }) {
+async function recordPhase2NonVerbal(teacherId, studentId, wordId, { tap_correct, session_id, is_probe = false }) {
   await assertStudentBelongsToTeacher(teacherId, studentId);
   await assertCat3WordExists(wordId);
 
   const progress = await getOrCreateProgress(studentId, wordId);
-  await progress.update({
-    non_verbal_count: progress.non_verbal_count + 1,
-    status: 'in_progress', updated_at: new Date(),
-  });
+
+  if (is_probe) {
+    // Rule 5 retention-check fallback: never touches status — a probe's
+    // non-verbal result must never move the word off its mastered state.
+    await progress.update({
+      non_verbal_count: progress.non_verbal_count + 1,
+      last_probe_date:  todayString(),
+      updated_at:       new Date(),
+    });
+  } else {
+    await progress.update({
+      non_verbal_count: progress.non_verbal_count + 1,
+      status: 'in_progress', updated_at: new Date(),
+    });
+  }
 
   const existing = session_id
     ? await ActionWordAttempt.findOne({
@@ -335,15 +346,15 @@ async function recordPhase2NonVerbal(teacherId, studentId, wordId, { tap_correct
     : null;
 
   if (existing) {
-    await existing.update({ phase2_speech_score: tap_correct ? 1 : 0, phase2_match_type: 'non_verbal' });
+    await existing.update({ phase2_speech_score: tap_correct ? 1 : 0, phase2_match_type: 'non_verbal', is_probe });
   } else {
     await ActionWordAttempt.create({
       student_id: studentId, word_id: wordId, session_id: session_id ?? null,
-      phase2_speech_score: tap_correct ? 1 : 0, phase2_match_type: 'non_verbal',
+      phase2_speech_score: tap_correct ? 1 : 0, phase2_match_type: 'non_verbal', is_probe,
     });
   }
 
-  return { tap_correct, non_verbal_count: progress.non_verbal_count + 1, advance_to_phase3: true };
+  return { tap_correct, non_verbal_count: progress.non_verbal_count + 1, advance_to_phase3: !is_probe };
 }
 
 /**
@@ -472,6 +483,8 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
     if (newSessionPassCount >= 2 && differentDay) {
       newStatus = 'mastered';
       mastered  = true;
+      // mastery_path is otherwise only ever written by recordProbeResult() (Rule 5's
+      // probe-driven non_verbal → mixed upgrade when emerged speech clears the bar).
       newMasteryPath =
         newVerbalPassCount > 0 && newNonVerbalPassCount > 0 ? 'mixed'
         : newNonVerbalPassCount > 0 ? 'non_verbal'
@@ -705,6 +718,64 @@ async function recordVerbQANonVerbal(teacherId, studentId, {
   return { id: round.id, logged: true };
 }
 
+/**
+ * POST /probe-result
+ * Rule 5 — mirrors dialogueService.js's recordProbeResult(), adapted to this
+ * file's ActionWordAttempt field names. Deliberately narrow: never writes
+ * status/session_pass_count/consecutive_fail_count/phase2_zero_streak — a
+ * probe must never risk the word's mastery status. No getProbeCandidate()
+ * here — dialogueService.js's version already covers abilities words (see
+ * STATE.md TASK-37 notes for the alias verification).
+ */
+async function recordProbeResult(teacherId, studentId, wordId, { audio_base64, mime_type, session_id }) {
+  await assertStudentBelongsToTeacher(teacherId, studentId);
+  const word = await assertCat3WordExists(wordId);
+  const progress = await getOrCreateProgress(studentId, wordId);
+
+  if (progress.mastery_path !== 'non_verbal') {
+    throw new ApiError(422, 'Word is not on the non-verbal mastery path; probe is not applicable.');
+  }
+
+  const { score, transcript, match_type, phoneme_error_class, phoneme_accuracy } = await speechAssessment.assessSpeech(
+    audio_base64,
+    mime_type,
+    word.keyword_triggers
+  );
+
+  await ActionWordAttempt.create({
+    student_id:                  studentId,
+    word_id:                     wordId,
+    session_id:                  session_id ?? null,
+    phase2_speech_score:         score,
+    phase2_transcript:           transcript,
+    phase2_match_type:           match_type,
+    phase2_phoneme_error_class:  phoneme_error_class,
+    phase2_phoneme_accuracy:     phoneme_accuracy,
+    is_probe:                    true,
+  });
+
+  const speechEmerged = score >= 2;
+  const updates = {
+    last_probe_date: todayString(),
+    updated_at:       new Date(),
+  };
+
+  let newMasteryPath = progress.mastery_path;
+  if (speechEmerged) {
+    newMasteryPath            = 'mixed';
+    updates.mastery_path      = newMasteryPath;
+    updates.verbal_pass_count = progress.verbal_pass_count + 1;
+  }
+
+  await progress.update(updates);
+
+  return {
+    score,
+    speech_emerged: speechEmerged,
+    mastery_path:   newMasteryPath,
+  };
+}
+
 module.exports = {
   getCat3Overview,
   getNextWord,
@@ -721,4 +792,5 @@ module.exports = {
   getVerbQASession,
   assessVerbQARound,
   recordVerbQANonVerbal,
+  recordProbeResult,
 };

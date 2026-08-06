@@ -60,6 +60,11 @@ const DialogueWordAttempt = sequelize.define('DialogueWordAttempt', {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+  is_probe: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false,
+  },
 }, {
   tableName: 'dialogue_word_attempts',
   timestamps: false,

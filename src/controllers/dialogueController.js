@@ -99,6 +99,29 @@ async function recordPhase3Result(req, res) {
   res.json(result);
 }
 
+async function getProbeCandidate(req, res) {
+  const { category } = req.query;
+  const word = await dialogueService.getProbeCandidate(
+    req.user.id,
+    req.params.studentId,
+    category ?? null
+  );
+  res.json(word ?? { done: true });
+}
+
+async function recordProbeResult(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await dialogueService.recordProbeResult(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId,
+    req.body
+  );
+  res.json(result);
+}
+
 module.exports = {
   getLevel1Overview,
   getNextWord,
@@ -109,4 +132,6 @@ module.exports = {
   recordNonVerbalResult,
   recordPhase3Scenario,
   recordPhase3Result,
+  getProbeCandidate,
+  recordProbeResult,
 };

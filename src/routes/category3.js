@@ -127,4 +127,15 @@ router.post('/student/:studentId/cat3/activity/3.3/round/nonverbal', [
   body('round_order').isInt({ min: 1 }).withMessage('round_order is required'),
 ], ctrl.recordVerbQANonVerbal);
 
+// ── Rule 5 — periodic production probe ────────────────────────────────────
+// GET probe-candidate is not duplicated here — abilities words are covered
+// by dialogueController's GET /level1/probe-candidate (see STATE.md TASK-37
+// notes for the association-alias verification behind this).
+
+router.post('/student/:studentId/cat3/word/:wordId/probe-result', [
+  body('audio_base64').isString().notEmpty().withMessage('audio_base64 is required'),
+  body('mime_type').isString().notEmpty().withMessage('mime_type is required'),
+  body('session_id').optional().isInt({ min: 1 }),
+], ctrl.recordProbeResult);
+
 module.exports = router;

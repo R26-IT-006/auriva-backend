@@ -60,4 +60,14 @@ router.post('/student/:studentId/level1/word/:wordId/phase3-complete', [
   body('session_id').optional().isInt({ min: 1 }),
 ], ctrl.recordPhase3Result);
 
+// ── Rule 5 — periodic production probe ────────────────────────────────────
+
+router.get('/student/:studentId/level1/probe-candidate', ctrl.getProbeCandidate);
+
+router.post('/student/:studentId/level1/word/:wordId/probe-result', [
+  body('audio_base64').isString().notEmpty().withMessage('audio_base64 is required'),
+  body('mime_type').isString().notEmpty().withMessage('mime_type is required'),
+  body('session_id').optional().isInt({ min: 1 }),
+], ctrl.recordProbeResult);
+
 module.exports = router;
