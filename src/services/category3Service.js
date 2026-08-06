@@ -266,14 +266,14 @@ async function assessPhase2Speech(teacherId, studentId, wordId, {
   }
 
   const progress = await getOrCreateProgress(studentId, wordId);
-  const newConsecFails = score === 0 ? progress.consecutive_fail_count + 1 : 0;
+  const newPhase2ZeroStreak = score === 0 ? progress.phase2_zero_streak + 1 : 0;
 
   // RC3 — running echolalia rate (same EMA approach as dialogueService.js)
   const newEcholaliaRate = progress.echolalia_rate
     + ECHOLALIA_EMA_ALPHA * ((echolalia_flag ? 1 : 0) - progress.echolalia_rate);
 
   await progress.update({
-    consecutive_fail_count: newConsecFails,
+    phase2_zero_streak: newPhase2ZeroStreak,
     status: 'in_progress',
     echolalia_rate: newEcholaliaRate,
     updated_at: new Date(),
@@ -307,8 +307,8 @@ async function assessPhase2Speech(teacherId, studentId, wordId, {
     score, transcript, match_type,
     session_id:        activeSessionId,
     advance_to_phase3: score >= 2,
-    trigger_nonverbal:      score === 0 && newConsecFails >= 3,
-    consecutive_fail_count: newConsecFails,
+    trigger_nonverbal:      score === 0 && newPhase2ZeroStreak >= 3,
+    phase2_zero_streak:     newPhase2ZeroStreak,
     mic_delay_ms:           newEcholaliaRate > 0.5 ? ECHOLALIA_MIC_DELAY_MS : 0,
   };
 }
@@ -442,6 +442,7 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
   let newStatus           = progress.status;
   let newSessionPassCount = progress.session_pass_count;
   let newLastPassDate     = progress.last_pass_date;
+  // Session-level only (Rule 2) — never write this from a Phase-2 sub-attempt-level function; use phase2_zero_streak for that.
   let newConsecFails      = progress.consecutive_fail_count;
   const newTotalSessions  = progress.total_sessions + 1;
   let mastered            = false;

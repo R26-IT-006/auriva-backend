@@ -55,6 +55,10 @@ const DialogueWordProgress = sequelize.define('DialogueWordProgress', {
     type: DataTypes.INTEGER,
     defaultValue: 0,
   },
+  phase2_zero_streak: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+  },
   total_sessions: {
     type: DataTypes.INTEGER,
     defaultValue: 0,

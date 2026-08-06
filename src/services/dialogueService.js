@@ -361,8 +361,8 @@ async function assessPhase2Speech(teacherId, studentId, wordId, {
   const progress = await getOrCreateProgress(studentId, wordId);
 
   // Track consecutive score-0s to trigger non-verbal fallback at 3
-  const newConsecutiveFails = score === 0
-    ? progress.consecutive_fail_count + 1
+  const newPhase2ZeroStreak = score === 0
+    ? progress.phase2_zero_streak + 1
     : 0;
 
   // RC3 — running echolalia rate (exponential moving average, no extra column needed)
@@ -370,7 +370,7 @@ async function assessPhase2Speech(teacherId, studentId, wordId, {
     + ECHOLALIA_EMA_ALPHA * ((echolalia_flag ? 1 : 0) - progress.echolalia_rate);
 
   const updates = {
-    consecutive_fail_count: newConsecutiveFails,
+    phase2_zero_streak: newPhase2ZeroStreak,
     status: 'in_progress',
     echolalia_rate: newEcholaliaRate,
     updated_at: new Date(),
@@ -402,8 +402,8 @@ async function assessPhase2Speech(teacherId, studentId, wordId, {
     match_type,
     session_id:             activeSessionId,
     advance_to_phase3:      score >= 2,
-    trigger_nonverbal:      newConsecutiveFails >= 3,
-    consecutive_fail_count: newConsecutiveFails,
+    trigger_nonverbal:      newPhase2ZeroStreak >= 3,
+    phase2_zero_streak:     newPhase2ZeroStreak,
     mic_delay_ms:           newEcholaliaRate > 0.5 ? ECHOLALIA_MIC_DELAY_MS : 0,
   };
 }
@@ -504,6 +504,7 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
   let newStatus           = progress.status;
   let newSessionPassCount = progress.session_pass_count;
   let newLastPassDate     = progress.last_pass_date;
+  // Session-level only (Rule 2) — never write this from a Phase-2 sub-attempt-level function; use phase2_zero_streak for that.
   let newConsecFails      = progress.consecutive_fail_count;
   let newTotalSessions    = progress.total_sessions + 1;
   let mastered            = false;
