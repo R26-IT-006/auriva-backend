@@ -70,4 +70,8 @@ router.post('/student/:studentId/level1/word/:wordId/probe-result', [
   body('session_id').optional().isInt({ min: 1 }),
 ], ctrl.recordProbeResult);
 
+// ── TASK-38 — trajectory-driven difficulty ladder / dwell adaptivity ──────
+
+router.get('/student/:studentId/word/:wordId/trajectory', ctrl.getTrajectory);
+
 module.exports = router;

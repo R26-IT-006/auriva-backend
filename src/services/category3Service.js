@@ -13,6 +13,7 @@ const {
 } = require('../models');
 const ApiError         = require('../utils/ApiError');
 const speechAssessment = require('./speechAssessmentService');
+const { getTrajectoryPrediction } = require('./trajectoryService');
 
 // RC3 — echolalia detection thresholds (mirrors dialogueService.js)
 const ECHOLALIA_THRESHOLD_MS = 1500;
@@ -141,18 +142,44 @@ async function getNextWord(teacherId, studentId) {
 
   const entries = await fetchCat3WordsWithProgress(studentId);
 
+  // Strict gate: every standalone word (Yes/No) must be mastered. 'typical'
+  // and 'struggling' both keep this, unchanged — this is the fallback path
+  // every session takes until TASK-04 exists; this category never had a
+  // stricter-than-default gate to begin with, so there's nothing to tighten
+  // for 'struggling'.
   const allStandaloneMastered = entries
     .filter(({ word }) => isStandalone(word))
     .every(({ progress }) => progress?.status === 'mastered');
 
+  // Relaxed gate ('fast' trajectory only): at least one standalone word has
+  // a session pass (mirrors dialogueService.js's isSessionUnlocked, adapted
+  // to this category's binary gate shape rather than a numbered-tier one).
+  const standaloneSessionUnlocked = entries
+    .filter(({ word }) => isStandalone(word))
+    .some(({ progress }) => (progress?.session_pass_count ?? 0) >= 1);
+
   const today = todayString();
 
-  const candidates = entries.filter(({ word, progress }) => {
+  const basePool = entries.filter(({ progress }) => {
     if (progress?.status === 'mastered') return false;
     if (progress?.last_session_date === today) return false;
-    if (!isStandalone(word) && !allStandaloneMastered) return false;
     return true;
   });
+
+  // Trajectory-conditioned gate, evaluated per action-verb candidate (Scope
+  // Amendment A1: getNextWord() has no single "just passed" word to key a
+  // one-shot trajectory call off of). Standalone candidates are never
+  // subject to this gate.
+  const candidates = [];
+  for (const e of basePool) {
+    if (isStandalone(e.word)) {
+      candidates.push(e);
+      continue;
+    }
+    const trajectory = await getTrajectoryPrediction(studentId, e.word.id);
+    const gateOpen = trajectory === 'fast' ? standaloneSessionUnlocked : allStandaloneMastered;
+    if (gateOpen) candidates.push(e);
+  }
 
   const pick =
     candidates.find(({ progress }) => progress?.status === 'in_progress') ??

@@ -2,6 +2,7 @@
 
 const { validationResult } = require('express-validator');
 const dialogueService      = require('../services/dialogueService');
+const trajectoryService    = require('../services/trajectoryService');
 const ApiError             = require('../utils/ApiError');
 
 async function getLevel1Overview(req, res) {
@@ -122,6 +123,14 @@ async function recordProbeResult(req, res) {
   res.json(result);
 }
 
+async function getTrajectory(req, res) {
+  const trajectory = await trajectoryService.getTrajectoryPrediction(
+    req.params.studentId,
+    req.params.wordId
+  );
+  res.json({ trajectory });
+}
+
 module.exports = {
   getLevel1Overview,
   getNextWord,
@@ -134,4 +143,5 @@ module.exports = {
   recordPhase3Result,
   getProbeCandidate,
   recordProbeResult,
+  getTrajectory,
 };

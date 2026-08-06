@@ -4,6 +4,7 @@ const { Op }                    = require('sequelize');
 const { DialogueWord, DialogueWordProgress, DialogueWordAttempt, DialoguePhase3Attempt, Student, Session } = require('../models');
 const ApiError                  = require('../utils/ApiError');
 const speechAssessment          = require('./speechAssessmentService');
+const { getTrajectoryPrediction } = require('./trajectoryService');
 
 // RC3 — echolalia detection thresholds
 const ECHOLALIA_THRESHOLD_MS = 1500;  // below this, treat as probable echolalia
@@ -159,6 +160,19 @@ async function getNextWord(teacherId, studentId, { category = null, exclude_word
     return true;
   }
 
+  // Loose gate ('fast' trajectory only): at least one lower-difficulty word
+  // (any tier below, not merely session-passed) is mastered.
+  function anyLowerDifficultyMastered(targetWord) {
+    if (targetWord.difficulty === 1) return true;
+
+    return entries.some(
+      (e) =>
+        e.word.category === targetWord.category &&
+        e.word.difficulty < targetWord.difficulty &&
+        e.progress?.status === 'mastered'
+    );
+  }
+
   const excludedId       = exclude_word_id ? parseInt(exclude_word_id, 10) : null;
   const currentDifficulty = excludedId
     ? (entries.find((e) => e.word.id === excludedId)?.word.difficulty ?? null)
@@ -187,10 +201,21 @@ async function getNextWord(teacherId, studentId, { category = null, exclude_word
     const samePick = pickFrom(sameDiff);
     if (samePick) return formatNextWord(samePick.word, samePick.progress);
 
-    // Offer next difficulty using the relaxed session-pass gate
-    const nextDiff = candidates.filter(
-      (e) => e.word.difficulty === currentDifficulty + 1 && isSessionUnlocked(e.word)
-    );
+    // Offer next difficulty — trajectory-conditioned gate, evaluated per
+    // candidate (Scope Amendment A1: no single "just passed" word is used).
+    // 'typical' must always resolve to today's pre-existing gate function,
+    // unchanged — this is the fallback path every session takes until
+    // TASK-04 exists.
+    const nextDiffPool = candidates.filter((e) => e.word.difficulty === currentDifficulty + 1);
+    const nextDiff = [];
+    for (const e of nextDiffPool) {
+      const trajectory = await getTrajectoryPrediction(studentId, e.word.id);
+      const nextDiffGate =
+        trajectory === 'struggling' ? allLowerDifficultyMastered :
+        trajectory === 'fast'       ? anyLowerDifficultyMastered :
+        isSessionUnlocked;
+      if (nextDiffGate(e.word)) nextDiff.push(e);
+    }
     const nextPick = pickFrom(nextDiff);
     if (nextPick) return formatNextWord(nextPick.word, nextPick.progress);
   }
