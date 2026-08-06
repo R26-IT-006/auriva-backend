@@ -59,6 +59,18 @@ const DialogueWordProgress = sequelize.define('DialogueWordProgress', {
     type: DataTypes.INTEGER,
     defaultValue: 0,
   },
+  verbal_pass_count: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+  },
+  non_verbal_pass_count: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+  },
+  mastery_path: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+  },
   total_sessions: {
     type: DataTypes.INTEGER,
     defaultValue: 0,

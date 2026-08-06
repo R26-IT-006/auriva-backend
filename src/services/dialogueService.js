@@ -494,9 +494,11 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
   });
 
   // A non-verbal attempt (match_type='non_verbal') counts as phase2 partial credit
-  // and allows moving to Phase 3, but the speech_score determines mastery eligibility.
+  // and allows moving to Phase 3; non-verbal's max speech_score is 1, not a lower
+  // version of the verbal 0-3 scale, so it needs its own pass threshold.
+  const phase2NonVerbal = lastPhase2?.match_type === 'non_verbal';
   const phase2Score     = lastPhase2?.speech_score ?? 0;
-  const phase2Passed    = phase2Score >= 2;
+  const phase2Passed    = phase2NonVerbal ? phase2Score >= 1 : phase2Score >= 2;
   const phase2Echolalic = lastPhase2?.echolalia_flag === true; // RC3
   const sessionPassed   = phase2Passed && phase3_passed;
 
@@ -508,6 +510,11 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
   let newConsecFails      = progress.consecutive_fail_count;
   let newTotalSessions    = progress.total_sessions + 1;
   let mastered            = false;
+  // Accumulate only on a genuine (non-echolalic) pass; unchanged in every other branch.
+  let newVerbalPassCount    = progress.verbal_pass_count;
+  let newNonVerbalPassCount = progress.non_verbal_pass_count;
+  // Only set when mastery triggers this call; unchanged in every other branch.
+  let newMasteryPath = progress.mastery_path;
 
   if (sessionPassed && phase2Echolalic) {
     // RC3 — echolalic pass: genuine comprehension not yet confirmed.
@@ -521,10 +528,17 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
     newLastPassDate     = today;
     newConsecFails      = 0;
 
+    newVerbalPassCount    = progress.verbal_pass_count + (phase2NonVerbal ? 0 : 1);
+    newNonVerbalPassCount = progress.non_verbal_pass_count + (phase2NonVerbal ? 1 : 0);
+
     // Rule 1: mastery requires 2+ passes on different calendar days
     if (newSessionPassCount >= 2 && differentDay) {
       newStatus = 'mastered';
       mastered  = true;
+      newMasteryPath =
+        newVerbalPassCount > 0 && newNonVerbalPassCount > 0 ? 'mixed'
+        : newNonVerbalPassCount > 0 ? 'non_verbal'
+        : 'verbal';
     } else {
       newStatus = 'in_progress';
     }
@@ -557,6 +571,9 @@ async function recordPhase3Result(teacherId, studentId, wordId, { phase3_passed,
     last_pass_date:            newLastPassDate,
     consecutive_fail_count:    newConsecFails,
     total_sessions:            newTotalSessions,
+    verbal_pass_count:         newVerbalPassCount,
+    non_verbal_pass_count:     newNonVerbalPassCount,
+    mastery_path:              newMasteryPath,
     updated_at:                new Date(),
   });
 

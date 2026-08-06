@@ -434,9 +434,13 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
         order: [['attempted_at', 'DESC']],
       });
 
+  // Non-verbal's max phase2_speech_score is 1, not a lower version of the verbal
+  // 0-3 scale, so it needs its own pass threshold (mirrors dialogueService.js).
+  const phase2NonVerbal = lastAttempt?.phase2_match_type === 'non_verbal';
   const phase2Score     = lastAttempt?.phase2_speech_score ?? 0;
+  const phase2Passed    = phase2NonVerbal ? phase2Score >= 1 : phase2Score >= 2;
   const phase2Echolalic = lastAttempt?.phase2_echolalia_flag === true; // RC3
-  const sessionPassed   = phase2Score >= 2 && phase3_passed;
+  const sessionPassed   = phase2Passed && phase3_passed;
 
   const today             = todayString();
   let newStatus           = progress.status;
@@ -446,6 +450,11 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
   let newConsecFails      = progress.consecutive_fail_count;
   const newTotalSessions  = progress.total_sessions + 1;
   let mastered            = false;
+  // Accumulate only on a genuine (non-echolalic) pass; unchanged in every other branch.
+  let newVerbalPassCount    = progress.verbal_pass_count;
+  let newNonVerbalPassCount = progress.non_verbal_pass_count;
+  // Only set when mastery triggers this call; unchanged in every other branch.
+  let newMasteryPath = progress.mastery_path;
 
   if (sessionPassed && phase2Echolalic) {
     // RC3 — echolalic pass: stays in_progress, no mastery credit, no fail penalty
@@ -456,9 +465,17 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
     newSessionPassCount = progress.session_pass_count + 1;
     newLastPassDate     = today;
     newConsecFails      = 0;
+
+    newVerbalPassCount    = progress.verbal_pass_count + (phase2NonVerbal ? 0 : 1);
+    newNonVerbalPassCount = progress.non_verbal_pass_count + (phase2NonVerbal ? 1 : 0);
+
     if (newSessionPassCount >= 2 && differentDay) {
       newStatus = 'mastered';
       mastered  = true;
+      newMasteryPath =
+        newVerbalPassCount > 0 && newNonVerbalPassCount > 0 ? 'mixed'
+        : newNonVerbalPassCount > 0 ? 'non_verbal'
+        : 'verbal';
     } else {
       newStatus = 'in_progress';
     }
@@ -471,7 +488,9 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
     status: newStatus, phase1_gate_passed: false,
     session_pass_count: newSessionPassCount, last_pass_date: newLastPassDate,
     last_session_date: today,
-    consecutive_fail_count: newConsecFails, total_sessions: newTotalSessions, updated_at: new Date(),
+    consecutive_fail_count: newConsecFails, total_sessions: newTotalSessions,
+    verbal_pass_count: newVerbalPassCount, non_verbal_pass_count: newNonVerbalPassCount,
+    mastery_path: newMasteryPath, updated_at: new Date(),
   });
 
   if (lastAttempt) await lastAttempt.update({ session_passed: sessionPassed });
