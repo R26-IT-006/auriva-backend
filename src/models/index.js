@@ -17,6 +17,7 @@ const ShapeFeature            = require('./ShapeFeature');
 const LetterAttempt           = require('./LetterAttempt');
 const CollectionSession       = require('./CollectionSession');
 const TeacherValidation       = require('./TeacherValidation');
+const StudentMotorBaseline    = require('./StudentMotorBaseline');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -92,9 +93,20 @@ CollectionSession.belongsTo(Student, { foreignKey: 'student_id', as: 'student' }
 Student.hasMany(TeacherValidation, { foreignKey: 'student_id', as: 'teacherValidations' });
 TeacherValidation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → StudentMotorBaseline (one immutable baseline per source assessment;
+// a student could in principle have more than one over time — see Decision 7 —
+// so this is hasMany, not hasOne)
+Student.hasMany(StudentMotorBaseline, { foreignKey: 'student_id', as: 'motorBaselines' });
+StudentMotorBaseline.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// HandwritingAssessment → StudentMotorBaseline (one baseline per source assessment,
+// enforced by the UNIQUE(source_assessment_id) index)
+HandwritingAssessment.hasOne(StudentMotorBaseline, { foreignKey: 'source_assessment_id', as: 'motorBaseline' });
+StudentMotorBaseline.belongsTo(HandwritingAssessment, { foreignKey: 'source_assessment_id', as: 'sourceAssessment' });
+
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
   HandwritingAssessment, LetterProgress, Stroke, ShapeFeature, LetterAttempt,
   ExplanationResult, RecommendationHistory, StudentMotorFeature,
-  CollectionSession, TeacherValidation,
+  CollectionSession, TeacherValidation, StudentMotorBaseline,
 };

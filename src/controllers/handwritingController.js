@@ -18,6 +18,8 @@ const { LETTER_TO_PRIMITIVE, PRIMITIVE_LABELS } = require('../config/letterMotor
 const logger   = require('../utils/logger');
 const { getStudentThreshold } = require('../utils/thresholdUtils');
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
+const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../services/motorBaselineService');
+const teacherService = require('../services/teacherService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
 const { computeMotorScore } = require('../utils/motorScore');
 
@@ -606,12 +608,91 @@ async function getLatestExplanation(req, res) {
   });
 }
 
+// ─── Finalize idempotency helpers (private) ────────────────────────────────
+// Reliability Step 1: makes repeated PATCH .../finalize calls for the same
+// assessment safe. See tests/finalizeAssessmentIdempotency.test.js.
+
+const SCORE_EPSILON = 1e-6;
+
+// Never Number(value) coerce — same rationale as motorBaselineService.js:
+// missing/malformed data must never compare equal to a real number by accident.
+function numbersApproximatelyEqual(a, b) {
+  if (typeof a !== 'number' || typeof b !== 'number') return a === b; // both null/undefined → equal
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) < SCORE_EPSILON;
+}
+
+function arraysEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  return a.every((v, i) => v === b[i]);
+}
+
+// motor_profile.shapeScores is { horizontal_line: 96.18..., ... } — floats,
+// not rounded like the three family scores (confirmed against live data).
+function shapeScoresEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false;
+  const keysA = Object.keys(a), keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => numbersApproximatelyEqual(a[k], b[k]));
+}
+
+// Compares the meaningful fields of a persisted motor_profile against an
+// incoming one — never JSON.stringify (property order is not guaranteed) and
+// never object-reference equality (a freshly re-sent clone must still match).
+// Real persisted shape (see calculateMotorProfile() in
+// frontend/src/utils/adaptiveSequencing.js, verified against live data):
+// { straightScore, curvedScore, complexScore, primaryStrength, categoryOrder,
+//   recommendedSequence, shapeScores }.
+function motorProfilesEqual(existing, incoming) {
+  if (existing === incoming) return true;
+  if (existing == null || incoming == null) return false;
+  if (typeof existing !== 'object' || typeof incoming !== 'object') return false;
+
+  return (
+    numbersApproximatelyEqual(existing.straightScore, incoming.straightScore) &&
+    numbersApproximatelyEqual(existing.curvedScore, incoming.curvedScore) &&
+    numbersApproximatelyEqual(existing.complexScore, incoming.complexScore) &&
+    existing.primaryStrength === incoming.primaryStrength &&
+    arraysEqual(existing.categoryOrder, incoming.categoryOrder) &&
+    existing.recommendedSequence === incoming.recommendedSequence &&
+    shapeScoresEqual(existing.shapeScores, incoming.shapeScores)
+  );
+}
+
+/**
+ * Determines whether this finalize call is a genuine first-time finalize, an
+ * exact resend of an already-finalized assessment (safe to no-op the
+ * mutation but still retry baseline creation), or a conflicting resend
+ * (different values for an already-finalized assessment — must be rejected).
+ */
+function classifyFinalizeRequest(assessment, incomingMotorScore, incomingMotorProfile) {
+  const previouslyFinalized = assessment.motor_score != null && assessment.motor_profile != null;
+  if (!previouslyFinalized) return { previouslyFinalized: false, isResend: false };
+
+  const isResend =
+    numbersApproximatelyEqual(assessment.motor_score, incomingMotorScore) &&
+    motorProfilesEqual(assessment.motor_profile, incomingMotorProfile);
+
+  return { previouslyFinalized: true, isResend };
+}
+
 /**
  * PATCH /handwriting/assessment/:id/finalize
  *
  * Called after the client computes the motor profile.
  * Stores motor_score + motor_profile on the assessment record,
  * then runs the explainability engine and saves to ExplanationResult.
+ *
+ * Idempotent for repeated identical calls (Reliability Step 1): an exact
+ * resend of the same assessmentId + motor_score + motor_profile never
+ * duplicates ExplanationResult/RecommendationHistory, and still safely
+ * retries baseline creation (already idempotent — see
+ * motorBaselineService.js, unchanged). A resend with materially different
+ * values for an already-finalized assessment is rejected with 409 rather
+ * than silently overwriting the original finalization.
  */
 async function finalizeAssessment(req, res) {
   const assessmentId = parseInt(req.params.id, 10);
@@ -624,7 +705,23 @@ async function finalizeAssessment(req, res) {
   const assessment = await HandwritingAssessment.findByPk(assessmentId);
   if (!assessment) throw new ApiError(404, 'Assessment not found');
 
-  await assessment.update({ motor_score, motor_profile });
+  const { previouslyFinalized, isResend } = classifyFinalizeRequest(assessment, motor_score, motor_profile);
+
+  // Conflict: this assessment was already finalized with DIFFERENT values.
+  // Reject before any mutation — protects the immutable meaning of the
+  // finalized initial assessment. No assessment.update, no explainability
+  // write, no baseline call.
+  if (previouslyFinalized && !isResend) {
+    throw new ApiError(409, 'Assessment has already been finalized with different values');
+  }
+
+  // First-time only — on a resend the persisted values already match
+  // exactly (that's what isResend means), so re-writing them is a pointless
+  // no-op write; skipping it keeps this endpoint's DB footprint minimal on
+  // retry rather than merely harmless.
+  if (!isResend) {
+    await assessment.update({ motor_score, motor_profile });
+  }
 
   // Map stored shapes (shape_id) → format expected by explainabilityService (shapeId)
   const shapesForAnalysis = (assessment.shapes ?? []).map(s => ({
@@ -632,31 +729,101 @@ async function finalizeAssessment(req, res) {
     features: s.features,
   }));
 
-  const result = analyzeMotorDifficulty(shapesForAnalysis, {}, motor_score);
+  // ExplanationResult.assessment_id is the idempotency anchor for
+  // explainability — checked BEFORE creating, regardless of whether this is
+  // a resend or a genuine first-time finalize. This also protects against a
+  // row that already exists because POST /handwriting/explain was called
+  // separately for the same assessment_id (a real, intentional code path —
+  // see explainAssessment — not just a finalize retry). Earliest row wins on
+  // ties; historical duplicates (confirmed present on live data — assessment
+  // 113 and 202 each already have 2 rows) are logged, never merged/deleted
+  // here — that is a separate data-quality task.
+  const existingExplanations = await ExplanationResult.findAll({
+    where: { assessment_id: assessment.id },
+    order: [['created_at', 'ASC'], ['id', 'ASC']],
+    limit: 2, // only need to know "one" vs "more than one" for the warning
+  });
 
-  try {
-    await ExplanationResult.create({
-      assessment_id:         assessmentId,
-      student_id:            assessment.student_id,
-      difficulty_type:       result.difficultyKey,
-      difficulty_label:      result.difficulty,
-      confidence_score:      result.confidence ?? null,
-      motor_score,
-      feature_contributions: result.featureContributions,
-      explanation_lines:     result.explanation,
-      recommendations:       result.recommendations,
-    });
-
-    if (result.difficultyKey && result.difficultyKey !== 'NONE') {
-      await RecommendationHistory.create({
-        student_id:       assessment.student_id,
-        difficulty_type:  result.difficultyKey,
-        difficulty_label: result.difficulty,
-        recommendations:  result.recommendations,
+  let result;
+  if (existingExplanations.length > 0) {
+    const existing = existingExplanations[0];
+    result = { difficulty: existing.difficulty_label, difficultyKey: existing.difficulty_type };
+    if (existingExplanations.length > 1) {
+      logger.warn('Multiple ExplanationResult rows found for assessment — reusing earliest, not merging/deleting', {
+        assessmentId: assessment.id, status: 'duplicate_explanation_detected',
       });
     }
-  } catch (dbErr) {
-    console.error('ExplanationResult save error (non-fatal):', dbErr.message);
+  } else {
+    result = analyzeMotorDifficulty(shapesForAnalysis, {}, motor_score);
+    try {
+      await ExplanationResult.create({
+        assessment_id:         assessmentId,
+        student_id:            assessment.student_id,
+        difficulty_type:       result.difficultyKey,
+        difficulty_label:      result.difficulty,
+        confidence_score:      result.confidence ?? null,
+        motor_score,
+        feature_contributions: result.featureContributions,
+        explanation_lines:     result.explanation,
+        recommendations:       result.recommendations,
+      });
+
+      // RecommendationHistory has no assessment_id column (see Reliability
+      // Step 1 audit), so — unlike ExplanationResult — it cannot be checked
+      // for an existing row tied to this specific assessment. The only safe
+      // anchor against duplicating it on a resend is "was this assessment
+      // ever finalized before at all" (previouslyFinalized). This covers the
+      // rare case where a resend's ExplanationResult happens to be missing
+      // (findAll above returned none, so we're in this branch even though
+      // isResend may be true): we still create the missing ExplanationResult
+      // row (safe — assessment_id proves no duplicate), but deliberately do
+      // NOT create RecommendationHistory, since we cannot prove one wasn't
+      // already recorded on the original attempt. Conservative by design.
+      if (!previouslyFinalized && result.difficultyKey && result.difficultyKey !== 'NONE') {
+        await RecommendationHistory.create({
+          student_id:       assessment.student_id,
+          difficulty_type:  result.difficultyKey,
+          difficulty_label: result.difficulty,
+          recommendations:  result.recommendations,
+        });
+      }
+    } catch (dbErr) {
+      console.error('ExplanationResult save error (non-fatal):', dbErr.message);
+    }
+  }
+
+  // Feature 1: Individual Motor-Family Baseline. Reads the assessment row we
+  // just persisted above (never the request body) so the baseline always
+  // reflects the same values now stored on HandwritingAssessment — see
+  // src/services/motorBaselineService.js for eligibility/validation rules.
+  // Always called, resend or not — this is exactly the "assessment update
+  // succeeded, baseline creation failed, response lost" recovery path:
+  // createInitialMotorBaseline() is itself already idempotent (unchanged
+  // this step), so a resend safely retries it (save_failed → created) or
+  // no-ops (created → already_exists).
+  // Non-fatal by design: a baseline failure must never roll back the
+  // finalize above, change this endpoint's success status, or block the
+  // explainability result already computed. The service itself already
+  // catches expected DB failures and returns { status: 'save_failed', ... };
+  // this try/catch is defense-in-depth against the service throwing
+  // unexpectedly rather than resolving.
+  let baselineResult = {
+    status:   'save_failed',
+    baseline: null,
+    reason:   'unexpected_service_error',
+  };
+  try {
+    baselineResult = await createInitialMotorBaseline({
+      studentId:    assessment.student_id,
+      assessmentId: assessment.id,
+    });
+  } catch (error) {
+    logger.error('Motor baseline service threw unexpectedly during finalize', {
+      studentId:    assessment.student_id,
+      assessmentId: assessment.id,
+      status:       'save_failed',
+      errorMessage: error.message,
+    });
   }
 
   res.json({
@@ -666,6 +833,10 @@ async function finalizeAssessment(req, res) {
     difficulty:   result.difficulty,
     difficultyKey: result.difficultyKey,
     message:      'Assessment finalized',
+    baselineStatus: baselineResult.status,
+    baselineId:     baselineResult.baseline?.id ?? null,
+    baselineReason: baselineResult.reason ?? null,
+    finalizeStatus: isResend ? 'already_finalized' : 'finalized',
   });
 }
 
@@ -817,4 +988,77 @@ async function getLetterProgressReport(req, res) {
   res.json({ letters, motorPatterns });
 }
 
-module.exports = { submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion, explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport, getLetterProgressReport };
+/**
+ * Maps a StudentMotorBaseline Sequelize row to the public API shape —
+ * camelCase, only the fields intended as part of the contract (never the
+ * raw Sequelize instance / dataValues). See Feature 1 Step 4.
+ */
+function serializeMotorBaseline(baseline) {
+  return {
+    id:                 baseline.id,
+    studentId:          baseline.student_id,
+    sourceAssessmentId: baseline.source_assessment_id,
+
+    scores: {
+      straight: baseline.straight_score,
+      curved:   baseline.curved_score,
+      complex:  baseline.complex_score,
+      overall:  baseline.overall_motor_score,
+    },
+
+    baselineVersion: baseline.baseline_version,
+    taxonomyVersion: baseline.taxonomy_version,
+    sourceType:      baseline.source_type,
+    isBackfilled:    baseline.is_backfilled,
+    backfilledAt:    baseline.backfilled_at,
+    createdAt:       baseline.created_at,
+  };
+}
+
+/**
+ * GET /handwriting/motor-baseline/:studentId
+ *
+ * Read-only retrieval of the student's immutable Individual Motor-Family
+ * Baseline (Feature 1). StudentMotorBaseline is the authoritative store —
+ * this endpoint never re-derives values from HandwritingAssessment, never
+ * creates or backfills a missing baseline. Creation happens only inside
+ * finalizeAssessment() (via createInitialMotorBaseline) or the future
+ * controlled backfill utility — not here.
+ */
+async function getMotorBaseline(req, res) {
+  // Strict parse — parseInt('10abc') would incorrectly accept 10; Number(...)
+  // followed by Number.isInteger correctly rejects any trailing garbage.
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  // Ownership check — reuses the same existing convention as
+  // GET /teacher/students/:id (teacherService.getOwnStudentById), so a
+  // teacher can only ever retrieve a baseline for a student assigned to
+  // them. Throws ApiError(404) on no-match, same as that route.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await getStudentMotorBaseline({ studentId });
+
+  if (serviceResult.status === 'found') {
+    return res.json({ status: 'found', baseline: serializeMotorBaseline(serviceResult.baseline) });
+  }
+
+  if (serviceResult.status === 'baseline_not_found') {
+    return res.status(404).json({ status: 'baseline_not_found', baseline: null });
+  }
+
+  // invalid_input is unreachable here (studentId already strictly validated
+  // above) but handled defensively rather than assumed unreachable.
+  if (serviceResult.status === 'invalid_input') {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  // read_failed — unexpected DB error, already logged inside the service
+  // without exposing SQL/host/stack details. Let the project's normal
+  // server-error handler format the response.
+  throw new ApiError(500, 'Failed to retrieve motor baseline');
+}
+
+module.exports = { submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion, explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport, getLetterProgressReport, getMotorBaseline };

@@ -22,6 +22,12 @@ router.patch('/assessment/:id/finalize',    ctrl.finalizeAssessment);
 router.get('/initial-report/:studentId',    ctrl.getInitialReport);
 router.get('/letter-progress-report/:studentId', ctrl.getLetterProgressReport);
 
+// ── Individual Motor-Family Baseline (Feature 1, read-only) ───────────────────
+// Path style matches the existing /progress/:studentId, /initial-report/:studentId,
+// /letter-progress-report/:studentId convention on this router, not the
+// nested /students/:studentId/... style — no PATCH/PUT/DELETE for this resource.
+router.get('/motor-baseline/:studentId',    ctrl.getMotorBaseline);
+
 // ── Data Collection Mode: session tracking, teacher validation, ML export ─────
 router.post('/collection-session/start',           collectionCtrl.startCollectionSession);
 router.patch('/collection-session/:id/complete',   collectionCtrl.completeCollectionSession);
