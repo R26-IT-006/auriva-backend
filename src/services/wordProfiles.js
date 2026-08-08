@@ -35,6 +35,30 @@ const WORD_PROFILES = {
   mango: { difficulty: 3, sounds: ['m', 'æ', 'ŋgəʊ'], easierWords: ['worm'], relatedWords: ['penguin'] },
   walk: { difficulty: 2, sounds: ['w', 'ɔː', 'k'], easierWords: ['worm'], relatedWords: ['whale'] },
   jump: { difficulty: 3, sounds: ['dʒ', 'ʌ', 'mp'], easierWords: ['jellyfish'], relatedWords: ['butterfly'] },
+
+  // Classroom
+  bag: { difficulty: 1, sounds: ['b', 'æ', 'g'], easierWords: ['book'], relatedWords: ['desk'] },
+  chair: { difficulty: 2, sounds: ['tʃ', 'eə'], easierWords: ['bag'], relatedWords: ['desk'] },
+  door: { difficulty: 1, sounds: ['d', 'ɔː'], easierWords: ['book'], relatedWords: ['chair'] },
+  pen: { difficulty: 1, sounds: ['p', 'e', 'n'], easierWords: ['bag'], relatedWords: ['pencil'] },
+  pencil: { difficulty: 3, sounds: ['p', 'e', 'n', 's', 'əl'], easierWords: ['pen'], relatedWords: ['ruler'] },
+  ruler: { difficulty: 2, sounds: ['r', 'uː', 'l', 'ə'], easierWords: ['pen'], relatedWords: ['pencil'] },
+
+  // Fruits
+  banana: { difficulty: 4, sounds: ['b', 'ə', 'n', 'ɑː', 'n', 'ə'], easierWords: ['apple'], relatedWords: ['mango'] },
+  grape: { difficulty: 3, sounds: ['gr', 'eɪ', 'p'], easierWords: ['apple'], relatedWords: ['orange'] },
+  orange: { difficulty: 3, sounds: ['ɒ', 'r', 'ɪ', 'ndʒ'], easierWords: ['mango'], relatedWords: ['lemon'] },
+  lemon: { difficulty: 2, sounds: ['l', 'e', 'm', 'ən'], easierWords: ['mango'], relatedWords: ['orange'] },
+  papaya: { difficulty: 4, sounds: ['p', 'ə', 'p', 'aɪ', 'ə'], easierWords: ['mango'], relatedWords: ['guava'] },
+  guava: { difficulty: 3, sounds: ['gw', 'ɑː', 'v', 'ə'], easierWords: ['mango'], relatedWords: ['papaya'] },
+
+  // Daily actions
+  run: { difficulty: 1, sounds: ['r', 'ʌ', 'n'], easierWords: ['walk'], relatedWords: ['jump'] },
+  eat: { difficulty: 1, sounds: ['iː', 't'], easierWords: ['walk'], relatedWords: ['drink'] },
+  drink: { difficulty: 3, sounds: ['dr', 'ɪ', 'ŋk'], easierWords: ['eat'], relatedWords: ['eat'] },
+  sleep: { difficulty: 2, sounds: ['sl', 'iː', 'p'], easierWords: ['eat'], relatedWords: ['read'] },
+  read: { difficulty: 2, sounds: ['r', 'iː', 'd'], easierWords: ['run'], relatedWords: ['sleep'] },
+  clap: { difficulty: 2, sounds: ['kl', 'æ', 'p'], easierWords: ['run'], relatedWords: ['jump'] },
 };
 
 // Phoneme sequences of spoken letter names, for alphabet mode where the
