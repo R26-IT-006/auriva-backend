@@ -624,4 +624,4 @@ async function completeTier3(studentId, categoryKey, conceptKey, timeSpentMs) {
   return { completed: true };
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getSequence, syncToGkb };
+module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getSequence, CATEGORY_SEQUENCES, syncToGkb };
