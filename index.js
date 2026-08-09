@@ -9,8 +9,9 @@ const morgan    = require('morgan');
 const rateLimit = require('express-rate-limit');
 const logger       = require('./src/utils/logger');
 const ApiError     = require('./src/utils/ApiError');
-const { sequelize } = require('./src/models');
-const swaggerUi    = require('swagger-ui-express');
+const { sequelize }      = require('./src/models');
+const fixCat3ForeignKeys = require('./src/utils/fixCat3ForeignKeys');
+const swaggerUi          = require('swagger-ui-express');
 const swaggerSpec  = require('./src/config/swagger');
 
 const app  = express();
@@ -40,9 +41,8 @@ app.use('/api', rateLimit({
 }));
 
 // ─── Body parsing ─────────────────────────────────────────────────────────────
-// 5mb limit: handwriting assessments send raw stroke point arrays that can be large
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ─── Swagger UI ───────────────────────────────────────────────────────────────
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
@@ -100,6 +100,10 @@ async function start() {
   await sequelize.authenticate();
   logger.info('Database connection established');
 
+  if (process.env.NODE_ENV === 'development') {
+    await fixCat3ForeignKeys();
+    await sequelize.sync({ alter: true });
+    logger.info('Database schema synced');
   const [[info]] = await sequelize.query(
     `SELECT current_database() AS db, current_schema() AS schema,
             (SELECT count(*) FROM information_schema.columns
