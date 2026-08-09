@@ -17,6 +17,8 @@ const ApiError = require('../utils/ApiError');
 const { LETTER_TO_PRIMITIVE, PRIMITIVE_LABELS } = require('../config/letterMotorPrimitives');
 const logger   = require('../utils/logger');
 const { getStudentThreshold } = require('../utils/thresholdUtils');
+const { resolveProgressionThreshold } = require('../services/progressionThresholdResolver');
+const { processDynamicThresholdAfterLetterSession } = require('../services/dynamicThresholdService');
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../services/motorBaselineService');
 const teacherService = require('../services/teacherService');
@@ -345,6 +347,38 @@ function saveLetterAttempts(attempts, {
   );
 }
 
+// Feature 2 Step 8 — the ONLY trigger point for automatic Feature 2
+// re-evaluation: called after saveLetterAttempts has succeeded (never
+// before — Step 4's recent-window read needs the just-persisted rows to
+// exist), from EITHER the failure or success branch of normal-mode
+// completion, never from collection mode. Non-fatal by design: adaptation
+// failing must never turn a successful/failed letter-completion response
+// into a server error, and must never retroactively change the threshold
+// that already gated THIS session (see progressionThresholdResolver.js —
+// threshold was already resolved and used before this ever runs).
+async function runDynamicThresholdOrchestration({ studentId, letter, caseType, sessionKey, attempts, requestedQualityThreshold }) {
+  // Section 5 — cheap, local guard computed from the request's own
+  // attempts array (already in scope, no extra query): only a session that
+  // actually included an attempt_number=3 record could possibly have
+  // changed a family's recent independent-performance window.
+  const hasAttempt3Evidence = Array.isArray(attempts) && attempts.some(a => a?.attempt_number === 3);
+  try {
+    return await processDynamicThresholdAfterLetterSession({
+      studentId, letter, caseType, sessionKey, hasAttempt3Evidence, requestedQualityThreshold,
+    });
+  } catch (err) {
+    // Defense in depth — processDynamicThresholdAfterLetterSession is
+    // itself already designed to catch its own expected failure modes and
+    // return status:'error' rather than throw; this catch exists only for
+    // a genuinely unexpected exception, so a Feature 2 bug can never
+    // surface as a 500 to the child.
+    logger.error('Dynamic threshold orchestration threw unexpectedly (non-fatal)', {
+      studentId, letter, caseType, sessionKey, errorMessage: err.message,
+    });
+    return { status: 'error', family: null, decision: null, newThreshold: null, historyId: null };
+  }
+}
+
 async function recordLetterCompletion(req, res) {
   const { student_id, letter, case_type, attempt_scores, quality_threshold, wrote_correctly,
           attempts, collection_mode,
@@ -398,12 +432,36 @@ async function recordLetterCompletion(req, res) {
 
   let bestScore = null;
   let threshold = null;
+  // Feature 2 Step 7 — additive response/diagnostic metadata only; the
+  // gate itself is still exactly `bestScore < threshold` below, unchanged.
+  let thresholdSource = null;
+  let thresholdFamily = null;
 
   if (Array.isArray(attempt_scores) && attempt_scores.length > 0) {
     bestScore = Math.max(...attempt_scores);
-    threshold = typeof quality_threshold === 'number'
-      ? quality_threshold
-      : await getStudentThreshold(student_id, letter);
+
+    // Feature 2 Step 7: resolveProgressionThreshold() replaces the old
+    // inline ternary (`typeof quality_threshold === 'number' ? ... :
+    // await getStudentThreshold(...)`) with a priority chain that ALSO
+    // considers a student's current Feature 2 family target — see
+    // src/services/progressionThresholdResolver.js for the full priority
+    // order and rationale. `status !== 'resolved'` should not be
+    // reachable here (student_id/case_type are already validated above),
+    // but falls back to the untouched legacy getStudentThreshold() as a
+    // last-resort safety net rather than ever leaving threshold unresolved.
+    const thresholdResolution = await resolveProgressionThreshold({
+      studentId: student_id, letter, caseType: case_type, requestedQualityThreshold: quality_threshold,
+    });
+    if (thresholdResolution.status === 'resolved') {
+      threshold = thresholdResolution.threshold;
+      thresholdSource = thresholdResolution.source;
+      thresholdFamily = thresholdResolution.family;
+    } else {
+      threshold = await getStudentThreshold(student_id, letter);
+      thresholdSource = 'legacy_fallback_resolver_error';
+      thresholdFamily = null;
+    }
+
     if (bestScore < threshold) {
       const [rec] = await LetterProgress.findOrCreate({
         where:    { student_id, letter, case_type },
@@ -431,20 +489,40 @@ async function recordLetterCompletion(req, res) {
         await rec.update({ attempt_data: attempts });
       }
       // ML: immutable per-attempt records — append-only, survive every retry
+      let attemptsSaved = false;
       try {
         await saveLetterAttempts(attempts, {
           student_id, letter, case_type, sessionKey, passed: false, bestScore, threshold,
           collection_mode: false,
           ...metaFields,
         });
+        attemptsSaved = true;
       } catch (dbErr) {
         console.error('LetterAttempt save error (non-fatal):', dbErr.message);
       }
+
+      // Feature 2 Step 8 — orchestration runs only AFTER a successful save
+      // (Section 2), regardless of whether THIS session itself passed
+      // (Section 4/10 — a failed independent attempt is still valid recent-
+      // window evidence). Non-fatal, additive-only response metadata.
+      let dynamicThresholdStatus = null;
+      let dynamicThresholdNextThreshold = null;
+      if (attemptsSaved) {
+        const orchestrationResult = await runDynamicThresholdOrchestration({
+          studentId: student_id, letter, caseType: case_type, sessionKey, attempts,
+          requestedQualityThreshold: quality_threshold,
+        });
+        dynamicThresholdStatus = orchestrationResult.status;
+        dynamicThresholdNextThreshold = orchestrationResult.newThreshold;
+      }
+
       logger.info(`Letter blocked: student=${student_id} ` +
         `letter=${letter} bestScore=${bestScore} ` +
         `threshold=${threshold} wroteCorrectly=${wrote_correctly}`);
       return res.status(200).json({
         completed: false, bestScore, threshold,
+        thresholdSource, thresholdFamily,
+        dynamicThresholdStatus, dynamicThresholdNextThreshold,
         message: 'Quality threshold not met'
       });
     }
@@ -480,20 +558,41 @@ async function recordLetterCompletion(req, res) {
     await record.update({ attempt_data: attempts });
   }
   // ML: immutable per-attempt records — append-only, survive every retry
+  let attemptsSaved = false;
   try {
     await saveLetterAttempts(attempts, {
       student_id, letter, case_type, sessionKey, passed: true, bestScore, threshold,
       collection_mode: false,
       ...metaFields,
     });
+    attemptsSaved = true;
   } catch (dbErr) {
     console.error('LetterAttempt save error (non-fatal):', dbErr.message);
+  }
+
+  // Feature 2 Step 8 — orchestration runs only AFTER a successful save,
+  // from the success branch too (Section 10) — a passing session is just
+  // as valid recent-window evidence as a failing one. Non-fatal,
+  // additive-only response metadata.
+  let dynamicThresholdStatus = null;
+  let dynamicThresholdNextThreshold = null;
+  if (attemptsSaved) {
+    const orchestrationResult = await runDynamicThresholdOrchestration({
+      studentId: student_id, letter, caseType: case_type, sessionKey, attempts,
+      requestedQualityThreshold: quality_threshold,
+    });
+    dynamicThresholdStatus = orchestrationResult.status;
+    dynamicThresholdNextThreshold = orchestrationResult.newThreshold;
   }
 
   logger.info(`Letter complete: student=${student_id} ` +
     `letter=${letter} bestScore=${bestScore ?? 'n/a'} ` +
     `threshold=${threshold ?? 'default'} wroteCorrectly=${wrote_correctly}`);
-  res.status(created ? 201 : 200).json({ id: record.id, letter, case_type });
+  res.status(created ? 201 : 200).json({
+    id: record.id, letter, case_type,
+    threshold, thresholdSource, thresholdFamily,
+    dynamicThresholdStatus, dynamicThresholdNextThreshold,
+  });
 }
 
 /**

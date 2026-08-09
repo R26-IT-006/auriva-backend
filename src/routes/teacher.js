@@ -186,4 +186,20 @@ router.patch('/students/:id/threshold', [
     .withMessage('value must be a number between 0 and 100'),
 ], ctrl.setThreshold);
 
+/**
+ * Feature 2 Step 6A — family-level teacher override. Deliberately a
+ * SEPARATE endpoint from PATCH /students/:id/threshold above (which writes
+ * the legacy per-letter students.personal_thresholds, unchanged) — this one
+ * writes an append-only student_threshold_history 'teacher_override' event
+ * and never touches personal_thresholds.
+ */
+router.patch('/students/:id/family-threshold', [
+  body('family')
+    .isIn(['straight', 'curved', 'complex'])
+    .withMessage('family must be one of: straight, curved, complex'),
+  body('value')
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('value must be a number between 0 and 100'),
+], ctrl.setFamilyThreshold);
+
 module.exports = router;

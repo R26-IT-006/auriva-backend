@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit');
 const logger       = require('./src/utils/logger');
 const ApiError     = require('./src/utils/ApiError');
 const { sequelize } = require('./src/models');
+const { ensurePersonalThresholdsColumn } = require('./src/utils/ensurePersonalThresholdsColumn');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./src/config/swagger');
 
@@ -95,32 +96,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// ─── Self-heal: students.personal_thresholds ──────────────────────────────────
-// This DB is shared across dev machines, and a teammate booting with
-// ALLOW_DB_SYNC=true on stale code (missing the alter:{drop:false} guard
-// below) can still run a full sync({ alter: true }) and drop this column out
-// from under everyone else — it has happened repeatedly, and mid-session, not
-// just at boot. Rather than everyone re-running the migration by hand each
-// time it's dropped, poll for it and re-add it whenever it's missing. This
-// never drops or alters anything else, so it's safe even outside
-// ALLOW_DB_SYNC and even while the server is already handling traffic.
-async function ensurePersonalThresholdsColumn() {
-  const [[info]] = await sequelize.query(
-    `SELECT count(*) AS has_col FROM information_schema.columns
-      WHERE table_name='students' AND column_name='personal_thresholds'`
-  );
-  if (Number(info.has_col) === 0) {
-    logger.warn('students.personal_thresholds missing — re-adding it (likely dropped by another dev\'s sync against this shared DB)');
-    await sequelize.getQueryInterface().addColumn('students', 'personal_thresholds', {
-      type:         require('sequelize').DataTypes.JSONB,
-      allowNull:    false,
-      defaultValue: {},
-    });
-    logger.warn('students.personal_thresholds re-added');
-  }
-  return Number(info.has_col) !== 0;
-}
-
 // ─── Startup ──────────────────────────────────────────────────────────────────
 async function start() {
   await sequelize.authenticate();
@@ -133,12 +108,15 @@ async function start() {
   );
   logger.info(`DB → ${info.db} schema=${info.schema} personal_thresholds=${info.has_col}`);
 
-  await ensurePersonalThresholdsColumn();
+  await ensurePersonalThresholdsColumn(sequelize);
 
   // Re-check periodically while running, not just at boot — another dev's
   // machine can drop the column at any point in this server's lifetime.
+  // Deliberately NOT startup-only — see ensurePersonalThresholdsColumn.js
+  // and the Reliability investigation report for why this interval is
+  // intentional, not an oversight.
   setInterval(() => {
-    ensurePersonalThresholdsColumn().catch((err) => {
+    ensurePersonalThresholdsColumn(sequelize).catch((err) => {
       logger.error('personal_thresholds self-heal check failed', { err });
     });
   }, 60_000).unref();

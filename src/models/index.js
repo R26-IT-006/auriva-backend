@@ -18,6 +18,7 @@ const LetterAttempt           = require('./LetterAttempt');
 const CollectionSession       = require('./CollectionSession');
 const TeacherValidation       = require('./TeacherValidation');
 const StudentMotorBaseline    = require('./StudentMotorBaseline');
+const ThresholdHistory        = require('./ThresholdHistory');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -104,9 +105,19 @@ StudentMotorBaseline.belongsTo(Student, { foreignKey: 'student_id', as: 'student
 HandwritingAssessment.hasOne(StudentMotorBaseline, { foreignKey: 'source_assessment_id', as: 'motorBaseline' });
 StudentMotorBaseline.belongsTo(HandwritingAssessment, { foreignKey: 'source_assessment_id', as: 'sourceAssessment' });
 
+// Feature 2 Step 1: Student → ThresholdHistory (append-only threshold
+// change/provenance log — see src/models/ThresholdHistory.js)
+Student.hasMany(ThresholdHistory, { foreignKey: 'student_id', as: 'thresholdHistory' });
+ThresholdHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// StudentMotorBaseline → ThresholdHistory (conceptual link only, app-layer —
+// which baseline a given threshold event was derived from, if any)
+StudentMotorBaseline.hasMany(ThresholdHistory, { foreignKey: 'baseline_id', as: 'thresholdHistoryEntries' });
+ThresholdHistory.belongsTo(StudentMotorBaseline, { foreignKey: 'baseline_id', as: 'baseline' });
+
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
   HandwritingAssessment, LetterProgress, Stroke, ShapeFeature, LetterAttempt,
   ExplanationResult, RecommendationHistory, StudentMotorFeature,
-  CollectionSession, TeacherValidation, StudentMotorBaseline,
+  CollectionSession, TeacherValidation, StudentMotorBaseline, ThresholdHistory,
 };
