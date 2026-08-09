@@ -37,6 +37,7 @@ const CollectionSession       = require('./CollectionSession');
 const TeacherValidation       = require('./TeacherValidation');
 const StudentConceptProgress   = require('./StudentConceptProgress');
 const ConceptInteractionLog    = require('./ConceptInteractionLog');
+const PronunciationSessionResult = require('./PronunciationSessionResult');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -188,34 +189,20 @@ VerbQAProductionRound.belongsTo(Session, { foreignKey: 'session_id', as: 'sessio
 // DialogueEvaluationAttempt associations (Level 1 evaluations, TASK-14)
 Student.hasMany(DialogueEvaluationAttempt, { foreignKey: 'student_id', as: 'evaluationAttempts' });
 DialogueEvaluationAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+// Teacher → PronunciationSessionResult
+Teacher.hasMany(PronunciationSessionResult, {
+  foreignKey: 'teacher_id',
+  as: 'pronunciationResults',
+});
+PronunciationSessionResult.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
 
-module.exports = {
-  sequelize,
-  Principal,
-  Teacher,
-  Student,
-  Session,
-  StudentAvatar,
-  PasswordResetOtp,
-  DialogueWord,
-  DialogueWordProgress,
-  DialogueWordAttempt,
-  DialoguePhase3Attempt,
-  DaysWheelAttempt,
-  SentenceQuestionnaire,
-  Level2TopicProgress,
-  Level2Session,
-  Level2SentenceAttempt,
-  Level2GenderSelectionLog,
-  Level2ActivitySelectionLog,
-  Level2ProductionAttempt,
-  Level2NonVerbalAttempt,
-  ActionWordAttempt,
-  CanYouGameRound,
-  ActionIdentificationRound,
-  VerbQAProductionRound,
-  DialogueEvaluationAttempt,
-};
+// Student → PronunciationSessionResult
+Student.hasMany(PronunciationSessionResult, {
+  foreignKey: 'student_id',
+  as: 'pronunciationResults',
+});
+PronunciationSessionResult.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 // Student → concept learning
 Student.hasMany(StudentConceptProgress, { foreignKey: 'student_id', as: 'conceptProgress' });
 StudentConceptProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
@@ -278,9 +265,42 @@ Student.hasMany(TeacherValidation, { foreignKey: 'student_id', as: 'teacherValid
 TeacherValidation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
 module.exports = {
-  sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
-  StudentConceptProgress, ConceptInteractionLog,
-  HandwritingAssessment, LetterProgress, Stroke, ShapeFeature, LetterAttempt,
-  ExplanationResult, RecommendationHistory, StudentMotorFeature,
-  CollectionSession, TeacherValidation,
+  sequelize,
+  Principal,
+  Teacher,
+  Student,
+  Session,
+  StudentAvatar,
+  PasswordResetOtp,
+  DialogueWord,
+  DialogueWordProgress,
+  DialogueWordAttempt,
+  DialoguePhase3Attempt,
+  DaysWheelAttempt,
+  SentenceQuestionnaire,
+  Level2TopicProgress,
+  Level2Session,
+  Level2SentenceAttempt,
+  Level2GenderSelectionLog,
+  Level2ActivitySelectionLog,
+  Level2ProductionAttempt,
+  Level2NonVerbalAttempt,
+  ActionWordAttempt,
+  CanYouGameRound,
+  ActionIdentificationRound,
+  VerbQAProductionRound,
+  DialogueEvaluationAttempt,
+  StudentConceptProgress,
+  ConceptInteractionLog,
+  HandwritingAssessment,
+  LetterProgress,
+  Stroke,
+  ShapeFeature,
+  LetterAttempt,
+  ExplanationResult,
+  RecommendationHistory,
+  StudentMotorFeature,
+  CollectionSession,
+  TeacherValidation,
+  PronunciationSessionResult,
 };
