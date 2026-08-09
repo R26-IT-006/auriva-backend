@@ -100,10 +100,6 @@ async function start() {
   await sequelize.authenticate();
   logger.info('Database connection established');
 
-  if (process.env.NODE_ENV === 'development') {
-    await fixCat3ForeignKeys();
-    await sequelize.sync({ alter: true });
-    logger.info('Database schema synced');
   const [[info]] = await sequelize.query(
     `SELECT current_database() AS db, current_schema() AS schema,
             (SELECT count(*) FROM information_schema.columns
@@ -120,6 +116,10 @@ async function start() {
   // disposable local/dev database — never against the school data.
   const allowSync = process.env.ALLOW_DB_SYNC === 'true' && process.env.NODE_ENV !== 'production';
   if (allowSync) {
+    // Clears the stale Cat3 word_id FK constraints so the sync below can
+    // recreate them — it only makes sense immediately before a sync, which is
+    // why it sits inside this branch rather than running on every boot.
+    await fixCat3ForeignKeys();
     // alter: { drop: false } — never let an out-of-date local model definition
     // drop a live column. This DB is shared across dev machines, and alter:true's
     // default (drop: true) has repeatedly dropped students.personal_thresholds
