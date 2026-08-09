@@ -683,6 +683,11 @@ async function getProbeCandidate(teacherId, studentId, category = null) {
   return {
     word_id:            word.id,
     word:                word.word,
+    // TASK-39 Scope Amendment A1: the frontend's asset maps (DIALOGUE_WORD_ASSETS/
+    // WORD_AUDIO, CAT3_WORD_IMAGE/CAT3_WORD_AUDIO) are keyed by asset_key, not
+    // `word` — added so ProbeProductionScreen.js can resolve displayable assets
+    // in this one call, without a second getWordById lookup.
+    asset_key:           word.asset_key,
     category:            word.category,
     cue_grapheme:        word.cue_grapheme,
     keyword_triggers:    word.keyword_triggers,
