@@ -91,90 +91,21 @@ router.get('/students', ctrl.getStudents);
  */
 router.get('/students/:id', ctrl.getStudentById);
 
-/**
- * @swagger
- * /api/teacher/session/start:
- *   post:
- *     summary: Start a learning session for a student
- *     tags: [Teacher]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [student_id]
- *             properties:
- *               student_id:
- *                 type: integer
- *                 example: 1
- *     responses:
- *       201:
- *         description: Session started
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Session'
- *       404:
- *         description: Student not found or not assigned to this teacher
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       409:
- *         description: A session is already active for this student
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-router.post('/session/start', [
-  body('student_id').isInt({ min: 1 }).withMessage('student_id must be a positive integer'),
-], ctrl.startSession);
-
-/**
- * @swagger
- * /api/teacher/session/end:
- *   post:
- *     summary: End the active session for a student
- *     tags: [Teacher]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [student_id]
- *             properties:
- *               student_id:
- *                 type: integer
- *                 example: 1
- *     responses:
- *       200:
- *         description: Session ended
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Session'
- *       404:
- *         description: No active session found for this student
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-router.post('/session/end', [
-  body('student_id').isInt({ min: 1 }).withMessage('student_id must be a positive integer'),
-], ctrl.endSession);
-
 router.post('/students/:id/avatar', [
   body('avatar_key')
     .isIn(['boba', 'glitter', 'lily', 'megatron'])
     .withMessage('avatar_key must be one of: boba, glitter, lily, megatron'),
 ], ctrl.setAvatar);
+
+router.patch('/students/:id/threshold', [
+  body('letter')
+    .isString().notEmpty()
+    .withMessage('letter must be a non-empty string'),
+  body('value')
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('value must be a number between 0 and 100'),
+], ctrl.setThreshold);
+
+router.use('/concepts', require('./concept'));
 
 module.exports = router;
