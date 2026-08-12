@@ -28,6 +28,24 @@ router.get('/letter-progress-report/:studentId', ctrl.getLetterProgressReport);
 // nested /students/:studentId/... style — no PATCH/PUT/DELETE for this resource.
 router.get('/motor-baseline/:studentId',    ctrl.getMotorBaseline);
 
+// ── Adaptive Support Recommendation (Feature 3 Step 6, read-only) ─────────────
+// Narrowly scoped to one (letter, caseType) rather than the whole student —
+// support is family-specific, and this is the exact shape the writing
+// screens need at session start (one letter at a time). No PATCH/PUT/DELETE.
+router.get('/support-recommendation/:studentId/:letter/:caseType', ctrl.getSupportRecommendation);
+
+// ── Adaptive Pre-Writing Recommendation (Feature 4 Step 5, read-only) ─────────
+// Same narrow (studentId, letter, caseType) scope as support-recommendation
+// above — pre-writing recommendation is also family-specific and resolved
+// one target letter at a time. No PATCH/PUT/DELETE.
+router.get('/pre-writing-recommendation/:studentId/:letter/:caseType', ctrl.getPreWritingRecommendation);
+
+// ── Adaptive Repetition Recommendation (Feature 5 Step 3, read-only) ──────────
+// Same narrow (studentId, letter, caseType) scope as the two recommendation
+// endpoints above, plus an optional ?adaptiveRepetitionsUsed= query param
+// (frontend-supplied interaction-scoped count). No PATCH/PUT/DELETE.
+router.get('/repetition-recommendation/:studentId/:letter/:caseType', ctrl.getRepetitionRecommendation);
+
 // ── Data Collection Mode: session tracking, teacher validation, ML export ─────
 router.post('/collection-session/start',           collectionCtrl.startCollectionSession);
 router.patch('/collection-session/:id/complete',   collectionCtrl.completeCollectionSession);

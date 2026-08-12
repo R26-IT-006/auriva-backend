@@ -2,6 +2,7 @@
 
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
+const { LETTER_SUPPORT_LEVELS } = require('../config/letterSupportLevels');
 
 const LetterAttempt = sequelize.define('LetterAttempt', {
   id: {
@@ -55,6 +56,43 @@ const LetterAttempt = sequelize.define('LetterAttempt', {
   stroke_points: {
     type:      DataTypes.JSONB,
     allowNull: true,
+  },
+  // Feature 3 Step 3 — per-attempt support level as actually RENDERED by the
+  // frontend for this specific attempt ('high'|'medium'|'low' — see
+  // src/config/letterSupportLevels.js and the frontend's
+  // constants/handwritingSupportLevels.js, Feature 3 Step 2). Genuinely
+  // per-attempt, like `features` above — never a session-level value copied
+  // across a session's rows (see saveLetterAttempts() in
+  // handwritingController.js, which reads it from each attempt's own
+  // payload object, never from a session-level field).
+  //
+  // Nullable by design and NEVER backfilled: rows saved before this column
+  // existed, and any row whose client omitted or sent an invalid value,
+  // simply have support_level = null — never a guessed value derived from
+  // attempt_number. See the Feature 3 Step 1 audit for why attempt_number
+  // cannot safely stand in for support_level (collection-mode attempt 3's
+  // presentation does not match either 'medium' or a bare 'no support'
+  // case), and the migration's header comment for the historical-row policy.
+  //
+  // DATA CAPTURE ONLY as of Step 3 — nothing in this codebase reads this
+  // column to make an adaptive decision yet.
+  //
+  // Deliberately a plain VARCHAR + application-level `isIn` validation
+  // rather than a native PostgreSQL ENUM: matches this column's own
+  // `case_type`/`capture_status` siblings only loosely — those two DO use
+  // DataTypes.ENUM — but a native enum type is more expensive to alter later
+  // (adding a 4th support tier, should one ever be needed, requires an
+  // `ALTER TYPE ... ADD VALUE` migration outside a transaction on some PG
+  // versions) and Feature 3's own vocabulary is still young; a plain string
+  // with the SAME validation enforced at the model layer keeps rollback and
+  // future vocabulary changes simple. Revisit only if this column's shape
+  // proves genuinely stable long-term.
+  support_level: {
+    type:      DataTypes.STRING(10),
+    allowNull: true,
+    validate: {
+      isIn: [LETTER_SUPPORT_LEVELS],
+    },
   },
   // true when this row was recorded during a fixed research protocol session
   collection_mode: {

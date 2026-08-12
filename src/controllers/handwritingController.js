@@ -24,6 +24,20 @@ const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../serv
 const teacherService = require('../services/teacherService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
 const { computeMotorScore } = require('../utils/motorScore');
+const { isValidLetterSupportLevel } = require('../config/letterSupportLevels');
+// Feature 3 Step 6 — read-only support-recommendation endpoint. Reuses
+// Step 5's evaluateSupportRecommendations() and Feature 2's own
+// getBaselineFamily() directly; no recommendation logic is duplicated here.
+const { getBaselineFamily } = require('../config/letterBaselineFamilies');
+const { evaluateSupportRecommendations } = require('../services/adaptiveSupportService');
+// Feature 4 Step 5 — read-only pre-writing recommendation endpoint. Reuses
+// Step 4's evaluatePreWritingRecommendation() directly; no recommendation
+// logic is duplicated here.
+const { evaluatePreWritingRecommendation } = require('../services/adaptivePreWritingService');
+// Feature 5 Step 3 — read-only repetition recommendation endpoint. Reuses
+// Step 2's evaluateRepetitionRecommendation() directly; no recommendation
+// logic is duplicated here.
+const { evaluateRepetitionRecommendation } = require('../services/repetitionRecommendationService');
 
 // item 7 / item 8: a row only counts as fully captured for ML if it has both
 // raw points and a non-empty features object — used to set capture_status
@@ -284,6 +298,33 @@ async function getProgress(req, res) {
   });
 }
 
+// Feature 3 Step 3 — resolves the per-attempt support_level to persist,
+// tolerant of older clients that don't send it at all. Never rejects the
+// whole letter-completion request over a missing/invalid value — matches
+// this file's existing tolerant-ingestion style (e.g. rowCaptureStatus()
+// above never blocks a save either; normalizeLetterFeatures() degrades
+// gracefully rather than throwing on malformed features).
+//
+// Distinguishes two cases:
+//   - absent (undefined/null)   → null, silently. Expected for older app
+//     builds, tests, and any legacy client that predates Feature 3 Step 2 —
+//     not a real problem, so not logged.
+//   - present but not one of 'high'|'medium'|'low' → null, WITH a logged
+//     warning. A real, current client sending a garbled value is worth
+//     knowing about even though it must never block the save (see Step 3
+//     spec §13/§14: invalid explicit value → null + warning, never a
+//     silent attempt_number-derived guess, and never a request rejection).
+function resolveAttemptSupportLevel(rawValue, context) {
+  if (rawValue == null) return null;
+  if (isValidLetterSupportLevel(rawValue)) return rawValue;
+
+  logger.warn('LetterAttempt received an invalid support_level — persisting null', {
+    ...context,
+    rawValue: typeof rawValue === 'string' ? rawValue : typeof rawValue,
+  });
+  return null;
+}
+
 // ML: bulk-insert one immutable row per attempt element from a single POST call.
 // All rows share the same session_key so the full session is always queryable.
 // Never updates existing rows — true append-only store.
@@ -312,6 +353,14 @@ function saveLetterAttempts(attempts, {
         threshold:       threshold ?? null,
         features:        a.features ?? null,
         stroke_points:   a.strokes  ?? null,
+        // Feature 3 Step 3 — read from THIS attempt's own payload object,
+        // never derived from attempt_number and never a single session-level
+        // value copied across rows (each attempt in `attempts` can — and,
+        // once adaptive support exists, eventually will — carry a different
+        // support_level; see resolveAttemptSupportLevel() above).
+        support_level: resolveAttemptSupportLevel(a.support_level, {
+          student_id, letter, case_type, sessionKey, attemptNumber: a.attempt_number ?? 1,
+        }),
         collection_mode: collection_mode ?? false,
 
         collection_session_id,
@@ -1160,4 +1209,255 @@ async function getMotorBaseline(req, res) {
   throw new ApiError(500, 'Failed to retrieve motor baseline');
 }
 
-module.exports = { submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion, explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport, getLetterProgressReport, getMotorBaseline };
+/**
+ * Maps a Step 5 family decision to the support level a session should START
+ * with (Feature 3 Step 6 spec §22). Deliberately a small, explicit lookup —
+ * NOT a second copy of Step 5's decision logic. Only these four decisions
+ * ever produce a real starting support; every other decision (insufficient_
+ * data, insufficient_target, not reached at all) maps to `undefined` here,
+ * which the caller below turns into `recommendedSupport: null` — the
+ * frontend's signal to fall back to its own legacy default sequence.
+ *
+ * support_review → 'high': the maximum available software support is what
+ * was actually being shown when the evidence was gathered (see Step 5's own
+ * rationale for why support_review always carries recommendedSupport:
+ * 'high') — Step 6 reuses that same value as the session's starting support,
+ * WITHOUT adding any teacher warning or dashboard behavior yet (spec §10).
+ * `requiresReview` is still exposed additively on the response for future use.
+ */
+const SUPPORT_DECISION_TO_STARTING_SUPPORT = {
+  recommend_high:   'high',
+  recommend_medium: 'medium',
+  recommend_low:    'low',
+  support_review:   'high',
+};
+
+/**
+ * GET /handwriting/support-recommendation/:studentId/:letter/:caseType
+ *
+ * Feature 3 Step 6 — READ-ONLY. Resolves the single baseline family for
+ * (letter, caseType) and returns ONLY the minimal recommendation metadata a
+ * session needs to choose its starting support level — never raw attempt
+ * history, trajectories, or the full evidence arrays Step 4/5 compute
+ * internally (spec §6). Performs no writes: evaluateSupportRecommendations()
+ * (Step 5) is itself fully read-only, and this handler adds none of its own.
+ *
+ * Ambiguous/unmapped letters (getBaselineFamily returns null) resolve to
+ * decision: 'not_applicable' WITHOUT ever calling evaluateSupportRecommendations
+ * — there is no family to evaluate, so nothing is guessed (spec §7).
+ *
+ * A genuine internal failure (evaluateSupportRecommendations() status !==
+ * 'evaluated', i.e. read_failed) is a real 500 — same convention
+ * getMotorBaseline already uses for its own read_failed case just above.
+ * This is intentional, not a gap in "never break the child's session": the
+ * FRONTEND is the layer responsible for treating any failure mode (network
+ * error, 404, 500) identically as "fall back to the legacy sequence" (Step 6
+ * spec §20/§21) — the backend does not need to disguise its own failure as
+ * a fake 200.
+ */
+async function getSupportRecommendation(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  const { letter, caseType } = req.params;
+  if (typeof letter !== 'string' || letter.length !== 1) {
+    throw new ApiError(422, 'Invalid letter');
+  }
+  if (!['lowercase', 'uppercase'].includes(caseType)) {
+    throw new ApiError(422, 'case_type must be lowercase or uppercase');
+  }
+
+  // Ownership check — identical convention to getMotorBaseline above: a
+  // teacher can only ever request a recommendation for a student assigned
+  // to them. Throws ApiError(404) on no-match.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const family = getBaselineFamily(letter, caseType);
+  if (!family) {
+    return res.json({
+      status: 'resolved',
+      studentId, letter, caseType,
+      family: null,
+      recommendedSupport: null,
+      decision: 'not_applicable',
+      reason: 'ambiguous_or_unmapped_letter',
+      requiresReview: false,
+      evidenceBasis: null,
+    });
+  }
+
+  const evalResult = await evaluateSupportRecommendations({ studentId });
+  if (evalResult.status !== 'evaluated') {
+    logger.error('Support recommendation evaluation failed', { studentId, letter, caseType, family, status: evalResult.status });
+    throw new ApiError(500, 'Failed to evaluate support recommendation');
+  }
+
+  const familyResult = evalResult.families[family];
+  const recommendedSupport = SUPPORT_DECISION_TO_STARTING_SUPPORT[familyResult.decision] ?? null;
+
+  res.json({
+    status: 'resolved',
+    studentId, letter, caseType, family,
+    recommendedSupport,
+    decision: familyResult.decision,
+    reason: familyResult.reason,
+    requiresReview: familyResult.requiresReview,
+    evidenceBasis: familyResult.evidenceBasis,
+  });
+}
+
+/**
+ * GET /handwriting/pre-writing-recommendation/:studentId/:letter/:caseType
+ *
+ * Feature 4 Step 5 — READ-ONLY. Thin controller wrapper around
+ * evaluatePreWritingRecommendation() (Feature 4 Step 4) — no recommendation
+ * logic is duplicated here. Same ownership/validation convention as
+ * getSupportRecommendation just above.
+ *
+ * Response is deliberately minimal child-facing metadata only — no raw
+ * scores, no trajectory data, no full attempt history (Step 5 spec §6). The
+ * service's own output shape already IS this minimal shape (studentId/
+ * letter/caseType/family/primitiveGroup/recommended/activityId/reason/
+ * signals) — this handler passes it through with no extra fields, exactly
+ * as evaluatePreWritingRecommendation() computed it.
+ *
+ * Performs no writes: evaluatePreWritingRecommendation() is itself fully
+ * read-only (Step 4), and this handler adds none of its own — no guard
+ * marking, no recommendation persistence, no ShapeFeature/LetterAttempt/
+ * ThresholdHistory write (Step 5 spec §28). Only the existing
+ * POST /pre-writing-activity endpoint records an actual completed warm-up.
+ */
+async function getPreWritingRecommendation(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  const { letter, caseType } = req.params;
+  if (typeof letter !== 'string' || letter.length !== 1) {
+    throw new ApiError(422, 'Invalid letter');
+  }
+  if (!['lowercase', 'uppercase'].includes(caseType)) {
+    throw new ApiError(422, 'case_type must be lowercase or uppercase');
+  }
+
+  // Ownership check — identical convention to getSupportRecommendation/
+  // getMotorBaseline above: a teacher can only ever request a recommendation
+  // for a student assigned to them. Throws ApiError(404) on no-match.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await evaluatePreWritingRecommendation({ studentId, letter, caseType });
+
+  if (result.status === 'invalid_input') {
+    // Unreachable in practice (studentId/letter/caseType already validated
+    // above with identical rules) but handled defensively, never assumed
+    // unreachable.
+    throw new ApiError(422, 'Invalid recommendation request');
+  }
+
+  if (result.status === 'read_failed') {
+    logger.error('Pre-writing recommendation evaluation failed', { studentId, letter, caseType, status: result.status });
+    throw new ApiError(500, 'Failed to evaluate pre-writing recommendation');
+  }
+
+  res.json({
+    status: result.status,
+    studentId: result.studentId,
+    letter: result.letter,
+    caseType: result.caseType,
+    family: result.family,
+    primitiveGroup: result.primitiveGroup,
+    recommended: result.recommended,
+    activityId: result.activityId,
+    reason: result.reason,
+    signals: result.signals,
+  });
+}
+
+/**
+ * GET /handwriting/repetition-recommendation/:studentId/:letter/:caseType?adaptiveRepetitionsUsed=N
+ *
+ * Feature 5 Step 3 — READ-ONLY. Thin controller wrapper around
+ * evaluateRepetitionRecommendation() (Feature 5 Step 2) — no recommendation
+ * logic is duplicated here. Same ownership/validation convention as
+ * getSupportRecommendation/getPreWritingRecommendation above.
+ *
+ * `adaptiveRepetitionsUsed` is an optional query parameter (defaults to 0,
+ * matching the service's own default) — the CALLER (frontend, via
+ * utils/repetitionSessionGuard.js) supplies how many automatic spaced
+ * repetitions this letter has already received THIS interaction; this
+ * endpoint never tracks or reconstructs that count itself (Step 2 spec
+ * §16/§17 — the same interactionId-is-frontend-only split Feature 4 already
+ * established).
+ *
+ * Performs no writes: evaluateRepetitionRecommendation() is itself fully
+ * read-only, and this handler adds none of its own — no sequence
+ * reinsertion, no guard marking, no recommendation persistence.
+ */
+async function getRepetitionRecommendation(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  const { letter, caseType } = req.params;
+  if (typeof letter !== 'string' || letter.length !== 1) {
+    throw new ApiError(422, 'Invalid letter');
+  }
+  if (!['lowercase', 'uppercase'].includes(caseType)) {
+    throw new ApiError(422, 'case_type must be lowercase or uppercase');
+  }
+
+  let adaptiveRepetitionsUsed = 0;
+  if (req.query.adaptiveRepetitionsUsed !== undefined) {
+    const raw = req.query.adaptiveRepetitionsUsed;
+    const parsed = Number(raw);
+    // raw === '' is checked explicitly: Number('') is 0, not NaN, which
+    // would otherwise silently treat "?adaptiveRepetitionsUsed=" (present
+    // but empty) as a valid 0 rather than a malformed value.
+    if (raw === '' || !Number.isInteger(parsed) || parsed < 0) {
+      throw new ApiError(422, 'adaptiveRepetitionsUsed must be a non-negative integer');
+    }
+    adaptiveRepetitionsUsed = parsed;
+  }
+
+  // Ownership check — identical convention to getSupportRecommendation/
+  // getPreWritingRecommendation/getMotorBaseline above. Throws
+  // ApiError(404) on no-match.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await evaluateRepetitionRecommendation({ studentId, letter, caseType, adaptiveRepetitionsUsed });
+
+  if (result.status === 'invalid_input') {
+    // Unreachable in practice (all inputs already validated above with
+    // identical rules) but handled defensively, never assumed unreachable.
+    throw new ApiError(422, 'Invalid recommendation request');
+  }
+
+  if (result.status === 'read_failed') {
+    logger.error('Repetition recommendation evaluation failed', { studentId, letter, caseType, adaptiveRepetitionsUsed, status: result.status });
+    throw new ApiError(500, 'Failed to evaluate repetition recommendation');
+  }
+
+  res.json({
+    status: result.status,
+    studentId: result.studentId,
+    letter: result.letter,
+    caseType: result.caseType,
+    family: result.family,
+    shouldRepeat: result.shouldRepeat,
+    reason: result.reason,
+    signals: result.signals,
+    policy: result.policy,
+    history: result.history,
+  });
+}
+
+module.exports = {
+  submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion,
+  explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport,
+  getLetterProgressReport, getMotorBaseline, getSupportRecommendation,
+  getPreWritingRecommendation, getRepetitionRecommendation,
+};
