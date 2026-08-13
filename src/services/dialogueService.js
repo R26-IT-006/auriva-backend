@@ -130,8 +130,9 @@ async function getNextWord(teacherId, studentId, { category = null, exclude_word
   });
 
   const entries = words.map((w) => ({
-    word:     w.get({ plain: true }),
-    progress: w.get({ plain: true }).progress?.[0] ?? null,
+    word:             w.get({ plain: true }),
+    progress:         w.progress?.[0]?.get({ plain: true }) ?? null,
+    progressInstance: w.progress?.[0] ?? null,
   }));
 
   // Strict gate: all lower-difficulty words must be mastered
@@ -258,7 +259,7 @@ async function getNextWord(teacherId, studentId, { category = null, exclude_word
     ({ word, progress }) => progress?.status === 'struggling' && allLowerDifficultyMastered(word)
   );
   if (reintroEntry) {
-    await reintroEntry.progress.update({
+    await reintroEntry.progressInstance.update({
       status:                 'in_progress',
       consecutive_fail_count: 0,
       current_phase:          1,
@@ -266,7 +267,7 @@ async function getNextWord(teacherId, studentId, { category = null, exclude_word
       phase1_exposure_count:  0,
       updated_at:             new Date(),
     });
-    const refreshed = await reintroEntry.progress.reload();
+    const refreshed = await reintroEntry.progressInstance.reload();
     return { ...formatNextWord(reintroEntry.word, refreshed), reintroduced: true };
   }
 
