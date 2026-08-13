@@ -3,19 +3,8 @@
 const { QueryTypes } = require('sequelize');
 const sequelize = require('../config/database');
 const { Student, StudentConceptProgress } = require('../models');
-const { CATEGORY_SEQUENCES } = require('./conceptService');
+const { CATEGORY_SEQUENCES, PASS_SCORE, isMastered } = require('./conceptService');
 const ApiError = require('../utils/ApiError');
-
-// The pass bar used by every tier screen (score >= 2/3). Kept here so the
-// "needs attention" rule can't drift from what the activities actually score.
-const PASS_SCORE = 2 / 3;
-
-// The codebase carries two conflicting definitions of "mastered":
-// activityService uses tier1 AND tier2; teacherService.getDashboardStats counts
-// tier1 alone. We adopt activityService's — tier 3 is a video with no assessment
-// and can only ever be 'passed', so counting it would measure exposure, not
-// mastery. The dashboard's differing figure is pre-existing and left alone.
-const isMastered = (row) => row.tier1_status === 'passed' && row.tier2_status === 'passed';
 
 // Human labels for the category keys. The backend only stores sequences, and the
 // labels live in the frontend catalogue, so they are mirrored here rather than
@@ -85,9 +74,10 @@ async function getConceptSummary(teacherId, studentId) {
     const inCat    = new Set(CATEGORY_SEQUENCES[key]);
     const mastered = catRows.filter(isMastered).length;
 
-    // A concept promoted by the adaptive quiz keeps its failing tier1_score,
-    // because completeAdaptive writes status without touching score. Including
-    // those would drag the average below what the child actually demonstrates.
+    // Backstop only. completeAdaptive now raises tier1_score to PASS_SCORE when it
+    // promotes a concept, so passed-with-a-failing-score rows are no longer created.
+    // This still guards rows written before that fix which the backfill missed —
+    // including them would drag the average below what the child demonstrated.
     const scoreRows = catRows.filter(
       (r) => typeof r.tier1_score === 'number'
         && !(r.tier1_status === 'passed' && r.tier1_score < PASS_SCORE),

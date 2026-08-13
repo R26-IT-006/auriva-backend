@@ -30,8 +30,6 @@ router.post('/tier1/attempt', [
   body('was_correct').isBoolean(),
 ], ctrl.logMatchAttempt);
 
-router.get('/:conceptKey/confusions', ctrl.getConfusions);
-
 router.post('/tier1/complete', [
   body('student_id').isInt({ min: 1 }),
   body('category_key').isString().notEmpty(),

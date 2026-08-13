@@ -8,6 +8,8 @@ const {
   getDistractors,
   syncToGkb,
   logInteraction,
+  PASS_SCORE,
+  isMastered,
 } = require('./conceptService');
 
 // Activity events share the concept_interaction_logs table but live in their own
@@ -15,18 +17,12 @@ const {
 const ACTIVITY_TIER = 4;
 
 const THRESHOLD    = 3;      // concepts that must be mastered to trigger an activity
-const PASS_SCORE   = 2 / 3;  // matches the Tier 2 pass bar
 const MAX_REROLLS  = 5;      // signature-collision retries before we accept a repeat
 
-/**
- * A concept counts as mastered only once the child has done BOTH the image-match
- * (tier 1) and the name-match (tier 2) for it — that guarantees every round type an
- * activity can produce tests a skill they have actually been taught. Tier 3 is
- * excluded deliberately: it is a video watch, not an assessment, and video assets
- * only exist for two categories.
- */
-const MASTERY_PREDICATE = (row) =>
-  row.tier1_status === 'passed' && row.tier2_status === 'passed';
+// Requiring both tier 1 and tier 2 guarantees every round type an activity can
+// produce tests a skill the child has actually been taught. Defined in
+// conceptService so the dashboard and the analytics report agree with this.
+const MASTERY_PREDICATE = isMastered;
 
 // ─── Difficulty ──────────────────────────────────────────────────────────────
 

@@ -81,15 +81,6 @@ async function getDistractors(req, res) {
   res.json(result);
 }
 
-async function getConfusions(req, res) {
-  const { conceptKey } = req.params;
-  const studentId = parseInt(req.query.student_id, 10);
-  if (!studentId) throw new ApiError(422, 'student_id query param is required');
-
-  const result = await conceptService.getConfusions(studentId, conceptKey);
-  res.json(result);
-}
-
 async function logAdaptiveAttempt(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
@@ -194,4 +185,4 @@ async function completeActivity(req, res) {
   res.json(result);
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getConfusions, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getActivityStatus, startActivity, logActivityAttempt, completeActivity };
+module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getActivityStatus, startActivity, logActivityAttempt, completeActivity };

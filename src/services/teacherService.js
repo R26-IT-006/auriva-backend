@@ -2,6 +2,7 @@
 
 const axios  = require('axios');
 const { Teacher, Student, Session, StudentConceptProgress, StudentAvatar } = require('../models');
+const { isMastered } = require('./conceptService');
 const ApiError = require('../utils/ApiError');
 
 const GNN_BASE = process.env.GNN_SERVICE_URL || 'http://localhost:8000';
@@ -22,9 +23,11 @@ async function getDashboardStats(teacherId) {
   const totalStudents = studentIds.length;
 
   const [conceptsMastered, avgEngagement, recentSessions, recentAchievements, allProgress, allSessions] = await Promise.all([
+    // "Mastered" means tier 1 AND tier 2, matching activityService and the concept
+    // analytics report. This counts fewer concepts than the old tier-1-only rule.
     totalStudents > 0
       ? StudentConceptProgress.count({
-          where: { tier1_status: 'passed', student_id: studentIds },
+          where: { tier1_status: 'passed', tier2_status: 'passed', student_id: studentIds },
         })
       : 0,
     totalStudents > 0
@@ -55,7 +58,9 @@ async function getDashboardStats(teacherId) {
     totalStudents > 0
       ? StudentConceptProgress.findAll({
           where: { student_id: studentIds },
-          attributes: ['student_id', 'tier1_status', 'tier1_score'],
+          // tier2_status is required by isMastered — without it the predicate reads
+          // undefined and silently counts nothing.
+          attributes: ['student_id', 'tier1_status', 'tier2_status', 'tier1_score'],
         })
       : [],
     totalStudents > 0
@@ -71,7 +76,7 @@ async function getDashboardStats(teacherId) {
     const progress = allProgress.filter((p) => p.student_id === s.sid);
     const scores = progress.filter((p) => p.tier1_score != null).map((p) => p.tier1_score);
     const avgScore = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-    const mastered = progress.filter((p) => p.tier1_status === 'passed').length;
+    const mastered = progress.filter(isMastered).length;
     const lastSession = allSessions.find((sess) => sess.student_id === s.sid);
 
     return {

@@ -8,6 +8,22 @@ const axios                   = require('axios');
 
 const GNN_BASE = process.env.GNN_SERVICE_URL || 'http://localhost:8000';
 
+// ─── Shared scoring rules ────────────────────────────────────────────────────
+// Both live here because this is the lowest-level concept module — activityService,
+// conceptAnalyticsService and teacherService all depend on it, so a single home
+// stops the pass bar and the meaning of "mastered" drifting apart again.
+
+/** The pass bar every tier screen scores against (2 of 3 attempts). */
+const PASS_SCORE = 2 / 3;
+
+/**
+ * A concept counts as mastered only once the child has done BOTH the image-match
+ * (tier 1) and the name-match (tier 2). Tier 3 is excluded deliberately: it is a
+ * video watch with no assessment, so counting it would measure exposure, not mastery.
+ */
+const isMastered = (row) =>
+  row.tier1_status === 'passed' && row.tier2_status === 'passed';
+
 // ─── GKB forwarding (fire-and-forget) ────────────────────────────────────────
 
 function syncToGkb(path, payload) {
@@ -338,32 +354,6 @@ async function completeTier1(studentId, categoryKey, conceptKey, passed, score, 
 }
 
 /**
- * Returns unique concept keys this student confused with the given conceptKey,
- * sourced from the GKB confusion edges (sorted by weight desc).
- * Falls back to PostgreSQL interaction logs if GKB is unreachable.
- */
-async function getConfusions(studentId, conceptKey) {
-  try {
-    // Primary: query GKB via FastAPI
-    const resp = await axios.get(
-      `${GNN_BASE}/gkb/student/${studentId}/concept/fruits/${conceptKey}/confusions`
-    );
-    const confusedKeys = (resp.data?.confused_keys || []).slice(0, 2);
-    if (confusedKeys.length > 0) return { confused_keys: confusedKeys };
-  } catch { /* fall through to PostgreSQL fallback */ }
-
-  // Fallback: derive from the most recent tier1_fail interaction log
-  const failLog = await ConceptInteractionLog.findOne({
-    where: { student_id: studentId, concept_key: conceptKey, event_type: 'tier1_fail', tier: 1 },
-    order: [['created_at', 'DESC']],
-  });
-
-  const confusedWith = failLog?.event_data?.confused_with || [];
-  const confusedKeys = [...new Set(confusedWith.map((c) => c.selected_key))].slice(0, 2);
-  return { confused_keys: confusedKeys };
-}
-
-/**
  * Logs a single adaptive (2-image) quiz attempt to concept_interaction_logs.
  */
 async function logAdaptiveAttempt(studentId, sessionId, categoryKey, conceptKey, confusedConceptKey, roundNumber, wasCorrect, timeTakenMs) {
@@ -401,15 +391,30 @@ async function completeAdaptive(studentId, sessionId, categoryKey, conceptKey, c
     created_at:   new Date(),
   });
 
-  // Passing the adaptive quiz promotes the concept to 'passed' in PostgreSQL
+  // Passing the adaptive quiz promotes the concept to 'passed' in PostgreSQL.
+  //
+  // The score has to move up with the status. Leaving it at the failing value the
+  // first quiz wrote would store the concept as passed-at-0.33, and that number is
+  // read as strength — activityService would keep the concept at the top of its
+  // weakest-first re-test queue and let it drag activity difficulty down, while the
+  // teacher screens would show a failing percentage on a concept the child passed.
+  //
+  // We raise it to exactly the pass bar rather than to 1.0: the adaptive quiz is a
+  // 2-choice remediation that requires every round correct, so scoring it on its own
+  // terms would always yield a perfect score and rank a remediated concept above one
+  // passed 2/3 first time. `max` so a re-run can never lower an existing better score.
   if (allPassed) {
     const now = new Date();
     const [row, created] = await StudentConceptProgress.findOrCreate({
       where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
-      defaults: { tier1_status: 'passed', tier1_passed_at: now },
+      defaults: { tier1_status: 'passed', tier1_score: PASS_SCORE, tier1_passed_at: now },
     });
     if (!created && row.tier1_status !== 'passed') {
-      await row.update({ tier1_status: 'passed', tier1_passed_at: now });
+      await row.update({
+        tier1_status:    'passed',
+        tier1_score:     Math.max(row.tier1_score ?? 0, PASS_SCORE),
+        tier1_passed_at: now,
+      });
     }
   }
 
@@ -624,4 +629,4 @@ async function completeTier3(studentId, categoryKey, conceptKey, timeSpentMs) {
   return { completed: true };
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getConfusions, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getSequence, CATEGORY_SEQUENCES, syncToGkb };
+module.exports = { getConceptItems, startTier1, logInteraction, completeTier1, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getSequence, CATEGORY_SEQUENCES, syncToGkb, PASS_SCORE, isMastered };
