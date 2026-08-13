@@ -46,6 +46,19 @@ router.get('/pre-writing-recommendation/:studentId/:letter/:caseType', ctrl.getP
 // (frontend-supplied interaction-scoped count). No PATCH/PUT/DELETE.
 router.get('/repetition-recommendation/:studentId/:letter/:caseType', ctrl.getRepetitionRecommendation);
 
+// ── Demo-Speed Recommendation (Feature 6 Step 3, read-only) ───────────────────
+// Same narrow (studentId, letter, caseType) scope as the other
+// recommendation endpoints above — categorical only ('standard'/'slow'), no
+// pixel/timing values. No PATCH/PUT/DELETE.
+router.get('/demo-speed-recommendation/:studentId/:letter/:caseType', ctrl.getDemoSpeedRecommendation);
+
+// ── Persistent-Difficulty Detection (Feature 7 Step 3, read-only) ─────────────
+// Student-wide (NOT narrowed to one letter/caseType, unlike the
+// recommendation endpoints above) — persistent difficulty is inherently a
+// rollup across all six (caseType, family) streams at once. Computed on
+// demand; no persistence table exists yet. No PATCH/PUT/DELETE.
+router.get('/persistent-difficulty/:studentId', ctrl.getPersistentDifficulty);
+
 // ── Data Collection Mode: session tracking, teacher validation, ML export ─────
 router.post('/collection-session/start',           collectionCtrl.startCollectionSession);
 router.patch('/collection-session/:id/complete',   collectionCtrl.completeCollectionSession);

@@ -3,6 +3,7 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 const { LETTER_SUPPORT_LEVELS } = require('../config/letterSupportLevels');
+const { VALID_DEMO_SPEED_LEVELS } = require('../config/demoSpeedPolicy');
 
 const LetterAttempt = sequelize.define('LetterAttempt', {
   id: {
@@ -92,6 +93,41 @@ const LetterAttempt = sequelize.define('LetterAttempt', {
     allowNull: true,
     validate: {
       isIn: [LETTER_SUPPORT_LEVELS],
+    },
+  },
+  // Feature 6 Step 5 — per-attempt demo-speed level as ACTUALLY RENDERED by
+  // the frontend for this specific attempt's animated tracer, if one was
+  // shown ('standard'|'slow' — see src/config/demoSpeedPolicy.js and the
+  // frontend's constants/demoSpeedLevels.js, Feature 6 Step 2). This is the
+  // frontend's resolveActualDemoSpeedLevel() output, NOT the raw backend
+  // recommendation — the two are deliberately different concepts (Step 3's
+  // persistence-semantics analysis): a `slow` recommendation at MEDIUM/LOW
+  // support, under reduce-motion, or in collection mode never actually
+  // rendered a tracer, so this column is `null` in every one of those cases,
+  // not a misleading 'slow'/'standard'. `null` means "no animated tracer was
+  // shown for this attempt" — it does NOT mean "no adaptation happened"; a
+  // HIGH-support attempt that genuinely rendered at the unmodified standard
+  // speed still stores 'standard' explicitly (Step 5 spec §39).
+  //
+  // Nullable by design and NEVER backfilled: rows saved before this column
+  // existed (and any row from before Feature 6 Step 4's frontend activation)
+  // simply have demo_speed_level = null — no historical proxy is derived
+  // from support_level/attempt_number/the backend recommendation, mirroring
+  // support_level's own no-backfill policy immediately above.
+  //
+  // DATA CAPTURE + RESEARCH/AUDITABILITY ONLY — nothing in this codebase
+  // reads this column to make a decision; it exists purely so a future
+  // analysis can compare standard-demo vs. slow-demo attempts (trajectory
+  // score, smoothness, attempt_duration_ms, threshold outcome) without
+  // guessing which speed was actually shown.
+  //
+  // Same STRING(10) + application-level `isIn` choice as support_level, for
+  // the same rollback-safety rationale (see that column's own comment).
+  demo_speed_level: {
+    type:      DataTypes.STRING(10),
+    allowNull: true,
+    validate: {
+      isIn: [VALID_DEMO_SPEED_LEVELS],
     },
   },
   // true when this row was recorded during a fixed research protocol session

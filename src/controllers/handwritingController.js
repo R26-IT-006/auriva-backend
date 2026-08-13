@@ -25,6 +25,7 @@ const teacherService = require('../services/teacherService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
 const { computeMotorScore } = require('../utils/motorScore');
 const { isValidLetterSupportLevel } = require('../config/letterSupportLevels');
+const { isValidDemoSpeedLevel } = require('../config/demoSpeedPolicy');
 // Feature 3 Step 6 — read-only support-recommendation endpoint. Reuses
 // Step 5's evaluateSupportRecommendations() and Feature 2's own
 // getBaselineFamily() directly; no recommendation logic is duplicated here.
@@ -38,6 +39,14 @@ const { evaluatePreWritingRecommendation } = require('../services/adaptivePreWri
 // Step 2's evaluateRepetitionRecommendation() directly; no recommendation
 // logic is duplicated here.
 const { evaluateRepetitionRecommendation } = require('../services/repetitionRecommendationService');
+// Feature 6 Step 3 — read-only demo-speed recommendation endpoint. Reuses
+// evaluateDemoSpeedRecommendation() directly; no recommendation logic is
+// duplicated here.
+const { evaluateDemoSpeedRecommendation } = require('../services/demoSpeedRecommendationService');
+// Feature 7 Step 3 — read-only, student-wide persistent-difficulty
+// detection endpoint. Reuses evaluatePersistentDifficulty() directly; no
+// evidence-reconstruction or decision logic is duplicated here.
+const { evaluatePersistentDifficulty } = require('../services/persistentDifficultyService');
 
 // item 7 / item 8: a row only counts as fully captured for ML if it has both
 // raw points and a non-empty features object — used to set capture_status
@@ -325,6 +334,40 @@ function resolveAttemptSupportLevel(rawValue, context) {
   return null;
 }
 
+// Feature 6 Step 5 — resolves the per-attempt demo_speed_level to persist.
+// Mirrors resolveAttemptSupportLevel() above exactly (same tolerant-ingestion
+// discipline, same absent-vs-invalid distinction), applied to Feature 6's
+// 'standard'|'slow' vocabulary instead of Feature 3's 'high'|'medium'|'low'.
+//
+// Deliberately NOT reconstructed here from support_level/attempt_number/any
+// backend recommendation (Step 5 spec §41) — the frontend is the sole
+// authority on what was actually rendered (resolveActualDemoSpeedLevel()),
+// since only it knows whether reduce-motion was active, whether the tracer
+// component actually mounted, and the true collection-mode state for this
+// exact attempt. This function only validates the client's own claim; it
+// never derives one.
+//
+//   - absent (undefined/null) → null, silently. Expected whenever no tracer
+//     was actually shown for this attempt (MEDIUM/LOW support, reduce-motion,
+//     collection mode) — see buildSessionAttemptRecord() on the frontend,
+//     which already sends null in exactly these cases — and for any client
+//     older than Feature 6 Step 5.
+//   - present but not one of 'standard'|'slow' → null, WITH a logged
+//     warning — a real, current client sending a garbled value is worth
+//     knowing about even though it must never block the save (same
+//     "invalid → null + warning, never a guess, never a rejection" contract
+//     as support_level, Step 5 spec §40).
+function resolveAttemptDemoSpeedLevel(rawValue, context) {
+  if (rawValue == null) return null;
+  if (isValidDemoSpeedLevel(rawValue)) return rawValue;
+
+  logger.warn('LetterAttempt received an invalid demo_speed_level — persisting null', {
+    ...context,
+    rawValue: typeof rawValue === 'string' ? rawValue : typeof rawValue,
+  });
+  return null;
+}
+
 // ML: bulk-insert one immutable row per attempt element from a single POST call.
 // All rows share the same session_key so the full session is always queryable.
 // Never updates existing rows — true append-only store.
@@ -359,6 +402,13 @@ function saveLetterAttempts(attempts, {
         // once adaptive support exists, eventually will — carry a different
         // support_level; see resolveAttemptSupportLevel() above).
         support_level: resolveAttemptSupportLevel(a.support_level, {
+          student_id, letter, case_type, sessionKey, attemptNumber: a.attempt_number ?? 1,
+        }),
+        // Feature 6 Step 5 — read from THIS attempt's own payload object,
+        // same per-attempt (never session-level) discipline as support_level
+        // immediately above. See resolveAttemptDemoSpeedLevel()'s own
+        // comment for why this is never reconstructed server-side.
+        demo_speed_level: resolveAttemptDemoSpeedLevel(a.demo_speed_level, {
           student_id, letter, case_type, sessionKey, attemptNumber: a.attempt_number ?? 1,
         }),
         collection_mode: collection_mode ?? false,
@@ -1455,9 +1505,117 @@ async function getRepetitionRecommendation(req, res) {
   });
 }
 
+/**
+ * GET /handwriting/demo-speed-recommendation/:studentId/:letter/:caseType
+ *
+ * Feature 6 Step 3 — READ-ONLY. Thin controller wrapper around
+ * evaluateDemoSpeedRecommendation() — no recommendation logic is duplicated
+ * here. Same ownership/validation convention as getSupportRecommendation/
+ * getPreWritingRecommendation/getRepetitionRecommendation above.
+ *
+ * The response is deliberately categorical only (`standard`/`slow`) — no
+ * pixel/timing values, no raw attempts, no raw timing metrics. The
+ * frontend (Step 4, not yet built) owns converting a level into an actual
+ * px/ms value.
+ *
+ * Performs no writes: evaluateDemoSpeedRecommendation() is itself fully
+ * read-only, and this handler adds none of its own.
+ */
+async function getDemoSpeedRecommendation(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  const { letter, caseType } = req.params;
+  if (typeof letter !== 'string' || letter.length !== 1) {
+    throw new ApiError(422, 'Invalid letter');
+  }
+  if (!['lowercase', 'uppercase'].includes(caseType)) {
+    throw new ApiError(422, 'case_type must be lowercase or uppercase');
+  }
+
+  // Ownership check — identical convention to every other recommendation
+  // endpoint above. Throws ApiError(404) on no-match.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await evaluateDemoSpeedRecommendation({ studentId, letter, caseType });
+
+  if (result.status === 'invalid_input') {
+    // Unreachable in practice (studentId/letter/caseType already validated
+    // above with identical rules) but handled defensively, never assumed
+    // unreachable.
+    throw new ApiError(422, 'Invalid recommendation request');
+  }
+
+  if (result.status === 'read_failed') {
+    logger.error('Demo speed recommendation evaluation failed', { studentId, letter, caseType, status: result.status });
+    throw new ApiError(500, 'Failed to evaluate demo speed recommendation');
+  }
+
+  res.json({
+    status: result.status,
+    studentId: result.studentId,
+    letter: result.letter,
+    caseType: result.caseType,
+    family: result.family,
+    recommendedSpeedLevel: result.recommendedSpeedLevel,
+    reason: result.reason,
+    signals: result.signals,
+  });
+}
+
+/**
+ * GET /handwriting/persistent-difficulty/:studentId
+ *
+ * Feature 7 Step 3 — READ-ONLY. Thin controller wrapper around
+ * evaluatePersistentDifficulty() — no evidence-reconstruction or decision
+ * logic is duplicated here. Student-wide (not narrowed to one letter/case,
+ * unlike the recommendation endpoints above) — persistent difficulty is
+ * inherently a rollup across all six (caseType, family) streams at once.
+ *
+ * The response is deliberately categorical/summary only — no raw
+ * LetterAttempt rows, no strokes, no normalized-feature JSON, no session
+ * keys, no database IDs (Step 3 spec §29). evaluatePersistentDifficulty()
+ * is itself fully read-only; this handler adds no writes of its own.
+ */
+async function getPersistentDifficulty(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  // Ownership check — identical convention to every other recommendation
+  // endpoint above. Throws ApiError(404) on no-match, BEFORE the
+  // (potentially larger, student-wide) evaluation ever runs.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await evaluatePersistentDifficulty({ studentId });
+
+  if (result.status === 'invalid_input') {
+    // Unreachable in practice (studentId already validated above with an
+    // identical rule) but handled defensively, never assumed unreachable.
+    throw new ApiError(422, 'Invalid persistent-difficulty evaluation request');
+  }
+
+  if (result.status === 'read_failed') {
+    logger.error('Persistent-difficulty evaluation failed', { studentId, status: result.status });
+    throw new ApiError(500, 'Failed to evaluate persistent difficulty');
+  }
+
+  res.json({
+    status: result.status,
+    studentId: result.studentId,
+    evaluatedAt: result.evaluatedAt,
+    streams: result.streams,
+    summary: result.summary,
+  });
+}
+
 module.exports = {
   submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion,
   explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport,
   getLetterProgressReport, getMotorBaseline, getSupportRecommendation,
-  getPreWritingRecommendation, getRepetitionRecommendation,
+  getPreWritingRecommendation, getRepetitionRecommendation, getDemoSpeedRecommendation,
+  getPersistentDifficulty,
 };
