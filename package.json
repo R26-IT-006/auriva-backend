@@ -7,7 +7,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "backfill:scores": "node src/config/backfillPassedScores.js"
+    "backfill:scores": "node scripts/backfillPassedScores.js"
   },
   "keywords": [],
   "author": "",

@@ -16,11 +16,11 @@
  * Usage:  npm run backfill:scores
  */
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 
 const { QueryTypes } = require('sequelize');
-const { sequelize } = require('../models');
-const { PASS_SCORE } = require('../services/conceptService');
+const { sequelize } = require('../src/models');
+const { PASS_SCORE } = require('../src/services/conceptService');
 
 async function backfill() {
   await sequelize.authenticate();

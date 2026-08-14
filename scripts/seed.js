@@ -1,9 +1,9 @@
 'use strict';
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 
 const bcrypt = require('bcryptjs');
-const { sequelize, Principal } = require('../models');
+const { sequelize, Principal } = require('../src/models');
 
 async function seed() {
   await sequelize.authenticate();
