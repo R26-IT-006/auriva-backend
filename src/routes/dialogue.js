@@ -74,4 +74,8 @@ router.post('/student/:studentId/level1/word/:wordId/probe-result', [
 
 router.get('/student/:studentId/word/:wordId/trajectory', ctrl.getTrajectory);
 
+// ── TASK-12 — Non-Verbal Adaptive Wait-Time Escalation ────────────────────
+
+router.get('/student/:studentId/speech-state', ctrl.getDailySpeechState);
+
 module.exports = router;

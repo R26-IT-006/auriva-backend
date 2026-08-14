@@ -614,6 +614,10 @@ async function startSession(teacherId, studentId, topic = 'self_introduction', p
       index:         i + 1,
       prompt:        PROMPTS[i],
       text,
+      // TASK-18: per-word tokenisation for the Sentence Familiarisation Ladder
+      // (L2ListenWatchScreen, L2SentenceBuildScreen). Additive — no existing
+      // consumer is broken because they already ignore unknown response fields.
+      words:         text.split(' '),
       dynamic_value: [
         q.child_first_name,
         String(q.child_age),

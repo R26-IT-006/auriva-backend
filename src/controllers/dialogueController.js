@@ -131,6 +131,14 @@ async function getTrajectory(req, res) {
   res.json({ trajectory });
 }
 
+// TASK-12 — Non-Verbal Adaptive Wait-Time Escalation
+// Same auth middleware as all sibling routes (verifyToken + isTeacher applied at
+// router level). No assertStudentBelongsToTeacher here — mirrors getTrajectory pattern.
+async function getDailySpeechState(req, res) {
+  const state = await dialogueService.getDailySpeechState(req.params.studentId);
+  res.json(state);
+}
+
 module.exports = {
   getLevel1Overview,
   getNextWord,
@@ -144,4 +152,5 @@ module.exports = {
   getProbeCandidate,
   recordProbeResult,
   getTrajectory,
+  getDailySpeechState,
 };

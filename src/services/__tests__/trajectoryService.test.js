@@ -53,10 +53,13 @@ function mockRow(data) {
 /** Primes the DB mocks with valid data so buildSession1Features succeeds. */
 function primeValidDbMocks() {
   DialogueWord.findByPk.mockResolvedValue({ difficulty: 2, category: 'greetings' });
+
+  // phase1_exposure_ratio_snapshot (written once at Phase 1 gate pass, never overwritten)
   DialogueWordProgress.findOne.mockResolvedValue({
-    phase1_exposure_count: 3,
-    phase1_required_exposures: 4,
+    phase1_exposure_ratio_snapshot: 0.75,
   });
+
+  // Phase 2 query — prompt_count was removed from this table's query after bug fix
   DialogueWordAttempt.findOne.mockResolvedValue(
     mockRow({
       speech_score: 2,
@@ -64,14 +67,16 @@ function primeValidDbMocks() {
       phoneme_error_class: 'substitution',
       response_latency_ms: 1200,
       echolalia_flag: false,
-      prompt_count: 1,
     })
   );
+
+  // Phase 3 query — prompt_count now lives here (bug fix 2026-08-13)
   DialoguePhase3Attempt.findOne.mockResolvedValue(
     mockRow({
       response_latency_ms: 1800,
       first_tap_correct: true,
       selection_change_count: 0,
+      prompt_count: 1,
     })
   );
 }

@@ -757,6 +757,90 @@ async function recordProbeResult(teacherId, studentId, wordId, { audio_base64, m
   };
 }
 
+/**
+ * TASK-12 — Non-Verbal Adaptive Wait-Time Escalation
+ *
+ * Derives today's trailing consecutive refusal count from dialogue_word_attempts
+ * and returns the corresponding wait-time multiplier for the TASK-06 prompt-
+ * hierarchy tiers. State is computed, not stored — no migration needed.
+ *
+ * Refusal = Phase 2 verbal attempt with speech_score = 0. Non-verbal activity
+ * rows (match_type = 'non_verbal') are excluded — they are outcomes of refusals,
+ * not refusals themselves.
+ *
+ * Day boundary uses UTC (mirrors todayString() / last_session_date pattern in
+ * Rules 1–4 above — specifically the differentDay check in recordPhase3Result).
+ *
+ * Escalation ladder (DEC-03 planner defaults):
+ *   0 refusals today → multiplier 1.0 (normal)
+ *   1 refusal today  → multiplier 0.7 (shortened waits)
+ *   2 refusals today → multiplier 0.5 (shortened further)
+ *   ≥3 refusals today → auto_nonverbal_today = true (skip production entirely)
+ *
+ * A genuine speech attempt (speech_score > 0) at any point resets the streak.
+ * Next calendar day starts fresh — the query is date-bounded to today UTC.
+ *
+ * Returns: { consecutive_refusals_today, wait_multiplier, auto_nonverbal_today }
+ */
+async function getDailySpeechState(studentId) {
+  const today = todayString(); // 'YYYY-MM-DD' in UTC — same as last_session_date
+
+  // Date range: today UTC midnight → tomorrow UTC midnight (exclusive upper bound).
+  // Using explicit Date objects (not raw strings) for portable DATETIME comparisons.
+  const todayStart    = new Date(`${today}T00:00:00.000Z`);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
+
+  // Fetch today's Phase 2 verbal attempts in chronological order.
+  // Excludes match_type = 'non_verbal' rows (image-selection activity results)
+  // because those are the outcome of a refusal, not a refusal themselves.
+  const todayAttempts = await DialogueWordAttempt.findAll({
+    where: {
+      student_id: studentId,
+      phase:      2,
+      match_type: { [Op.ne]: 'non_verbal' },
+      attempted_at: {
+        [Op.gte]: todayStart,
+        [Op.lt]:  tomorrowStart,
+      },
+    },
+    attributes: ['speech_score'],
+    order:       [['attempted_at', 'ASC']],
+  });
+
+  // Count trailing consecutive rows with speech_score = 0.
+  // Iterate in reverse: stop at the first row with speech_score > 0.
+  let consecutive = 0;
+  for (let i = todayAttempts.length - 1; i >= 0; i--) {
+    if (todayAttempts[i].speech_score === 0) {
+      consecutive++;
+    } else {
+      break; // any speech_score > 0 resets the streak
+    }
+  }
+
+  let wait_multiplier;
+  let auto_nonverbal_today;
+
+  if (consecutive >= 3) {
+    // ≥3 refusals: skip production entirely for the rest of today.
+    wait_multiplier      = 1.0; // irrelevant — production is bypassed
+    auto_nonverbal_today = true;
+  } else if (consecutive === 2) {
+    wait_multiplier      = 0.5;
+    auto_nonverbal_today = false;
+  } else if (consecutive === 1) {
+    wait_multiplier      = 0.7;
+    auto_nonverbal_today = false;
+  } else {
+    // streak 0 — behaviour byte-identical to before TASK-12 (multiplier 1.0 path)
+    wait_multiplier      = 1.0;
+    auto_nonverbal_today = false;
+  }
+
+  return { consecutive_refusals_today: consecutive, wait_multiplier, auto_nonverbal_today };
+}
+
 module.exports = {
   getLevel1Overview,
   getNextWord,
@@ -769,4 +853,5 @@ module.exports = {
   recordPhase3Result,
   getProbeCandidate,
   recordProbeResult,
+  getDailySpeechState,
 };
