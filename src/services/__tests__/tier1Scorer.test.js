@@ -99,3 +99,35 @@ test('6. mid-range score classifies as typical', () => {
 
   expect(result).toBe('typical');
 });
+
+test('7. non-verbal correct answer scores as full speech credit, not speech_score/3', () => {
+  // Same term composition in both (phoneme_accuracy/response_latency_ms_phase2
+  // absent for both) — a fully-correct non-verbal answer should classify
+  // identically to a fully-correct verbal one, not as if speech_score were 1/3.
+  const nonVerbalCorrect = computeTier1Trajectory({
+    speech_score: 1,
+    match_type: 'non_verbal',
+    echolalia_flag: false,
+    prompt_count: 1,
+  });
+  const verbalEquivalent = computeTier1Trajectory({
+    speech_score: 3,
+    echolalia_flag: false,
+    prompt_count: 1,
+  });
+
+  expect(nonVerbalCorrect).toBe(verbalEquivalent);
+  expect(nonVerbalCorrect).toBe('fast');
+});
+
+test('8. non-verbal incorrect answer does not throw and reweights around missing phoneme/latency', () => {
+  const result = computeTier1Trajectory({
+    speech_score: 0,
+    match_type: 'non_verbal',
+    echolalia_flag: false,
+    prompt_count: 3,
+  });
+
+  expect(result).not.toBeNaN();
+  expect(['fast', 'typical', 'struggling']).toContain(result);
+});

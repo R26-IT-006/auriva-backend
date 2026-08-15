@@ -81,6 +81,37 @@ function primeValidDbMocks() {
   );
 }
 
+/** Primes the DB mocks for a non-verbal (image-selection) attempt. */
+function primeNonVerbalDbMocks({ speechScore = 1 } = {}) {
+  DialogueWord.findByPk.mockResolvedValue({ difficulty: 2, category: 'greetings' });
+
+  DialogueWordProgress.findOne.mockResolvedValue({
+    phase1_exposure_ratio_snapshot: 0.75,
+  });
+
+  // recordNonVerbalResult never writes phoneme_accuracy / response_latency_ms —
+  // they stay null. echolalia_flag defaults to false at the DB level.
+  DialogueWordAttempt.findOne.mockResolvedValue(
+    mockRow({
+      speech_score: speechScore,
+      phoneme_accuracy: null,
+      phoneme_error_class: null,
+      response_latency_ms: null,
+      echolalia_flag: false,
+      match_type: 'non_verbal',
+    })
+  );
+
+  DialoguePhase3Attempt.findOne.mockResolvedValue(
+    mockRow({
+      response_latency_ms: 1800,
+      first_tap_correct: true,
+      selection_change_count: 0,
+      prompt_count: 1,
+    })
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Test setup / teardown
 // ---------------------------------------------------------------------------
@@ -282,6 +313,146 @@ describe('AC5 — high-confidence Tier 2 response is returned directly', () => {
       status: 200,
       data: { trajectory: 'typical', confidence: 0.75 },
     });
+    const result = await getTrajectoryPrediction(1, 10);
+    expect(result).toBe('typical');
+    expect(computeTier1Trajectory).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// phoneme_error_class null handling — 2026-08-15 fix. NULL is the common
+// real-world case (no error to classify: exact/keyword match short-circuits
+// before RC1 ever runs, or RC1 ran and found no error). Previously this was
+// treated as a fatal missing-feature and buildSession1Features() returned
+// null, so getTrajectoryPrediction() bailed out to hardcoded 'typical' —
+// Tier 1 and Tier 2 never ran at all for the majority of real rows. Now
+// substituted with the literal string 'none', matching the synthetic
+// training data's own convention (generate_synthetic_training_set.py never
+// writes a raw null here), so the feature stays in-distribution for the
+// Tier 2 microservice's get_dummies encoding and no longer blocks assembly.
+// ---------------------------------------------------------------------------
+
+describe('phoneme_error_class null handling', () => {
+  beforeEach(() => {
+    process.env.TRAJECTORY_ML_ENABLED = 'true';
+    process.env.MICROSERVICE_URL = 'http://localhost:5001';
+    process.env.TRAJECTORY_MIN_CONFIDENCE = '0.5';
+  });
+
+  function primeDbMocksWithPhonemeErrorClass(value) {
+    DialogueWord.findByPk.mockResolvedValue({ difficulty: 2, category: 'greetings' });
+    DialogueWordProgress.findOne.mockResolvedValue({ phase1_exposure_ratio_snapshot: 0.75 });
+    DialogueWordAttempt.findOne.mockResolvedValue(
+      mockRow({
+        speech_score: 3,
+        phoneme_accuracy: 1.0,
+        phoneme_error_class: value,
+        response_latency_ms: 1200,
+        echolalia_flag: false,
+      })
+    );
+    DialoguePhase3Attempt.findOne.mockResolvedValue(
+      mockRow({
+        response_latency_ms: 1800,
+        first_tap_correct: true,
+        selection_change_count: 0,
+        prompt_count: 1,
+      })
+    );
+  }
+
+  it('does not bail out to "typical" when phoneme_error_class is null', async () => {
+    primeDbMocksWithPhonemeErrorClass(null);
+    axios.post.mockRejectedValue(new Error('ECONNREFUSED')); // force the Tier 1 path
+    computeTier1Trajectory.mockReturnValue('fast');
+    const result = await getTrajectoryPrediction(1, 10);
+    expect(result).toBe('fast');
+    expect(computeTier1Trajectory).toHaveBeenCalledTimes(1);
+  });
+
+  it('substitutes the literal string "none" for a null phoneme_error_class (Tier 1 payload)', async () => {
+    primeDbMocksWithPhonemeErrorClass(null);
+    axios.post.mockRejectedValue(new Error('ECONNREFUSED'));
+    computeTier1Trajectory.mockReturnValue('typical');
+    await getTrajectoryPrediction(1, 10);
+    const callArg = computeTier1Trajectory.mock.calls[0][0];
+    expect(callArg.phoneme_error_class).toBe('none');
+  });
+
+  it('sends the substituted "none" in the Tier 2 microservice payload too', async () => {
+    primeDbMocksWithPhonemeErrorClass(null);
+    axios.post.mockResolvedValue({ status: 200, data: { trajectory: 'fast', confidence: 0.9 } });
+    await getTrajectoryPrediction(1, 10);
+    const postBody = axios.post.mock.calls[0][1];
+    expect(postBody.phoneme_error_class).toBe('none');
+  });
+
+  it('passes through a real (non-null) phoneme_error_class value unchanged', async () => {
+    primeDbMocksWithPhonemeErrorClass('r_deletion');
+    axios.post.mockRejectedValue(new Error('ECONNREFUSED'));
+    computeTier1Trajectory.mockReturnValue('typical');
+    await getTrajectoryPrediction(1, 10);
+    const callArg = computeTier1Trajectory.mock.calls[0][0];
+    expect(callArg.phoneme_error_class).toBe('r_deletion');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC6: non-verbal attempts (match_type='non_verbal') skip Tier 2 entirely
+// and go straight to Tier 1 — the ML model has never seen a non-verbal
+// training row, so Tier 2 is not a safe fallback for these.
+// ---------------------------------------------------------------------------
+
+describe('AC6 — non-verbal attempts bypass Tier 2, go straight to Tier 1', () => {
+  beforeEach(() => {
+    process.env.TRAJECTORY_ML_ENABLED = 'true';
+    process.env.MICROSERVICE_URL = 'http://localhost:5001';
+    process.env.TRAJECTORY_MIN_CONFIDENCE = '0.5';
+    primeNonVerbalDbMocks();
+    computeTier1Trajectory.mockReturnValue('typical');
+  });
+
+  it('does not call the Tier 2 microservice for a non-verbal attempt', async () => {
+    await getTrajectoryPrediction(1, 10);
+    expect(axios.post).not.toHaveBeenCalled();
+  });
+
+  it('calls Tier 1 exactly once with match_type intact and the null verbal fields visible', async () => {
+    await getTrajectoryPrediction(1, 10);
+    expect(computeTier1Trajectory).toHaveBeenCalledTimes(1);
+    const callArg = computeTier1Trajectory.mock.calls[0][0];
+    expect(callArg).toMatchObject({
+      speech_score: 1,
+      match_type: 'non_verbal',
+      phoneme_accuracy: null,
+      response_latency_ms_phase2: null,
+      echolalia_flag: false,
+    });
+  });
+
+  it('still includes prompt_count sourced from Phase 3 in the non-verbal payload', async () => {
+    await getTrajectoryPrediction(1, 10);
+    const callArg = computeTier1Trajectory.mock.calls[0][0];
+    expect(callArg.prompt_count).toBe(1);
+  });
+
+  it('returns the Tier 1 result directly', async () => {
+    computeTier1Trajectory.mockReturnValue('fast');
+    const result = await getTrajectoryPrediction(1, 10);
+    expect(result).toBe('fast');
+  });
+
+  it('falls back to "typical" without calling Tier 1 when even speech_score is missing (malformed row)', async () => {
+    DialogueWordAttempt.findOne.mockResolvedValue(
+      mockRow({
+        speech_score: null,
+        phoneme_accuracy: null,
+        phoneme_error_class: null,
+        response_latency_ms: null,
+        echolalia_flag: false,
+        match_type: 'non_verbal',
+      })
+    );
     const result = await getTrajectoryPrediction(1, 10);
     expect(result).toBe('typical');
     expect(computeTier1Trajectory).not.toHaveBeenCalled();

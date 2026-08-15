@@ -34,7 +34,7 @@ function isPresent(value) {
  *
  * `features` is the same shape as the feature payload buildSession1Features
  * (or its equivalent) assembles: { speech_score, phoneme_accuracy,
- * echolalia_flag, prompt_count, response_latency_ms_phase2, ... }.
+ * echolalia_flag, prompt_count, response_latency_ms_phase2, match_type, ... }.
  */
 function computeTier1Trajectory(features = {}) {
   const {
@@ -43,12 +43,19 @@ function computeTier1Trajectory(features = {}) {
     echolalia_flag,
     prompt_count,
     response_latency_ms_phase2,
+    match_type,
   } = features || {};
 
   const terms = {};
 
   if (isPresent(speech_score)) {
-    terms.speech = clip(speech_score / 3, 0, 1);
+    // Non-verbal speech_score is a binary correct/incorrect signal (max 1),
+    // not a compressed version of the verbal 0-3 scale — dialogueService.js
+    // draws the same distinction for its own pass threshold. Dividing by 3
+    // would score a fully-correct non-verbal answer as only 33%.
+    terms.speech = match_type === 'non_verbal'
+      ? clip(speech_score, 0, 1)
+      : clip(speech_score / 3, 0, 1);
   }
   if (isPresent(phoneme_accuracy)) {
     terms.phoneme = clip(phoneme_accuracy, 0, 1);

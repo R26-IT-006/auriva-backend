@@ -42,6 +42,7 @@ async function buildSession1Features(studentId, wordId) {
       'phoneme_error_class',
       'response_latency_ms',
       'echolalia_flag',
+      'match_type',
     ],
     order: [['attempted_at', 'DESC']],
   });
@@ -50,17 +51,27 @@ async function buildSession1Features(studentId, wordId) {
   const {
     speech_score,
     phoneme_accuracy,
-    phoneme_error_class,
+    phoneme_error_class: phoneme_error_class_raw,
     response_latency_ms: response_latency_ms_phase2,
     echolalia_flag,
+    match_type,
   } = phase2Row.get({ plain: true });
+
+  // Substitute 'none' when phoneme_error_class is null — this happens when the
+  // phoneme scorer finds no error (correct pronunciation). The synthetic training
+  // data encodes the same case as 'none', so this keeps the feature in-distribution.
+  const phoneme_error_class = phoneme_error_class_raw ?? 'none';
+
+  // Non-verbal attempts (match_type='non_verbal', recordNonVerbalResult) never
+  // populate the verbal-only phoneme/latency fields — that's expected, not a
+  // data gap. Tier 1 renormalizes around whichever terms are present (see
+  // tier1Scorer.js); Tier 2 is skipped for these entirely (getTrajectoryPrediction).
+  const isNonVerbal = match_type === 'non_verbal';
 
   if (
     speech_score == null ||
-    phoneme_accuracy == null ||
-    phoneme_error_class == null ||
-    response_latency_ms_phase2 == null ||
-    echolalia_flag == null
+    echolalia_flag == null ||
+    (!isNonVerbal && (phoneme_accuracy == null || response_latency_ms_phase2 == null))
   )
     return null;
 
@@ -100,6 +111,7 @@ async function buildSession1Features(studentId, wordId) {
     response_latency_ms_phase2,
     echolalia_flag,
     prompt_count,
+    match_type,
     // Phase 3
     response_latency_ms_phase3,
     first_tap_correct,
@@ -119,7 +131,12 @@ async function buildSession1Features(studentId, wordId) {
  * Returns 'fast', 'typical', or 'struggling'.
  *
  * Architecture: kill switch → feature assembly → Tier 2 (microservice, HTTP) →
- * confidence gate → Tier 1 (literature-grounded formula, TASK-41).
+ * confidence gate → Tier 1 (literature-grounded formula, TASK-41). Non-verbal
+ * attempts skip Tier 2 entirely — the ML model has never been trained on a
+ * non-verbal row (no such rows exist in the synthetic training set), so a
+ * prediction from it would be extrapolating outside its training distribution.
+ * They go straight to Tier 1, which is a deterministic formula, not a model,
+ * and needs no training data.
  */
 async function getTrajectoryPrediction(studentId, wordId) {
   // Kill switch — returns 'typical' (= today's unmodified difficulty-ladder behavior, per R-39)
@@ -131,19 +148,27 @@ async function getTrajectoryPrediction(studentId, wordId) {
   // Assembly failure → today's unmodified difficulty-ladder behavior (R-39)
   if (!features) return 'typical';
 
-  // Tier 2: call the microservice
+  const isNonVerbal = features.match_type === 'non_verbal';
+  // match_type is control-flow metadata for Tier 1, not a trained feature —
+  // strip it before sending to Tier 2 so its payload stays byte-identical to
+  // what the model was actually trained on.
+  const { match_type: _matchType, ...tier2Features } = features;
+
+  // Tier 2: call the microservice (skipped for non-verbal — see doc comment above)
   let tier2Result = null;
-  try {
-    const resp = await axios.post(
-      `${process.env.MICROSERVICE_URL}/predict-trajectory`,
-      features,
-      { timeout: 2000 }
-    );
-    if (resp.status === 200 && resp.data.trajectory && resp.data.confidence != null) {
-      tier2Result = resp.data;
+  if (!isNonVerbal) {
+    try {
+      const resp = await axios.post(
+        `${process.env.MICROSERVICE_URL}/predict-trajectory`,
+        tier2Features,
+        { timeout: 2000 }
+      );
+      if (resp.status === 200 && resp.data.trajectory && resp.data.confidence != null) {
+        tier2Result = resp.data;
+      }
+    } catch (err) {
+      logger.warn('[trajectoryService] microservice call failed:', err.message);
     }
-  } catch (err) {
-    logger.warn('[trajectoryService] microservice call failed:', err.message);
   }
 
   // Confidence gate
