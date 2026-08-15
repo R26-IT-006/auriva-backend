@@ -19,6 +19,7 @@ const CollectionSession       = require('./CollectionSession');
 const TeacherValidation       = require('./TeacherValidation');
 const StudentMotorBaseline    = require('./StudentMotorBaseline');
 const ThresholdHistory        = require('./ThresholdHistory');
+const TeacherRecommendationValidation = require('./TeacherRecommendationValidation');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -115,9 +116,19 @@ ThresholdHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' })
 StudentMotorBaseline.hasMany(ThresholdHistory, { foreignKey: 'baseline_id', as: 'thresholdHistoryEntries' });
 ThresholdHistory.belongsTo(StudentMotorBaseline, { foreignKey: 'baseline_id', as: 'baseline' });
 
+// Feature 9 Step 3: Student → TeacherRecommendationValidation (append-only
+// teacher-judgement history for Feature 8 worksheet recommendations — see
+// src/models/TeacherRecommendationValidation.js). No association to Teacher
+// is declared here — teacher_id is recorded and read the same
+// application-layer-only way every other student_id/teacher_id pair in
+// this schema already is (no FK constraint convention, Step 1 audit §52).
+Student.hasMany(TeacherRecommendationValidation, { foreignKey: 'student_id', as: 'recommendationValidations' });
+TeacherRecommendationValidation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
   HandwritingAssessment, LetterProgress, Stroke, ShapeFeature, LetterAttempt,
   ExplanationResult, RecommendationHistory, StudentMotorFeature,
   CollectionSession, TeacherValidation, StudentMotorBaseline, ThresholdHistory,
+  TeacherRecommendationValidation,
 };

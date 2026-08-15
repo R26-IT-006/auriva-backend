@@ -59,6 +59,28 @@ router.get('/demo-speed-recommendation/:studentId/:letter/:caseType', ctrl.getDe
 // demand; no persistence table exists yet. No PATCH/PUT/DELETE.
 router.get('/persistent-difficulty/:studentId', ctrl.getPersistentDifficulty);
 
+// ── Worksheet Recommendation (Feature 8 Step 3, read-only) ────────────────────
+// Same student-wide scope as persistent-difficulty above — plural path,
+// since a student may have zero, one, or multiple recommendations at once
+// (one per persistent stream). Computed on demand from Feature 7's own
+// live result; no persistence table exists yet. No PATCH/PUT/DELETE.
+router.get('/worksheet-recommendations/:studentId', ctrl.getWorksheetRecommendations);
+
+// ── Teacher Validation + Long-Term History (Feature 9 Step 4) ─────────────────
+// Deliberately distinct route names from the pre-existing, unrelated
+// collection-mode `/teacher-validation` pair below (session-quality
+// ratings) — these two families of routes must never collide or shadow
+// one another. GET returns Feature 9's own persisted history only (never
+// re-runs Feature 7/8); POST records one explicit teacher judgement
+// against the server-verified current Feature 8 recommendation. Both are
+// ownership-protected exactly like every recommendation endpoint above.
+router.get('/worksheet-recommendation-validations/:studentId',       ctrl.getWorksheetRecommendationValidations);
+router.post('/worksheet-recommendation-validations/:studentId',      ctrl.postWorksheetRecommendationValidation);
+// Separate top-level route (not a nested /:studentId/current path) to
+// avoid any Express route-precedence ambiguity against the plain
+// /:studentId route directly above.
+router.get('/worksheet-recommendation-validation-state/:studentId',  ctrl.getWorksheetRecommendationValidationState);
+
 // ── Data Collection Mode: session tracking, teacher validation, ML export ─────
 router.post('/collection-session/start',           collectionCtrl.startCollectionSession);
 router.patch('/collection-session/:id/complete',   collectionCtrl.completeCollectionSession);

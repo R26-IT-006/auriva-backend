@@ -47,6 +47,11 @@ const { evaluateDemoSpeedRecommendation } = require('../services/demoSpeedRecomm
 // detection endpoint. Reuses evaluatePersistentDifficulty() directly; no
 // evidence-reconstruction or decision logic is duplicated here.
 const { evaluatePersistentDifficulty } = require('../services/persistentDifficultyService');
+// Feature 8 Step 3 — read-only, student-wide worksheet-recommendation
+// endpoint. Reuses evaluateWorksheetRecommendations() directly; no
+// recommendation-building logic is duplicated here.
+const { evaluateWorksheetRecommendations } = require('../services/worksheetRecommendationService');
+const teacherRecommendationValidationService = require('../services/teacherRecommendationValidationService');
 
 // item 7 / item 8: a row only counts as fully captured for ML if it has both
 // raw points and a non-empty features object — used to set capture_status
@@ -1612,10 +1617,225 @@ async function getPersistentDifficulty(req, res) {
   });
 }
 
+/**
+ * GET /handwriting/worksheet-recommendations/:studentId
+ *
+ * Feature 8 Step 3 — READ-ONLY. Thin controller wrapper around
+ * evaluateWorksheetRecommendations() — no recommendation-building logic is
+ * duplicated here. Student-wide, same convention as getPersistentDifficulty
+ * above — a worksheet recommendation is inherently a rollup, never scoped
+ * to one letter/case at a time.
+ *
+ * The response is deliberately Feature 8's OWN shape only — never the raw
+ * Feature 7 response (Step 3 spec §42): no `separationMs`, no window
+ * diagnostics, no `validCycleCount`/`usableCycleCount`, no raw
+ * LetterAttempt fields of any kind. evaluateWorksheetRecommendations() is
+ * itself fully read-only; this handler adds no writes of its own.
+ */
+async function getWorksheetRecommendations(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  // Ownership check — identical convention to every other recommendation
+  // endpoint above. Throws ApiError(404) on no-match, BEFORE the service
+  // (and therefore before Feature 7) ever runs.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await evaluateWorksheetRecommendations({ studentId });
+
+  if (result.status === 'invalid_input') {
+    // Unreachable in practice (studentId already validated above with an
+    // identical rule) but handled defensively, never assumed unreachable.
+    throw new ApiError(422, 'Invalid worksheet recommendation request');
+  }
+
+  if (result.status === 'read_failed') {
+    logger.error('Worksheet recommendation evaluation failed', { studentId, status: result.status });
+    throw new ApiError(500, 'Failed to evaluate worksheet recommendations');
+  }
+
+  res.json({
+    status: result.status,
+    studentId: result.studentId,
+    evaluatedAt: result.evaluatedAt,
+    recommendations: result.recommendations,
+    summary: result.summary,
+  });
+}
+
+/**
+ * GET /handwriting/worksheet-recommendation-validations/:studentId
+ *
+ * Feature 9 Step 4 — READ-ONLY. Returns Feature 9's own persisted teacher-
+ * validation history for this student — it does NOT re-run Feature 8 or
+ * Feature 7 (Step 4 spec §2). Thin wrapper around
+ * getTeacherValidationHistory(); no history-shaping logic lives here.
+ *
+ * Optional ?caseType=&family= query filters — invalid values are rejected
+ * (422), never silently ignored (Step 4 spec §21).
+ */
+async function getWorksheetRecommendationValidations(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  // Ownership check — identical convention to every other Feature 7/8/9
+  // endpoint. Throws ApiError(404) on no-match, BEFORE any history read.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const { caseType, family } = req.query;
+  const result = await teacherRecommendationValidationService.getTeacherValidationHistory({ studentId, caseType, family });
+
+  if (result.status === 'invalid_input') {
+    throw new ApiError(422, 'Invalid teacher-validation-history request');
+  }
+  if (result.status === 'read_failed') {
+    logger.error('Teacher-validation-history read failed', { studentId, caseType, family });
+    throw new ApiError(500, 'Failed to read teacher validation history');
+  }
+
+  // Empty history is a valid state, not a 404 (Step 4 spec §23) — the
+  // service's own public event shape already excludes fingerprints,
+  // teacherId, and policy/mapping versions (Step 3 spec §54), so no
+  // reshaping happens here.
+  res.json({
+    status: result.status,
+    studentId: result.studentId,
+    events: result.events,
+    latestByStream: result.latestByStream,
+  });
+}
+
+/**
+ * GET /handwriting/worksheet-recommendation-validation-state/:studentId
+ *
+ * Feature 9 Step 4 — READ-ONLY. Resolves the teacher's current judgement
+ * for ONE exact, currently-displayed Feature 8 recommendation instance —
+ * identified by ?caseType=&family=&recommendationFingerprint= (Step 4 spec
+ * §27/§28). A dedicated route rather than a `/:studentId/current` nested
+ * path, to avoid any Express route-precedence ambiguity against the plain
+ * `/:studentId` history route above.
+ *
+ * Never echoes the fingerprint back, never exposes teacherId/hashes/raw
+ * row data (Step 4 spec §32/§33) — only `{validation, teacherNote,
+ * validatedAt}` or `null`.
+ */
+async function getWorksheetRecommendationValidationState(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const { caseType, family, recommendationFingerprint } = req.query;
+  const result = await teacherRecommendationValidationService.getLatestValidationForRecommendation({
+    studentId, caseType, family, recommendationFingerprint,
+  });
+
+  if (result.status === 'invalid_input') {
+    throw new ApiError(422, 'Invalid current-validation-state request');
+  }
+  if (result.status === 'read_failed') {
+    logger.error('Current-validation-state read failed', { studentId, caseType, family });
+    throw new ApiError(500, 'Failed to read current validation state');
+  }
+
+  res.json({ status: result.status, current: result.current });
+}
+
+/**
+ * POST /handwriting/worksheet-recommendation-validations/:studentId
+ *
+ * Feature 9 Step 4 — records one explicit teacher judgement (confirmed /
+ * dismissed) about the EXACT current Feature 8 recommendation the teacher
+ * is looking at. Never trusts client-supplied recommendation content —
+ * validateWorksheetRecommendation() re-evaluates Feature 7/8 server-side
+ * and verifies the client's recommendationFingerprint before writing (Step
+ * 3 spec §38-§46).
+ *
+ * teacherId is ALWAYS req.user.id — any client-supplied
+ * teacherId/teacher_id in the body is deliberately never read (Step 4 spec
+ * §6): destructuring only the expected fields below means a spoofed value
+ * on the body has no path to reach the service call at all.
+ */
+async function postWorksheetRecommendationValidation(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  // Ownership check BEFORE any Feature 7/8 re-evaluation or write attempt.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const { caseType, family, validation, teacherNote, recommendationFingerprint } = req.body || {};
+
+  const result = await teacherRecommendationValidationService.validateWorksheetRecommendation({
+    studentId,
+    teacherId: req.user.id,
+    caseType,
+    family,
+    validation,
+    teacherNote,
+    recommendationFingerprint,
+  });
+
+  switch (result.status) {
+    case 'invalid_input':
+      throw new ApiError(422, 'Invalid teacher validation request');
+
+    case 'recommendation_not_found':
+      // The requested (caseType, family) instance no longer exists in the
+      // current Feature 8 result — treated the same as a changed
+      // recommendation (Step 4 spec §16): the teacher must refresh. Never
+      // a raw 404, since the student/route itself is perfectly valid.
+      throw new ApiError(409, 'This recommendation is no longer available. Refresh the report.', {
+        status: 'recommendation_not_found',
+      });
+
+    case 'recommendation_changed':
+      // Deliberately never includes result.currentRecommendationFingerprint
+      // in the response (Step 4 spec §15) — the client already knows it
+      // must refresh; the raw server fingerprint has no teacher-facing use.
+      throw new ApiError(409, 'The recommendation has changed. Refresh the report before validating it.', {
+        status: 'recommendation_changed',
+      });
+
+    case 'read_failed':
+      logger.error('Teacher-validation write failed: Feature 7/8 dependency read failed', { studentId, caseType, family });
+      throw new ApiError(500, 'Failed to evaluate the current recommendation');
+
+    case 'write_failed':
+      logger.error('Teacher-validation write failed', { studentId, caseType, family, validation });
+      throw new ApiError(500, 'Failed to record teacher validation');
+
+    case 'validated':
+      // duplicate:true is a safe idempotent retry, not a conflict — 200,
+      // never 409 (Step 4 spec §13). A brand-new event is 201.
+      res.status(result.duplicate ? 200 : 201).json({
+        status: 'validated',
+        duplicate: result.duplicate,
+        validation: { id: result.id, validatedAt: result.validatedAt },
+      });
+      return;
+
+    default:
+      // Defensive only — validateWorksheetRecommendation()'s contract
+      // never returns any other status.
+      logger.error('Unexpected teacher-validation service status', { studentId, status: result.status });
+      throw new ApiError(500, 'Unexpected teacher validation result');
+  }
+}
+
 module.exports = {
   submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion,
   explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport,
   getLetterProgressReport, getMotorBaseline, getSupportRecommendation,
   getPreWritingRecommendation, getRepetitionRecommendation, getDemoSpeedRecommendation,
-  getPersistentDifficulty,
+  getPersistentDifficulty, getWorksheetRecommendations,
+  getWorksheetRecommendationValidations, getWorksheetRecommendationValidationState,
+  postWorksheetRecommendationValidation,
 };
