@@ -13,7 +13,7 @@ const PronunciationSessionResult = require('./PronunciationSessionResult');
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
 Teacher.belongsTo(Principal, { foreignKey: 'created_by', as: 'creator' });
 
-// Teacher → Student (max 3 enforced at service layer)
+// Teacher → Student (max 5 enforced at service layer)
 Teacher.hasMany(Student, { foreignKey: 'teacher_id', as: 'students' });
 Student.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
 

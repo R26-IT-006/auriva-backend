@@ -36,42 +36,53 @@ async function getDashboardStats(teacherId) {
   startOfWeek.setHours(0, 0, 0, 0);
   startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
 
-  const [profile, totalSessions, weeklySessions, lastSession] = await Promise.all([
+  const [profile, students] = await Promise.all([
     Teacher.findByPk(teacherId, { attributes: { exclude: ['password_hash'] } }),
-    PronunciationSessionResult.count({ where: { teacher_id: teacherId } }),
-    PronunciationSessionResult.count({
-      where: { teacher_id: teacherId, created_at: { [Op.gte]: startOfWeek } },
-    }),
-    PronunciationSessionResult.findOne({
+    Student.findAll({
       where: { teacher_id: teacherId },
-      order: [['created_at', 'DESC'], ['id', 'DESC']],
-      include: [
-        {
-          model: Student,
-          as: 'student',
-          attributes: ['sid', 'full_name', 'student_code'],
-        },
-      ],
+      attributes: ['sid', 'full_name', 'profile_photo_url'],
+      order: [['student_code', 'ASC']],
     }),
   ]);
 
   if (!profile) throw new ApiError(404, 'Teacher not found');
 
+  const studentIds = students.map((s) => s.sid);
+  const totalStudents = studentIds.length;
+
+  const [weeklySessions, recentSessions] = totalStudents > 0
+    ? await Promise.all([
+        Session.count({
+          where: { student_id: studentIds, started_at: { [Op.gte]: startOfWeek } },
+        }),
+        Session.findAll({
+          where: { student_id: studentIds },
+          include: [{ model: Student, as: 'student', attributes: ['full_name'] }],
+          order: [['started_at', 'DESC']],
+          limit: 5,
+        }),
+      ])
+    : [0, []];
+
+  const proficiency = students.map((s) => ({
+    studentId: s.sid,
+    fullName: s.full_name,
+    profilePhotoUrl: s.profile_photo_url,
+  }));
+
   return {
     profile,
     stats: {
-      totalSessions,
+      totalStudents,
       weeklySessions,
-      lastSession: lastSession
-        ? {
-            studentName: lastSession.student?.full_name,
-            studentCode: lastSession.student?.student_code,
-            date: lastSession.created_at,
-            score: lastSession.overall_score,
-            wordLabel: lastSession.word_label,
-          }
-        : null,
     },
+    proficiency,
+    recentSessions: recentSessions.map((s) => ({
+      studentName: s.student?.full_name ?? 'Student',
+      startedAt: s.started_at,
+      endedAt: s.ended_at,
+      isActive: s.is_active,
+    })),
   };
 }
 
