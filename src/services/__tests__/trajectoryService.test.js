@@ -19,6 +19,7 @@ jest.mock('../../models', () => ({
   DialogueWordProgress: { findOne: jest.fn() },
   DialogueWordAttempt: { findOne: jest.fn() },
   DialoguePhase3Attempt: { findOne: jest.fn() },
+  ActionWordAttempt: { findOne: jest.fn() },
 }));
 
 // Sequelize Op is only used inside buildSession1Features for { [Op.ne]: null }.
@@ -36,6 +37,7 @@ const {
   DialogueWordProgress,
   DialogueWordAttempt,
   DialoguePhase3Attempt,
+  ActionWordAttempt,
 } = require('../../models');
 
 // Import the service AFTER mocks are set up.
@@ -451,6 +453,114 @@ describe('AC6 — non-verbal attempts bypass Tier 2, go straight to Tier 1', () 
         response_latency_ms: null,
         echolalia_flag: false,
         match_type: 'non_verbal',
+      })
+    );
+    const result = await getTrajectoryPrediction(1, 10);
+    expect(result).toBe('typical');
+    expect(computeTier1Trajectory).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC7: abilities-category words read Phase 1/2 features from the correct
+// tables (ActionWordAttempt, no DialogueWordProgress.phase1_exposure_ratio_snapshot
+// requirement) instead of always failing assembly and defaulting to
+// 'typical'. 2026-08-16 fix — category3Service.js has called
+// getTrajectoryPrediction() since TASK-38, but buildSession1Features() only
+// ever read the greetings/magic_words tables, so every abilities prediction
+// silently returned 'typical' regardless of the child's actual trajectory.
+// ---------------------------------------------------------------------------
+
+function primeAbilitiesDbMocks({ speechScore = 3, matchType = 'exact' } = {}) {
+  DialogueWord.findByPk.mockResolvedValue({ difficulty: 1, category: 'abilities' });
+
+  ActionWordAttempt.findOne.mockResolvedValue(
+    mockRow({
+      phase2_speech_score:        speechScore,
+      phase2_phoneme_accuracy:    matchType === 'non_verbal' ? null : 0.8,
+      phase2_phoneme_error_class: null,
+      phase2_response_latency_ms: matchType === 'non_verbal' ? null : 1000,
+      phase2_echolalia_flag:      false,
+      phase2_match_type:          matchType,
+    })
+  );
+
+  DialoguePhase3Attempt.findOne.mockResolvedValue(
+    mockRow({
+      response_latency_ms:    1500,
+      first_tap_correct:      true,
+      selection_change_count: 0,
+      prompt_count:            1,
+    })
+  );
+}
+
+describe('AC7 — abilities words read Phase 1/2 features from the correct tables', () => {
+  beforeEach(() => {
+    process.env.TRAJECTORY_ML_ENABLED = 'true';
+    process.env.MICROSERVICE_URL = 'http://localhost:5001';
+    process.env.TRAJECTORY_MIN_CONFIDENCE = '0.5';
+    primeAbilitiesDbMocks();
+    computeTier1Trajectory.mockReturnValue('typical');
+  });
+
+  it('reads Phase 2 data from ActionWordAttempt, not DialogueWordAttempt', async () => {
+    axios.post.mockRejectedValue(new Error('ECONNREFUSED')); // force Tier 1 path
+    await getTrajectoryPrediction(1, 10);
+    expect(ActionWordAttempt.findOne).toHaveBeenCalledTimes(1);
+    expect(DialogueWordAttempt.findOne).not.toHaveBeenCalled();
+  });
+
+  it('does not query DialogueWordProgress for abilities words (no Phase 1 exposure concept)', async () => {
+    axios.post.mockRejectedValue(new Error('ECONNREFUSED'));
+    await getTrajectoryPrediction(1, 10);
+    expect(DialogueWordProgress.findOne).not.toHaveBeenCalled();
+  });
+
+  it('assembles phase1_applicable=false and the -1.0 sentinel for abilities words', async () => {
+    axios.post.mockRejectedValue(new Error('ECONNREFUSED'));
+    await getTrajectoryPrediction(1, 10);
+    const callArg = computeTier1Trajectory.mock.calls[0][0];
+    expect(callArg).toMatchObject({
+      phase1_applicable:    false,
+      phase1_exposure_ratio: -1.0,
+      category:              'abilities',
+    });
+  });
+
+  it('no longer bails out to "typical" for an abilities word with real data — Tier 1 actually runs', async () => {
+    axios.post.mockRejectedValue(new Error('ECONNREFUSED'));
+    computeTier1Trajectory.mockReturnValue('fast');
+    const result = await getTrajectoryPrediction(1, 10);
+    expect(result).toBe('fast');
+    expect(computeTier1Trajectory).toHaveBeenCalledTimes(1);
+  });
+
+  it('still reaches Tier 2 for a normal (non-non-verbal) abilities attempt', async () => {
+    axios.post.mockResolvedValue({ status: 200, data: { trajectory: 'fast', confidence: 0.9 } });
+    const result = await getTrajectoryPrediction(1, 10);
+    expect(result).toBe('fast');
+    expect(axios.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips Tier 2 for a non-verbal abilities attempt (recordPhase2NonVerbal), same as the generic non-verbal path', async () => {
+    primeAbilitiesDbMocks({ speechScore: 1, matchType: 'non_verbal' });
+    await getTrajectoryPrediction(1, 10);
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(computeTier1Trajectory).toHaveBeenCalledTimes(1);
+    const callArg = computeTier1Trajectory.mock.calls[0][0];
+    expect(callArg.match_type).toBe('non_verbal');
+  });
+
+  it('falls back to "typical" without calling Tier 1 when an abilities row has no speech_score (malformed)', async () => {
+    ActionWordAttempt.findOne.mockResolvedValue(
+      mockRow({
+        phase2_speech_score:        null,
+        phase2_phoneme_accuracy:    null,
+        phase2_phoneme_error_class: null,
+        phase2_response_latency_ms: null,
+        phase2_echolalia_flag:      false,
+        phase2_match_type:          'exact',
       })
     );
     const result = await getTrajectoryPrediction(1, 10);

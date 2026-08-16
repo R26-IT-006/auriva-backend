@@ -21,9 +21,6 @@ const Level2ActivitySelectionLog = require('./Level2ActivitySelectionLog');
 const Level2ProductionAttempt    = require('./Level2ProductionAttempt');
 const Level2NonVerbalAttempt     = require('./Level2NonVerbalAttempt');
 const ActionWordAttempt          = require('./ActionWordAttempt');
-const CanYouGameRound            = require('./CanYouGameRound');
-const ActionIdentificationRound  = require('./ActionIdentificationRound');
-const VerbQAProductionRound      = require('./VerbQAProductionRound');
 const DialogueEvaluationAttempt  = require('./DialogueEvaluationAttempt');
 
 // Principal → Teacher
@@ -149,30 +146,6 @@ ActionWordAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' }
 Session.hasMany(ActionWordAttempt, { foreignKey: 'session_id', as: 'actionWordAttempts' });
 ActionWordAttempt.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
 
-// CanYouGameRound associations
-DialogueWord.hasMany(CanYouGameRound, { foreignKey: 'word_id', as: 'canYouRounds' });
-CanYouGameRound.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
-Student.hasMany(CanYouGameRound, { foreignKey: 'student_id', as: 'canYouRounds' });
-CanYouGameRound.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
-Session.hasMany(CanYouGameRound, { foreignKey: 'session_id', as: 'canYouRounds' });
-CanYouGameRound.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
-
-// ActionIdentificationRound associations
-DialogueWord.hasMany(ActionIdentificationRound, { foreignKey: 'word_id', as: 'identificationRounds' });
-ActionIdentificationRound.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
-Student.hasMany(ActionIdentificationRound, { foreignKey: 'student_id', as: 'identificationRounds' });
-ActionIdentificationRound.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
-Session.hasMany(ActionIdentificationRound, { foreignKey: 'session_id', as: 'identificationRounds' });
-ActionIdentificationRound.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
-
-// VerbQAProductionRound associations
-DialogueWord.hasMany(VerbQAProductionRound, { foreignKey: 'word_id', as: 'verbQARounds' });
-VerbQAProductionRound.belongsTo(DialogueWord, { foreignKey: 'word_id', as: 'dialogueWord' });
-Student.hasMany(VerbQAProductionRound, { foreignKey: 'student_id', as: 'verbQARounds' });
-VerbQAProductionRound.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
-Session.hasMany(VerbQAProductionRound, { foreignKey: 'session_id', as: 'verbQARounds' });
-VerbQAProductionRound.belongsTo(Session, { foreignKey: 'session_id', as: 'session' });
-
 // DialogueEvaluationAttempt associations (Level 1 evaluations, TASK-14)
 Student.hasMany(DialogueEvaluationAttempt, { foreignKey: 'student_id', as: 'evaluationAttempts' });
 DialogueEvaluationAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
@@ -199,8 +172,5 @@ module.exports = {
   Level2ProductionAttempt,
   Level2NonVerbalAttempt,
   ActionWordAttempt,
-  CanYouGameRound,
-  ActionIdentificationRound,
-  VerbQAProductionRound,
   DialogueEvaluationAttempt,
 };
