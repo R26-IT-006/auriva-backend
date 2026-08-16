@@ -8,7 +8,7 @@
  * is already known (e.g. fetched from the DB).
  */
 
-const DIFFICULTY_RULES = require('./difficultyRules');
+const DIFFICULTY_RULES = require('../data/difficultyRules');
 
 /**
  * Return the recommended exercises for a given difficulty key.

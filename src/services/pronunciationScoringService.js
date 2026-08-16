@@ -4,7 +4,7 @@ const {
   scoreWordPronunciationAttempt,
   scoreWordPronunciationAttemptWithoutReference,
 } = require('./pronunciationAnalysisService');
-const { WORD_PROFILES, LETTER_SOUNDS } = require('./wordProfiles');
+const { WORD_PROFILES, LETTER_SOUNDS } = require('../data/wordProfiles');
 
 const PHONEME_CUES = {
   'æ': 'Open the mouth wide for the short /a/ sound.',

@@ -7,7 +7,7 @@ const path = require('path');
 const { promisify } = require('util');
 const FFT = require('fft.js');
 
-const { WORD_PROFILES, LETTER_SOUNDS } = require('./wordProfiles');
+const { WORD_PROFILES, LETTER_SOUNDS } = require('../data/wordProfiles');
 const { verifySpokenWord } = require('./speechRecognitionService');
 const { assessPhonemeGop } = require('./phonemeGopService');
 

@@ -4,7 +4,7 @@
  * explainabilityService.js
  */
 
-const DIFFICULTY_RULES = require('./difficultyRules');
+const DIFFICULTY_RULES = require('../data/difficultyRules');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

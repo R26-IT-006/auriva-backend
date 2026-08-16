@@ -14,7 +14,7 @@ const {
 } = require('../models');
 const { fn, col } = require('sequelize');
 const ApiError = require('../utils/ApiError');
-const { LETTER_TO_PRIMITIVE, PRIMITIVE_LABELS } = require('../config/letterMotorPrimitives');
+const { LETTER_TO_PRIMITIVE, PRIMITIVE_LABELS } = require('../data/letterMotorPrimitives');
 const logger   = require('../utils/logger');
 const { getStudentThreshold } = require('../utils/thresholdUtils');
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
