@@ -1,31 +1,34 @@
 'use strict';
 
-const sequelize               = require('../config/database');
-const Principal               = require('./Principal');
-const Teacher                 = require('./Teacher');
-const Student                 = require('./Student');
-const Session                 = require('./Session');
-const StudentAvatar           = require('./StudentAvatar');
-const PasswordResetOtp        = require('./PasswordResetOtp');
-const HandwritingAssessment   = require('./HandwritingAssessment');
-const LetterProgress          = require('./LetterProgress');
-const Stroke                  = require('./Stroke');
-const ExplanationResult       = require('./ExplanationResult');
-const RecommendationHistory   = require('./RecommendationHistory');
-const StudentMotorFeature     = require('./StudentMotorFeature');
-const ShapeFeature            = require('./ShapeFeature');
-const LetterAttempt           = require('./LetterAttempt');
-const CollectionSession       = require('./CollectionSession');
-const TeacherValidation       = require('./TeacherValidation');
-const StudentMotorBaseline    = require('./StudentMotorBaseline');
-const ThresholdHistory        = require('./ThresholdHistory');
+const sequelize                       = require('../config/database');
+const Principal                       = require('./Principal');
+const Teacher                         = require('./Teacher');
+const Student                         = require('./Student');
+const Session                         = require('./Session');
+const StudentAvatar                   = require('./StudentAvatar');
+const PasswordResetOtp                = require('./PasswordResetOtp');
+const HandwritingAssessment           = require('./HandwritingAssessment');
+const LetterProgress                  = require('./LetterProgress');
+const Stroke                          = require('./Stroke');
+const ExplanationResult               = require('./ExplanationResult');
+const RecommendationHistory           = require('./RecommendationHistory');
+const StudentMotorFeature             = require('./StudentMotorFeature');
+const ShapeFeature                    = require('./ShapeFeature');
+const LetterAttempt                   = require('./LetterAttempt');
+const CollectionSession               = require('./CollectionSession');
+const TeacherValidation               = require('./TeacherValidation');
+const StudentMotorBaseline            = require('./StudentMotorBaseline');
+const ThresholdHistory                = require('./ThresholdHistory');
 const TeacherRecommendationValidation = require('./TeacherRecommendationValidation');
+const StudentConceptProgress          = require('./StudentConceptProgress');
+const ConceptInteractionLog           = require('./ConceptInteractionLog');
+const StudentActivity                 = require('./StudentActivity');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
 Teacher.belongsTo(Principal, { foreignKey: 'created_by', as: 'creator' });
 
-// Teacher → Student (max 3 enforced at service layer)
+// Teacher → Student (max 5 enforced at service layer)
 Teacher.hasMany(Student, { foreignKey: 'teacher_id', as: 'students' });
 Student.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
 
@@ -125,10 +128,22 @@ ThresholdHistory.belongsTo(StudentMotorBaseline, { foreignKey: 'baseline_id', as
 Student.hasMany(TeacherRecommendationValidation, { foreignKey: 'student_id', as: 'recommendationValidations' });
 TeacherRecommendationValidation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → concept learning
+Student.hasMany(StudentConceptProgress, { foreignKey: 'student_id', as: 'conceptProgress' });
+StudentConceptProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+Student.hasMany(ConceptInteractionLog, { foreignKey: 'student_id', as: 'conceptLogs' });
+ConceptInteractionLog.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Student → cross-concept activities
+Student.hasMany(StudentActivity, { foreignKey: 'student_id', as: 'activities' });
+StudentActivity.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
   HandwritingAssessment, LetterProgress, Stroke, ShapeFeature, LetterAttempt,
   ExplanationResult, RecommendationHistory, StudentMotorFeature,
   CollectionSession, TeacherValidation, StudentMotorBaseline, ThresholdHistory,
   TeacherRecommendationValidation,
+  StudentConceptProgress, ConceptInteractionLog, StudentActivity,
 };

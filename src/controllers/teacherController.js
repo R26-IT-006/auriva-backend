@@ -20,22 +20,6 @@ async function getStudentById(req, res) {
   res.json(student);
 }
 
-async function startSession(req, res) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
-
-  const session = await teacherService.startSession(req.user.id, req.body.student_id);
-  res.status(201).json(session);
-}
-
-async function endSession(req, res) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
-
-  const session = await teacherService.endSession(req.user.id, req.body.student_id);
-  res.json(session);
-}
-
 async function setAvatar(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
@@ -110,4 +94,4 @@ async function setFamilyThreshold(req, res) {
   }
 }
 
-module.exports = { getDashboard, getStudents, getStudentById, startSession, endSession, setAvatar, setThreshold, setFamilyThreshold };
+module.exports = { getDashboard, getStudents, getStudentById, setAvatar, setThreshold, setFamilyThreshold };

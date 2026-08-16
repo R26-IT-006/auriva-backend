@@ -5,6 +5,7 @@ const { verifyToken } = require('../middleware/auth');
 const { isTeacher }   = require('../middleware/roleGuard');
 const { body }        = require('express-validator');
 const ctrl            = require('../controllers/teacherController');
+const analyticsCtrl   = require('../controllers/conceptAnalyticsController');
 
 // All routes require JWT + teacher role + first-login gate
 router.use(verifyToken, isTeacher);
@@ -91,86 +92,6 @@ router.get('/students', ctrl.getStudents);
  */
 router.get('/students/:id', ctrl.getStudentById);
 
-/**
- * @swagger
- * /api/teacher/session/start:
- *   post:
- *     summary: Start a learning session for a student
- *     tags: [Teacher]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [student_id]
- *             properties:
- *               student_id:
- *                 type: integer
- *                 example: 1
- *     responses:
- *       201:
- *         description: Session started
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Session'
- *       404:
- *         description: Student not found or not assigned to this teacher
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       409:
- *         description: A session is already active for this student
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-router.post('/session/start', [
-  body('student_id').isInt({ min: 1 }).withMessage('student_id must be a positive integer'),
-], ctrl.startSession);
-
-/**
- * @swagger
- * /api/teacher/session/end:
- *   post:
- *     summary: End the active session for a student
- *     tags: [Teacher]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [student_id]
- *             properties:
- *               student_id:
- *                 type: integer
- *                 example: 1
- *     responses:
- *       200:
- *         description: Session ended
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Session'
- *       404:
- *         description: No active session found for this student
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-router.post('/session/end', [
-  body('student_id').isInt({ min: 1 }).withMessage('student_id must be a positive integer'),
-], ctrl.endSession);
-
 router.post('/students/:id/avatar', [
   body('avatar_key')
     .isIn(['boba', 'glitter', 'lily', 'megatron'])
@@ -201,5 +122,13 @@ router.patch('/students/:id/family-threshold', [
     .isFloat({ min: 0, max: 100 })
     .withMessage('value must be a number between 0 and 100'),
 ], ctrl.setFamilyThreshold);
+
+// Concept-learning analytics for one student. Split by cost: /summary reads only
+// student_concept_progress so the profile renders immediately, while /report
+// aggregates the per-tap interaction log and is lazy-loaded by the drill-down.
+router.get('/students/:id/concepts/summary', analyticsCtrl.getConceptSummary);
+router.get('/students/:id/concepts/report',  analyticsCtrl.getConceptReport);
+
+router.use('/concepts', require('./concept'));
 
 module.exports = router;
