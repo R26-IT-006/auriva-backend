@@ -6,11 +6,11 @@
   "scripts": {
     "test": "jest",
     "start": "node index.js",
-    "dev": "node index.js",
-    "dev:watch": "node --watch index.js",
+    "dev": "node --watch index.js",
     "migrate": "sequelize-cli db:migrate",
     "migrate:status": "sequelize-cli db:migrate:status",
-    "migrate:undo": "sequelize-cli db:migrate:undo"
+    "migrate:undo": "sequelize-cli db:migrate:undo",
+    "backfill:scores": "node scripts/backfillPassedScores.js"
   },
   "keywords": [],
   "author": "",

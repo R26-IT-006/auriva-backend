@@ -10,6 +10,7 @@ const {
   savePronunciationResultValidation,
   scorePronunciationAttemptValidation,
 } = require('../validations/pronunciationValidation');
+const analyticsCtrl   = require('../controllers/conceptAnalyticsController');
 
 // All routes require JWT + teacher role + first-login gate
 router.use(verifyToken, isTeacher);
@@ -113,6 +114,12 @@ router.post('/students/:id/avatar', [
     .isIn(['boba', 'glitter', 'lily', 'megatron'])
     .withMessage('avatar_key must be one of: boba, glitter, lily, megatron'),
 ], ctrl.setAvatar);
+
+// Concept-learning analytics for one student. Split by cost: /summary reads only
+// student_concept_progress so the profile renders immediately, while /report
+// aggregates the per-tap interaction log and is lazy-loaded by the drill-down.
+router.get('/students/:id/concepts/summary', analyticsCtrl.getConceptSummary);
+router.get('/students/:id/concepts/report',  analyticsCtrl.getConceptReport);
 
 router.patch('/students/:id/threshold', [
   body('letter')

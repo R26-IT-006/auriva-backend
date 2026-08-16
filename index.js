@@ -62,11 +62,27 @@ app.use('/api/auth', rateLimit({
   message: { error: 'Too many authentication requests, please try again later.' },
 }));
 
+// Concept learning gets its own, much looser budget. It emits per-tap and
+// per-round telemetry (image taps, match attempts, activity rounds), so a single
+// child working through a few concepts plus one activity can run to hundreds of
+// requests — and a classroom of tablets shares one NAT'd IP. The general /api
+// bar below is sized for auth and CRUD, not telemetry.
+const CONCEPT_PREFIX = '/api/teacher/concepts';
+
+app.use(CONCEPT_PREFIX, rateLimit({
+  windowMs: rateLimitWindowMs,
+  limit: getPositiveIntegerEnv('CONCEPT_RATE_LIMIT_MAX', 1000),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+}));
+
 app.use('/api', rateLimit({
   windowMs: rateLimitWindowMs,
   limit: getPositiveIntegerEnv('API_RATE_LIMIT_MAX', 1000),
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.originalUrl.startsWith(CONCEPT_PREFIX),
   message: { error: 'Too many requests, please try again later.' },
 }));
 

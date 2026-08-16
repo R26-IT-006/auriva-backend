@@ -30,8 +30,6 @@ router.post('/tier1/attempt', [
   body('was_correct').isBoolean(),
 ], ctrl.logMatchAttempt);
 
-router.get('/:conceptKey/confusions', ctrl.getConfusions);
-
 router.post('/tier1/complete', [
   body('student_id').isInt({ min: 1 }),
   body('category_key').isString().notEmpty(),
@@ -83,5 +81,31 @@ router.post('/tier3/complete', [
   body('category_key').isString().notEmpty(),
   body('concept_key').isString().notEmpty(),
 ], ctrl.completeTier3);
+
+// ─── Cross-concept activities ────────────────────────────────────────────────
+// 3-segment path, so no conflict with /:category/items or /:conceptKey/confusions
+router.get('/:category/activity/status', ctrl.getActivityStatus);
+
+router.post('/activity/start', [
+  body('student_id').isInt({ min: 1 }),
+  body('category_key').isString().notEmpty(),
+  body('session_id').optional({ nullable: true }).isInt(),
+], ctrl.startActivity);
+
+router.post('/activity/attempt', [
+  body('student_id').isInt({ min: 1 }),
+  body('activity_id').isInt({ min: 1 }),
+  body('category_key').isString().notEmpty(),
+  body('concept_key').isString().notEmpty(),
+  body('round_number').isInt({ min: 1 }),
+  body('question_type').isIn(['image_choice', 'name_choice', 'drag_drop']),
+  body('was_correct').isBoolean(),
+], ctrl.logActivityAttempt);
+
+router.post('/activity/complete', [
+  body('student_id').isInt({ min: 1 }),
+  body('activity_id').isInt({ min: 1 }),
+  body('round_results').isArray({ min: 1 }),
+], ctrl.completeActivity);
 
 module.exports = router;

@@ -38,6 +38,7 @@ const TeacherValidation       = require('./TeacherValidation');
 const StudentConceptProgress   = require('./StudentConceptProgress');
 const ConceptInteractionLog    = require('./ConceptInteractionLog');
 const PronunciationSessionResult = require('./PronunciationSessionResult');
+const StudentActivity          = require('./StudentActivity');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -210,6 +211,10 @@ StudentConceptProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'stude
 Student.hasMany(ConceptInteractionLog, { foreignKey: 'student_id', as: 'conceptLogs' });
 ConceptInteractionLog.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → cross-concept activities
+Student.hasMany(StudentActivity, { foreignKey: 'student_id', as: 'activities' });
+StudentActivity.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 // Student → HandwritingAssessment
 Student.hasMany(HandwritingAssessment, { foreignKey: 'student_id', as: 'handwritingAssessments' });
 HandwritingAssessment.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
@@ -292,6 +297,7 @@ module.exports = {
   DialogueEvaluationAttempt,
   StudentConceptProgress,
   ConceptInteractionLog,
+  StudentActivity,
   HandwritingAssessment,
   LetterProgress,
   Stroke,
