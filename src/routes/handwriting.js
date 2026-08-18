@@ -28,6 +28,14 @@ router.get('/letter-progress-report/:studentId', ctrl.getLetterProgressReport);
 // nested /students/:studentId/... style — no PATCH/PUT/DELETE for this resource.
 router.get('/motor-baseline/:studentId',    ctrl.getMotorBaseline);
 
+// ── Feature 2 current family thresholds (Teacher Dashboard integration fix,
+// read-only) ────────────────────────────────────────────────────────────────
+// Student-wide (all three families at once), matching motor-baseline's own
+// convention above — never the legacy /students/:id/personal_thresholds
+// shape, and never merged into GET /teacher/students/:id itself (keeps the
+// student-profile endpoint free of Feature 2 concerns). No PATCH/PUT/DELETE.
+router.get('/family-thresholds/:studentId', ctrl.getFamilyThresholds);
+
 // ── Adaptive Support Recommendation (Feature 3 Step 6, read-only) ─────────────
 // Narrowly scoped to one (letter, caseType) rather than the whole student —
 // support is family-specific, and this is the exact shape the writing

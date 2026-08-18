@@ -20,6 +20,18 @@ const sequelize = require('../config/database');
 //   - Feature 7's own still-deferred, never-created
 //     `persistent_difficulty_history` table.
 
+// Feature 9 repair (final integration audit finding, pre-deployment — see
+// migrations/20260814000001-create-teacher-recommendation-validations.js's
+// own "Feature 9 repair" comment for the full root-cause writeup): the
+// original idempotency key — (student_id, teacher_id, case_type, family,
+// validation, recommendation_fingerprint) — collided a genuine later
+// action against an earlier historical row whenever a teacher returned to
+// a previously-used `validation` value for the same recommendation
+// instance (Confirm→Dismiss→Confirm), silently dropping the newest
+// judgement from "current state." Replaced with `action_id`, a
+// client-generated UUID scoped to exactly one submit action (one button
+// press) — see `action_id` below.
+
 const CASE_TYPE_VALUES = ['lowercase', 'uppercase'];
 const FAMILY_VALUES = ['straight', 'curved', 'complex'];
 const VALIDATION_VALUES = ['confirmed', 'dismissed'];
@@ -104,6 +116,18 @@ const TeacherRecommendationValidation = sequelize.define('TeacherRecommendationV
     allowNull: false,
     validate:  { isIn: [VALIDATION_VALUES] },
   },
+  // The ONLY idempotency key for this table (unique, see indexes below).
+  // Client-generated once per submit action (one Confirm/Not-suitable
+  // button press) — see the module-header comment above. Follows this
+  // schema's own existing convention for a client/session-scoped grouping
+  // UUID (`LetterAttempt.session_key`).
+  action_id: {
+    type:      DataTypes.UUID,
+    allowNull: false,
+    // 'all' (not a fixed version) — matches the service layer's own
+    // version-agnostic UUID_REGEX (see teacherRecommendationValidationService.js).
+    validate:  { isUUID: 'all' },
+  },
   teacher_note: {
     type:      DataTypes.TEXT,
     allowNull: true,
@@ -153,9 +177,18 @@ const TeacherRecommendationValidation = sequelize.define('TeacherRecommendationV
   indexes: [
     { fields: ['student_id', 'created_at'] },
     { fields: ['student_id', 'case_type', 'family', 'created_at'] },
+    // Supports getLatestValidationForRecommendation() — the highest-
+    // frequency Feature 9 read (once per recommendation card render).
     {
-      name:   'teacher_recommendation_validations_idempotency_uniq',
-      fields: ['student_id', 'teacher_id', 'case_type', 'family', 'validation', 'recommendation_fingerprint'],
+      name:   'teacher_recommendation_validations_current_state_idx',
+      fields: ['student_id', 'case_type', 'family', 'recommendation_fingerprint', 'created_at'],
+    },
+    // Idempotency — the ONLY uniqueness constraint on this table. See the
+    // module-header comment above and the migration's own "Feature 9
+    // repair" note for why this replaced the old semantic-tuple key.
+    {
+      name:   'teacher_recommendation_validations_action_id_uniq',
+      fields: ['action_id'],
       unique: true,
     },
   ],

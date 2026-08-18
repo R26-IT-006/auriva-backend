@@ -33,6 +33,43 @@
 // historical circumstance (sync({alter:true}) racing ahead of migrations
 // on server boot for tables that were brand new at the time); it is not
 // this codebase's current standing convention for a new table.
+//
+// ── Feature 9 repair (final integration audit finding, pre-deployment) ─────
+// This migration was NEVER applied to any live/shared database (confirmed
+// via a direct read-only query against production: the table is absent and
+// this file is absent from SequelizeMeta) — it exists only in source. It is
+// therefore edited IN PLACE here rather than superseded by a new corrective
+// migration: no deployed environment's history depends on its original
+// shape, so there is nothing to "correct after the fact." This is a
+// deliberate exception to this project's normal rule (never edit an
+// applied migration — see the 20260808000002/3 and 20260809000001 batch,
+// which all *add* corrections rather than editing the original
+// create-table migrations they follow) and applies ONLY because this file
+// has zero deployment history. Once this migration is ever applied
+// anywhere (including a shared dev/staging DB), it must never be edited
+// again — only additive follow-up migrations from that point on.
+//
+// The original design (`docs/feature9-validation-history-design.md` §11)
+// intended the semantic unique index below only to catch a literal
+// same-button double-POST (a transport-level retry), not to prevent a
+// teacher from legitimately alternating back to a previously-used
+// `validation` value later. Because a UNIQUE constraint has no concept of
+// "recency," it also silently blocked that legitimate case: a third action
+// (Confirm→Dismiss→Confirm) collided with the FIRST historical Confirm row
+// and `findOrCreate` returned that old row instead of appending a new one —
+// so the newest teacher judgement was never recorded as newest. See the
+// final integration audit's Feature 9 finding for the full reproduction.
+//
+// Fix: replace the semantic key with an explicit, client-generated
+// `action_id` (UUID) — one value per submit *action* (a single button
+// press), reused verbatim across any transport-level retry of that same
+// action (client.js's response interceptor resends the identical request
+// body), but a genuinely new value for every new button press. This
+// correctly distinguishes "retry of the same action" from "a new action
+// that happens to repeat an old value" — which the removed semantic key
+// could not do. `action_id` follows this schema's own existing convention
+// for a client/session-scoped grouping UUID (`letter_attempts.session_key`,
+// `DataTypes.UUID`).
 module.exports = {
   async up(queryInterface, Sequelize) {
     await queryInterface.createTable('teacher_recommendation_validations', {
@@ -98,6 +135,17 @@ module.exports = {
         type:      Sequelize.STRING(20),
         allowNull: false,
       },
+      // Client-generated, once per submit action (one Confirm/Not-suitable
+      // button press) — the ONLY idempotency key for this table (see the
+      // "Feature 9 repair" note above). Never derived from
+      // student/teacher/case/family/validation/recommendation_fingerprint;
+      // never reused across two distinct button presses, even if they
+      // submit the identical validation value for the identical
+      // recommendation instance.
+      action_id: {
+        type:      Sequelize.UUID,
+        allowNull: false,
+      },
       // Optional teacher note. Nullable — empty/whitespace-only input is
       // normalized to NULL at the service layer (Step 3 spec §17), never an
       // empty string.
@@ -152,18 +200,33 @@ module.exports = {
       ['student_id', 'case_type', 'family', 'created_at'],
       { name: 'teacher_recommendation_validations_stream_lookup_idx' }
     );
-    // Idempotency: same teacher + same recommendation instance + same
-    // action can never be written twice (Step 3 spec §26/§27). Deliberately
-    // NOT (student_id, case_type, family) alone — that would prevent the
-    // required history entirely. Deliberately NOT partial/conditional
-    // (unlike student_threshold_history's own evidence_fingerprint index)
-    // — every column here is always NOT NULL, so no WHERE clause is needed.
-    // Including `validation` in the key means confirmed+dismissed for the
-    // identical recommendation_fingerprint remain two distinct, valid rows.
+    // Current-state query: "the latest event for THIS exact currently-
+    // displayed recommendation instance" (getLatestValidationForRecommendation
+    // — filters on all four columns, orders by created_at DESC, id DESC).
+    // Added because this read happens on every recommendation-card render,
+    // the highest-frequency Feature 9 query; the two indexes above don't
+    // cover recommendation_fingerprint.
     await queryInterface.addIndex(
       'teacher_recommendation_validations',
-      ['student_id', 'teacher_id', 'case_type', 'family', 'validation', 'recommendation_fingerprint'],
-      { name: 'teacher_recommendation_validations_idempotency_uniq', unique: true }
+      ['student_id', 'case_type', 'family', 'recommendation_fingerprint', 'created_at'],
+      { name: 'teacher_recommendation_validations_current_state_idx' }
+    );
+    // Idempotency (repaired — see the "Feature 9 repair" note above): the
+    // ONLY uniqueness constraint on this table. One row per client-generated
+    // action_id — a transport-level retry of the SAME submit action (same
+    // action_id) can never create a second row, but a genuinely new action
+    // (new action_id) always can, even if it repeats an earlier
+    // student/teacher/case/family/validation/fingerprint combination. This
+    // is what makes legitimate alternating history
+    // (Confirm→Dismiss→Confirm→Dismiss→...) possible — the previous
+    // semantic key (student_id, teacher_id, case_type, family, validation,
+    // recommendation_fingerprint) could not distinguish "the same action
+    // retried" from "an old value legitimately chosen again later" and
+    // incorrectly collapsed the two.
+    await queryInterface.addIndex(
+      'teacher_recommendation_validations',
+      ['action_id'],
+      { name: 'teacher_recommendation_validations_action_id_uniq', unique: true }
     );
   },
 

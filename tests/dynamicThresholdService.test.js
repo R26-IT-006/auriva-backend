@@ -51,7 +51,7 @@ const { Op } = require('sequelize'); // real — only ../src/models is mocked ab
 const {
   deriveInitialFamilyThresholds, createInitialFamilyThresholds, classifyFamilyInitialization,
   getRecentFamilyPerformance, RECENT_FAMILY_WINDOW_SIZE,
-  getCurrentFamilyThreshold, evaluateDynamicThresholds, THRESHOLD_INCREASE_STEP,
+  getCurrentFamilyThreshold, getCurrentFamilyThresholdsForStudent, evaluateDynamicThresholds, THRESHOLD_INCREASE_STEP,
   setTeacherFamilyThreshold, getFamilyThresholdProtection,
   computeEvidenceFingerprint, classifyAutomaticThresholdPersistence, persistAutomaticThresholdDecisions,
   processDynamicThresholdAfterLetterSession,
@@ -1214,6 +1214,129 @@ describe('getCurrentFamilyThreshold — Section 31', () => {
     mockThFindOne.mockRejectedValueOnce(new Error('connection terminated'));
     const result = await getCurrentFamilyThreshold({ studentId: 13, family: 'straight' });
     expect(result.status).toBe('read_failed');
+  });
+});
+
+// ─── Teacher Dashboard integration fix — getCurrentFamilyThresholdsForStudent ─
+//
+// Reuses this file's existing getCurrentFamilyThreshold mocks (mockThFindOne)
+// and createInitialFamilyThresholds mocks (mockFindOne for
+// StudentMotorBaseline, mockThFindAll/mockThBulkCreate for ThresholdHistory)
+// exactly as Section 31/Persistence Test 1 already do — this function is a
+// pure aggregation over those two, never a reimplementation.
+
+describe('getCurrentFamilyThresholdsForStudent — Teacher Dashboard integration fix', () => {
+  it('all three families already resolved: returns them as-is, never triggers repair', async () => {
+    mockThFindOne
+      .mockResolvedValueOnce(makeHistoryRow({ scope_key: 'straight', baseline_family: 'straight', source: 'initial_from_baseline', new_threshold: 89 }))
+      .mockResolvedValueOnce(makeHistoryRow({ scope_key: 'curved',   baseline_family: 'curved',   source: 'automatic',           new_threshold: 84 }))
+      .mockResolvedValueOnce(makeHistoryRow({ scope_key: 'complex',  baseline_family: 'complex',  source: 'teacher_override',    new_threshold: 96 }));
+
+    const result = await getCurrentFamilyThresholdsForStudent({ studentId: 31 });
+
+    expect(result).toEqual({
+      status: 'resolved',
+      families: {
+        straight: { status: 'available', threshold: 89, source: 'initial_from_baseline' },
+        curved:   { status: 'available', threshold: 84, source: 'automatic' },
+        complex:  { status: 'available', threshold: 96, source: 'teacher_override' },
+      },
+    });
+    expect(mockFindOne).not.toHaveBeenCalled(); // StudentMotorBaseline never read — no repair needed
+    expect(mockThBulkCreate).not.toHaveBeenCalled();
+  });
+
+  it('no target for any family, but a baseline exists: lazily repairs exactly once via createInitialFamilyThresholds, then returns the newly created values', async () => {
+    mockThFindOne.mockResolvedValue(null); // no_target for all three families
+    mockFindOne.mockResolvedValueOnce(makeBaselineRow({ student_id: 35, straight_score: 9, curved_score: 95, complex_score: 94 }));
+    mockThFindAll.mockResolvedValueOnce([]); // createInitialFamilyThresholds' own pre-insert check
+    mockThBulkCreate.mockImplementationOnce(echoBulkCreate());
+
+    const result = await getCurrentFamilyThresholdsForStudent({ studentId: 35 });
+
+    expect(result.status).toBe('resolved');
+    expect(result.families.straight).toEqual({ status: 'available', threshold: 14, source: 'initial_from_baseline' });
+    expect(result.families.curved).toEqual({ status: 'available', threshold: 100, source: 'initial_from_baseline' });
+    expect(result.families.complex).toEqual({ status: 'available', threshold: 99, source: 'initial_from_baseline' });
+    expect(mockThBulkCreate).toHaveBeenCalledTimes(1); // exactly one repair attempt, not one per family
+  });
+
+  it('no target for any family, and no baseline exists either: reports unavailable, never fabricates a value, and does not throw', async () => {
+    mockThFindOne.mockResolvedValue(null);
+    mockFindOne.mockResolvedValueOnce(null); // StudentMotorBaseline.findOne finds nothing
+
+    const result = await getCurrentFamilyThresholdsForStudent({ studentId: 9 });
+
+    expect(result).toEqual({
+      status: 'resolved',
+      families: {
+        straight: { status: 'unavailable', threshold: null, source: null },
+        curved:   { status: 'unavailable', threshold: null, source: null },
+        complex:  { status: 'unavailable', threshold: null, source: null },
+      },
+    });
+    expect(mockThBulkCreate).not.toHaveBeenCalled();
+  });
+
+  it('a mix of available and no_target families: only the no_target ones are sent through repair, available ones are left untouched', async () => {
+    mockThFindOne
+      .mockResolvedValueOnce(makeHistoryRow({ scope_key: 'straight', baseline_family: 'straight', source: 'automatic', new_threshold: 70 })) // straight: found
+      .mockResolvedValueOnce(null) // curved: no_target
+      .mockResolvedValueOnce(null); // complex: no_target
+    mockFindOne.mockResolvedValueOnce(makeBaselineRow({ straight_score: 62, curved_score: 83, complex_score: 68 }));
+    // createInitialFamilyThresholds performs its OWN independent existence
+    // check (ThresholdHistory.findAll) — consistent with the mockThFindOne
+    // sequence above, straight already has a row (an 'automatic' one, not
+    // 'initial_from_baseline', but still enough to make the initial-family
+    // insert skip it); curved/complex do not.
+    mockThFindAll.mockResolvedValueOnce([
+      makeHistoryRow({ id: 1, scope_key: 'straight', baseline_family: 'straight', source: 'automatic', new_threshold: 70 }),
+    ]);
+    mockThBulkCreate.mockImplementationOnce(echoBulkCreate());
+
+    const result = await getCurrentFamilyThresholdsForStudent({ studentId: 13 });
+
+    expect(result.families.straight).toEqual({ status: 'available', threshold: 70, source: 'automatic' });
+    expect(result.families.curved.status).toBe('available');
+    expect(result.families.complex.status).toBe('available');
+    // Repair only ever writes the two genuinely-missing families, never re-derives straight's real (non-lazy) value.
+    const insertedRows = mockThBulkCreate.mock.calls[0][0];
+    expect(insertedRows.map(r => r.scope_key).sort()).toEqual(['complex', 'curved']);
+  });
+
+  it('lazy repair itself throws: the thrown error is caught, and every pending family stays unavailable rather than crashing the endpoint', async () => {
+    mockThFindOne.mockResolvedValue(null);
+    mockFindOne.mockRejectedValueOnce(new Error('connection terminated'));
+
+    const result = await getCurrentFamilyThresholdsForStudent({ studentId: 13 });
+
+    expect(result.status).toBe('resolved');
+    expect(result.families.straight).toEqual({ status: 'unavailable', threshold: null, source: null });
+    expect(result.families.curved).toEqual({ status: 'unavailable', threshold: null, source: null });
+    expect(result.families.complex).toEqual({ status: 'unavailable', threshold: null, source: null });
+  });
+
+  it('a family already-initialized by a concurrent request during the repair race resolves as available too (already_initialized counts, not just created)', async () => {
+    mockThFindOne.mockResolvedValue(null); // this request's own initial read still sees nothing yet
+    mockFindOne.mockResolvedValueOnce(makeBaselineRow());
+    // createInitialFamilyThresholds' own pre-check now finds all 3 rows already inserted by a racing request.
+    mockThFindAll.mockResolvedValueOnce([
+      makeHistoryRow({ id: 1, scope_key: 'straight', new_threshold: 67 }),
+      makeHistoryRow({ id: 2, scope_key: 'curved',   new_threshold: 88 }),
+      makeHistoryRow({ id: 3, scope_key: 'complex',  new_threshold: 73 }),
+    ]);
+
+    const result = await getCurrentFamilyThresholdsForStudent({ studentId: 13 });
+
+    expect(result.families.straight).toEqual({ status: 'available', threshold: 67, source: 'initial_from_baseline' });
+    expect(mockThBulkCreate).not.toHaveBeenCalled();
+  });
+
+  it('invalid studentId is rejected before any query', async () => {
+    const result = await getCurrentFamilyThresholdsForStudent({ studentId: -1 });
+    expect(result).toEqual({ status: 'invalid_input', families: null });
+    expect(mockThFindOne).not.toHaveBeenCalled();
+    expect(mockFindOne).not.toHaveBeenCalled();
   });
 });
 

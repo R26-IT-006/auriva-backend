@@ -17,6 +17,7 @@ const {
 
 const VALID_SHA256 = 'a'.repeat(64);
 const VALID_SHA256_2 = 'b'.repeat(64);
+const VALID_ACTION_ID = '11111111-1111-4111-8111-111111111111';
 
 function validRecord(overrides = {}) {
   return {
@@ -30,6 +31,7 @@ function validRecord(overrides = {}) {
     suggested_activities: ['Circle tracing exercises', 'Curved-line guided tracing'],
     rationale: 'Curved movement practice is recommended because difficulty remained across two separate practice periods.',
     validation: 'confirmed',
+    action_id: VALID_ACTION_ID,
     teacher_note: null,
     evidence_fingerprint: VALID_SHA256,
     recommendation_fingerprint: VALID_SHA256_2,
@@ -195,12 +197,31 @@ describe('26. no delete-specific behavior on the model definition', () => {
   });
 });
 
+describe('27. action_id (Feature 9 repair — sole idempotency key)', () => {
+  it('accepts a well-formed UUID', async () => {
+    const instance = Model.build(validRecord({ action_id: VALID_ACTION_ID }));
+    await expect(instance.validate()).resolves.toBeDefined();
+  });
+
+  it('is required', async () => {
+    const record = validRecord();
+    delete record.action_id;
+    const instance = Model.build(record);
+    await expect(instance.validate()).rejects.toThrow();
+  });
+
+  it('rejects a malformed (non-UUID) value', async () => {
+    const instance = Model.build(validRecord({ action_id: 'not-a-uuid' }));
+    await expect(instance.validate()).rejects.toThrow();
+  });
+});
+
 describe('required fields are enforced', () => {
   it.each([
     'student_id', 'teacher_id', 'case_type', 'family',
     'recommendation_type', 'recommendation_title',
     'focus_letters', 'suggested_activities', 'rationale',
-    'validation', 'evidence_fingerprint', 'recommendation_fingerprint',
+    'validation', 'action_id', 'evidence_fingerprint', 'recommendation_fingerprint',
     'persistent_policy_version', 'recommendation_policy_version', 'mapping_version',
   ])('rejects a record missing %s', async (field) => {
     const record = validRecord();

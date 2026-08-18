@@ -18,12 +18,16 @@ const { LETTER_TO_PRIMITIVE, PRIMITIVE_LABELS } = require('../config/letterMotor
 const logger   = require('../utils/logger');
 const { getStudentThreshold } = require('../utils/thresholdUtils');
 const { resolveProgressionThreshold } = require('../services/progressionThresholdResolver');
-const { processDynamicThresholdAfterLetterSession } = require('../services/dynamicThresholdService');
+const {
+  processDynamicThresholdAfterLetterSession, createInitialFamilyThresholds, getCurrentFamilyThresholdsForStudent,
+} = require('../services/dynamicThresholdService');
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../services/motorBaselineService');
 const teacherService = require('../services/teacherService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
 const { computeMotorScore } = require('../utils/motorScore');
+const { deriveMotorScoreFromStoredShape } = require('../utils/unifiedShapeScore');
+const { computeCoverageFilteredBestScore } = require('../utils/attemptCoverageValidity');
 const { isValidLetterSupportLevel } = require('../config/letterSupportLevels');
 const { isValidDemoSpeedLevel } = require('../config/demoSpeedPolicy');
 // Feature 3 Step 6 — read-only support-recommendation endpoint. Reuses
@@ -542,7 +546,26 @@ async function recordLetterCompletion(req, res) {
   let thresholdFamily = null;
 
   if (Array.isArray(attempt_scores) && attempt_scores.length > 0) {
-    bestScore = Math.max(...attempt_scores);
+    // Coverage-fix audit: bestScore now excludes any attempt whose drawing
+    // fails the coverage/geometry check (see
+    // utils/attemptCoverageValidity.js — mirrors ONLY didPassAttempt's
+    // coverage sub-check, not its smoothness/DTW conditions, which are out
+    // of scope here). The index-alignment guard inside
+    // computeCoverageFilteredBestScore fails open (reverts to the old
+    // Math.max(...attempt_scores) behavior) if attempt_scores and attempts
+    // aren't the same length — logged below since that should never happen
+    // with the real client.
+    const coverageResult = computeCoverageFilteredBestScore({
+      attemptScores: attempt_scores, attempts, canvasWidth: canvas_width, canvasHeight: canvas_height,
+    });
+    if (coverageResult.skippedForMismatch) {
+      logger.warn('attempt_scores/attempts length mismatch — coverage filter skipped, failing open', {
+        student_id, letter, case_type,
+        attemptScoresLength: attempt_scores.length,
+        attemptsLength: Array.isArray(attempts) ? attempts.length : null,
+      });
+    }
+    bestScore = coverageResult.bestScore;
 
     // Feature 2 Step 7: resolveProgressionThreshold() replaces the old
     // inline ternary (`typeof quality_threshold === 'number' ? ... :
@@ -566,7 +589,7 @@ async function recordLetterCompletion(req, res) {
       thresholdFamily = null;
     }
 
-    if (bestScore < threshold) {
+    if (bestScore == null || bestScore < threshold) {
       const [rec] = await LetterProgress.findOrCreate({
         where:    { student_id, letter, case_type },
         defaults: { student_id, letter, case_type, blocked_attempts: 0 },
@@ -1029,6 +1052,41 @@ async function finalizeAssessment(req, res) {
     });
   }
 
+  // Feature 2 — automatic family-threshold initialization (final workflow
+  // integration). Runs immediately after Feature 1's baseline result above,
+  // whenever a valid baseline row now exists for this student — whether
+  // just created this call ('created'), already existed from a prior
+  // finalize/resend ('already_exists'), or already existed from a
+  // different source assessment entirely ('student_baseline_already_exists',
+  // e.g. an earlier legitimate finalize). This is the ONLY trigger a normal
+  // student needs: src/scripts/initializeFamilyThresholds.js is no longer
+  // required for a new student — see progressionThresholdResolver.js for
+  // the second, lazy-repair trigger that covers students whose baseline
+  // predates this change.
+  //
+  // Non-fatal and idempotent by the exact same discipline as the baseline
+  // call above: createInitialFamilyThresholds() is itself already
+  // idempotent (per-family findAll-before-insert + a DB-level partial
+  // unique index — see dynamicThresholdService.js), so a resend or a
+  // second finalize call safely resolves to 'already_initialized' rather
+  // than duplicating history rows. A failure here must never roll back the
+  // finalize, change this endpoint's success status, or block the baseline
+  // result already computed.
+  let familyThresholdResult = { status: 'skipped_no_baseline', created: null };
+  if (['created', 'already_exists', 'student_baseline_already_exists'].includes(baselineResult.status)) {
+    try {
+      familyThresholdResult = await createInitialFamilyThresholds({ studentId: assessment.student_id });
+    } catch (error) {
+      logger.error('Family threshold service threw unexpectedly during finalize', {
+        studentId:    assessment.student_id,
+        assessmentId: assessment.id,
+        status:       'save_failed',
+        errorMessage: error.message,
+      });
+      familyThresholdResult = { status: 'save_failed', created: null };
+    }
+  }
+
   res.json({
     id:           assessmentId,
     is_initial:   assessment.is_initial,
@@ -1039,6 +1097,7 @@ async function finalizeAssessment(req, res) {
     baselineStatus: baselineResult.status,
     baselineId:     baselineResult.baseline?.id ?? null,
     baselineReason: baselineResult.reason ?? null,
+    familyThresholdStatus: familyThresholdResult.status,
     finalizeStatus: isResend ? 'already_finalized' : 'finalized',
   });
 }
@@ -1087,13 +1146,45 @@ async function getInitialReport(req, res) {
     order: [['created_at', 'DESC']],
   });
 
+  // Fix (teacher report showing 50/50 "Motor Comfort"/"Motor Performance"
+  // for pre-unification assessments): assessment.shapes is the raw
+  // submitted-at-the-time JSON snapshot — for assessments recorded before
+  // motor_score existed, shape.features.motor_score is simply absent, and
+  // the frontend's ?? 50 fallback was silently rendering that as a real,
+  // plausible-looking score. Compute it here, on read, from the SAME
+  // stored raw stroke_points/canvas_width/canvas_height/smoothness via the
+  // canonical unifiedShapeScore module — no data migration, no write to
+  // the DB, and assessments that already have motor_score (recorded after
+  // the unification) pass through unchanged (deriveMotorScoreFromStoredShape
+  // never recomputes over an already-real value).
+  const enrichedShapes = Array.isArray(assessment.shapes)
+    ? assessment.shapes.map(shape => {
+        const derived = deriveMotorScoreFromStoredShape({
+          shapeId:      shape.shape_id,
+          features:     shape.features,
+          strokes:      shape.strokes,
+          canvasWidth:  shape.canvas_width,
+          canvasHeight: shape.canvas_height,
+        });
+        return {
+          ...shape,
+          features: {
+            ...shape.features,
+            motor_score:      derived.motor_score,
+            dtw_score:        derived.dtw_score,
+            smoothness_score: derived.smoothness_score,
+          },
+        };
+      })
+    : assessment.shapes;
+
   res.json({
     hasData: true,
     assessment: {
       id:            assessment.id,
       motor_score:   assessment.motor_score,
       motor_profile: assessment.motor_profile,
-      shapes:        assessment.shapes,
+      shapes:        enrichedShapes,
       created_at:    assessment.created_at,
       is_initial:    assessment.is_initial,
     },
@@ -1262,6 +1353,39 @@ async function getMotorBaseline(req, res) {
   // without exposing SQL/host/stack details. Let the project's normal
   // server-error handler format the response.
   throw new ApiError(500, 'Failed to retrieve motor baseline');
+}
+
+/**
+ * GET /handwriting/family-thresholds/:studentId
+ *
+ * Teacher Dashboard integration fix — read-only retrieval of the student's
+ * CURRENT Feature 2 family thresholds (straight/curved/complex), for the
+ * Teacher Dashboard's "Current Learning Targets" card. Never the legacy
+ * students.personal_thresholds field, and never a re-derived/duplicated
+ * threshold formula — thin wrapper around
+ * dynamicThresholdService.getCurrentFamilyThresholdsForStudent(), which
+ * itself only ever reuses createInitialFamilyThresholds() (the same
+ * already-approved, idempotent write) for a one-time lazy repair when a
+ * family has never been initialized.
+ */
+async function getFamilyThresholds(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  // Ownership check — identical convention to every other Feature 1-9 read endpoint.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await getCurrentFamilyThresholdsForStudent({ studentId });
+
+  if (result.status === 'invalid_input') {
+    // Unreachable in practice (studentId already validated above) but
+    // handled defensively, never assumed unreachable.
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  res.json({ status: 'resolved', families: result.families });
 }
 
 /**
@@ -1771,7 +1895,11 @@ async function postWorksheetRecommendationValidation(req, res) {
   // Ownership check BEFORE any Feature 7/8 re-evaluation or write attempt.
   await teacherService.getOwnStudentById(req.user.id, studentId);
 
-  const { caseType, family, validation, teacherNote, recommendationFingerprint } = req.body || {};
+  // actionId — Feature 9 repair (final integration audit finding): a
+  // client-generated UUID identifying this ONE submit action, the sole
+  // idempotency key the service now uses. See
+  // teacherRecommendationValidationService.js's own module header.
+  const { caseType, family, validation, teacherNote, recommendationFingerprint, actionId } = req.body || {};
 
   const result = await teacherRecommendationValidationService.validateWorksheetRecommendation({
     studentId,
@@ -1781,6 +1909,7 @@ async function postWorksheetRecommendationValidation(req, res) {
     validation,
     teacherNote,
     recommendationFingerprint,
+    actionId,
   });
 
   switch (result.status) {
@@ -1833,7 +1962,7 @@ async function postWorksheetRecommendationValidation(req, res) {
 module.exports = {
   submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion,
   explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport,
-  getLetterProgressReport, getMotorBaseline, getSupportRecommendation,
+  getLetterProgressReport, getMotorBaseline, getFamilyThresholds, getSupportRecommendation,
   getPreWritingRecommendation, getRepetitionRecommendation, getDemoSpeedRecommendation,
   getPersistentDifficulty, getWorksheetRecommendations,
   getWorksheetRecommendationValidations, getWorksheetRecommendationValidationState,

@@ -107,11 +107,17 @@ function feature8EvaluatedResult(overrides = {}) {
   };
 }
 
+const ACTION_ID_1 = '11111111-1111-4111-8111-111111111111';
+const ACTION_ID_2 = '22222222-2222-4222-8222-222222222222';
+const ACTION_ID_3 = '33333333-3333-4333-8333-333333333333';
+const ACTION_ID_4 = '44444444-4444-4444-8444-444444444444';
+
 function validArgs(overrides = {}) {
   return {
     studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
     validation: 'confirmed', teacherNote: undefined,
     recommendationFingerprint: EXPECTED_RECOMMENDATION_FINGERPRINT,
+    actionId: ACTION_ID_1,
     ...overrides,
   };
 }
@@ -164,6 +170,20 @@ describe('input validation (spec §37)', () => {
   it('32. malformed recommendationFingerprint returns invalid_input', async () => {
     const result = await validateWorksheetRecommendation(validArgs({ recommendationFingerprint: 'not-a-hash' }));
     expect(result.status).toBe('invalid_input');
+  });
+
+  // Feature 9 repair (final integration audit finding) — actionId is now a
+  // required, validated field: the sole idempotency key.
+  it('missing actionId returns invalid_input, no write', async () => {
+    const result = await validateWorksheetRecommendation(validArgs({ actionId: undefined }));
+    expect(result.status).toBe('invalid_input');
+    expect(TeacherRecommendationValidation.findOrCreate).not.toHaveBeenCalled();
+  });
+
+  it('malformed actionId returns invalid_input, no write', async () => {
+    const result = await validateWorksheetRecommendation(validArgs({ actionId: 'not-a-uuid' }));
+    expect(result.status).toBe('invalid_input');
+    expect(TeacherRecommendationValidation.findOrCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -346,8 +366,8 @@ describe('snapshot field fidelity (spec §32/§46/§47/§48)', () => {
 
 // ─── 49-50: idempotency / append-only semantics ─────────────────────────────
 
-describe('idempotency and append-only semantics (spec §26/§27/§49/§50)', () => {
-  it('49. a duplicate identical action is idempotent (findOrCreate returns created:false)', async () => {
+describe('idempotency and append-only semantics — Feature 9 repair (final integration audit finding)', () => {
+  it('49. a duplicate identical action (same actionId) is idempotent (findOrCreate returns created:false)', async () => {
     TeacherRecommendationValidation.findOrCreate.mockResolvedValue([
       { id: 7, created_at: new Date('2026-08-10T00:00:00.000Z') }, false,
     ]);
@@ -362,22 +382,82 @@ describe('idempotency and append-only semantics (spec §26/§27/§49/§50)', () 
     expect(result.duplicate).toBe(false);
   });
 
-  it('the findOrCreate where-clause keys on exactly the 6 idempotency columns', async () => {
+  it('the findOrCreate where-clause keys on action_id ALONE — never the old semantic tuple', async () => {
     await validateWorksheetRecommendation(validArgs());
     const [{ where }] = TeacherRecommendationValidation.findOrCreate.mock.calls[0];
-    expect(Object.keys(where).sort()).toEqual(
-      ['student_id', 'teacher_id', 'case_type', 'family', 'validation', 'recommendation_fingerprint'].sort()
-    );
+    expect(Object.keys(where)).toEqual(['action_id']);
+    expect(where.action_id).toBe(ACTION_ID_1);
   });
 
-  it('50. confirmed then dismissed for the same recommendation produces two separate findOrCreate calls with different validation values', async () => {
-    await validateWorksheetRecommendation(validArgs({ validation: 'confirmed' }));
-    await validateWorksheetRecommendation(validArgs({ validation: 'dismissed' }));
+  it('the defaults still carry student/teacher/case/family/validation for the new row', async () => {
+    await validateWorksheetRecommendation(validArgs());
+    const [{ defaults }] = TeacherRecommendationValidation.findOrCreate.mock.calls[0];
+    expect(defaults.student_id).toBe(STUDENT_ID);
+    expect(defaults.teacher_id).toBe(TEACHER_ID);
+    expect(defaults.case_type).toBe('lowercase');
+    expect(defaults.family).toBe('curved');
+    expect(defaults.validation).toBe('confirmed');
+    expect(defaults.action_id).toBe(ACTION_ID_1);
+  });
+
+  it('50. confirmed then dismissed for the same recommendation produces two separate findOrCreate calls, keyed on their own distinct actionIds', async () => {
+    await validateWorksheetRecommendation(validArgs({ validation: 'confirmed', actionId: ACTION_ID_1 }));
+    await validateWorksheetRecommendation(validArgs({ validation: 'dismissed', actionId: ACTION_ID_2 }));
 
     expect(TeacherRecommendationValidation.findOrCreate).toHaveBeenCalledTimes(2);
     const [firstCall, secondCall] = TeacherRecommendationValidation.findOrCreate.mock.calls;
-    expect(firstCall[0].where.validation).toBe('confirmed');
-    expect(secondCall[0].where.validation).toBe('dismissed');
+    expect(firstCall[0].where.action_id).toBe(ACTION_ID_1);
+    expect(firstCall[0].defaults.validation).toBe('confirmed');
+    expect(secondCall[0].where.action_id).toBe(ACTION_ID_2);
+    expect(secondCall[0].defaults.validation).toBe('dismissed');
+  });
+
+  // ── Alternating-state acceptance test (repair spec §12) ────────────────────
+  // Confirm → Dismiss → Confirm → Dismiss: each action gets its own actionId
+  // (exactly how the real frontend behaves — one fresh UUID per button
+  // press) and therefore its own findOrCreate call/row, never colliding
+  // with an earlier historical row even though `validation` repeats.
+  it('Confirm -> Dismiss -> Confirm -> Dismiss creates 4 separate findOrCreate calls, one per action, in order', async () => {
+    await validateWorksheetRecommendation(validArgs({ validation: 'confirmed', actionId: ACTION_ID_1 }));
+    await validateWorksheetRecommendation(validArgs({ validation: 'dismissed', actionId: ACTION_ID_2 }));
+    await validateWorksheetRecommendation(validArgs({ validation: 'confirmed', actionId: ACTION_ID_3 }));
+    await validateWorksheetRecommendation(validArgs({ validation: 'dismissed', actionId: ACTION_ID_4 }));
+
+    expect(TeacherRecommendationValidation.findOrCreate).toHaveBeenCalledTimes(4);
+    const calls = TeacherRecommendationValidation.findOrCreate.mock.calls;
+    expect(calls.map((c) => c[0].where.action_id)).toEqual([ACTION_ID_1, ACTION_ID_2, ACTION_ID_3, ACTION_ID_4]);
+    expect(calls.map((c) => c[0].defaults.validation)).toEqual(['confirmed', 'dismissed', 'confirmed', 'dismissed']);
+    // None of the 4 where-clauses collide with each other — this is exactly
+    // what the old semantic key (student/teacher/case/family/validation/
+    // fingerprint) could NOT guarantee for calls 1 and 3 (both 'confirmed'
+    // for the identical recommendation instance).
+    const whereClauses = calls.map((c) => JSON.stringify(c[0].where));
+    expect(new Set(whereClauses).size).toBe(4);
+  });
+
+  // ── Same-action retry test (repair spec §13) ────────────────────────────────
+  it('a retry of the SAME action (identical actionId) does not create a second row', async () => {
+    await validateWorksheetRecommendation(validArgs({ validation: 'confirmed', actionId: ACTION_ID_1 }));
+    // Simulate client.js's response interceptor resending the identical body.
+    TeacherRecommendationValidation.findOrCreate.mockResolvedValueOnce([
+      { id: 1, created_at: new Date('2026-08-14T12:00:00.000Z') }, false,
+    ]);
+    const retryResult = await validateWorksheetRecommendation(validArgs({ validation: 'confirmed', actionId: ACTION_ID_1 }));
+
+    expect(TeacherRecommendationValidation.findOrCreate).toHaveBeenCalledTimes(2);
+    expect(TeacherRecommendationValidation.findOrCreate.mock.calls[1][0].where.action_id).toBe(ACTION_ID_1);
+    expect(retryResult.duplicate).toBe(true);
+  });
+
+  it('a genuinely new action with the same validation+fingerprint as an earlier action still creates a new row', async () => {
+    await validateWorksheetRecommendation(validArgs({ validation: 'confirmed', actionId: ACTION_ID_1 }));
+    // Different actionId, but same validation/fingerprint as the first call —
+    // this is exactly the case the old semantic key incorrectly deduplicated.
+    await validateWorksheetRecommendation(validArgs({ validation: 'confirmed', actionId: ACTION_ID_2 }));
+
+    expect(TeacherRecommendationValidation.findOrCreate).toHaveBeenCalledTimes(2);
+    expect(TeacherRecommendationValidation.findOrCreate.mock.calls[0][0].where.action_id).toBe(ACTION_ID_1);
+    expect(TeacherRecommendationValidation.findOrCreate.mock.calls[1][0].where.action_id).toBe(ACTION_ID_2);
   });
 });
 

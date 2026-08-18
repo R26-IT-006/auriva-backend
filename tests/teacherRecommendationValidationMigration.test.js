@@ -43,12 +43,22 @@ describe('up() — 3. expected columns exist', () => {
         'case_type', 'family',
         'recommendation_type', 'recommendation_title',
         'focus_letters', 'suggested_activities', 'rationale',
-        'validation', 'teacher_note',
+        'validation', 'action_id', 'teacher_note',
         'evidence_fingerprint', 'recommendation_fingerprint',
         'persistent_policy_version', 'recommendation_policy_version', 'mapping_version',
         'created_at',
       ]);
     });
+  });
+});
+
+describe('up() — 3b. action_id column (Feature 9 repair)', () => {
+  it('is a required UUID column', async () => {
+    const qi = makeQueryInterface();
+    await migration.up(qi, Sequelize);
+    const columns = qi.createTable.mock.calls[0][1];
+    expect(columns.action_id.type).toBe(Sequelize.UUID);
+    expect(columns.action_id.allowNull).toBe(false);
   });
 });
 
@@ -111,22 +121,49 @@ describe('up() — 10. history indexes exist', () => {
   });
 });
 
-describe('up() — 11. idempotency unique index exists', () => {
-  it('creates a unique index on (student_id, teacher_id, case_type, family, validation, recommendation_fingerprint)', async () => {
+// ─── Feature 9 repair (final integration audit finding) ────────────────────
+// The old semantic-tuple unique index — (student_id, teacher_id, case_type,
+// family, validation, recommendation_fingerprint) — silently collided a
+// genuinely new teacher action against an old historical row whenever the
+// action repeated an earlier `validation` value for the same recommendation
+// instance (Confirm→Dismiss→Confirm). It is REPLACED by a single unique
+// index on `action_id` alone — see the migration file's own "Feature 9
+// repair" comment for the full root-cause writeup.
+
+describe('up() — 11. idempotency unique index is action_id ALONE', () => {
+  it('creates a unique index on exactly [action_id]', async () => {
     const qi = makeQueryInterface();
     await migration.up(qi, Sequelize);
     const indexCalls = qi.addIndex.mock.calls;
 
-    const idempotencyIndex = indexCalls.find(([, fields]) =>
-      JSON.stringify(fields) === JSON.stringify([
-        'student_id', 'teacher_id', 'case_type', 'family', 'validation', 'recommendation_fingerprint',
-      ]));
-    expect(idempotencyIndex).toBeDefined();
-    expect(idempotencyIndex[2].unique).toBe(true);
+    const actionIdIndex = indexCalls.find(([, fields]) =>
+      JSON.stringify(fields) === JSON.stringify(['action_id']));
+    expect(actionIdIndex).toBeDefined();
+    expect(actionIdIndex[2].unique).toBe(true);
+  });
+
+  it('creates exactly one unique index total, and it is the action_id index', async () => {
+    const qi = makeQueryInterface();
+    await migration.up(qi, Sequelize);
+    const uniqueIndexCalls = qi.addIndex.mock.calls.filter(([, , opts]) => opts && opts.unique);
+    expect(uniqueIndexCalls).toHaveLength(1);
+    expect(uniqueIndexCalls[0][1]).toEqual(['action_id']);
   });
 });
 
-describe('up() — 12. no incorrect (student_id, case_type, family)-only unique index', () => {
+describe('up() — 12. the old semantic idempotency index no longer exists', () => {
+  it('never creates a unique index on the old 6-column semantic tuple', async () => {
+    const qi = makeQueryInterface();
+    await migration.up(qi, Sequelize);
+    const indexCalls = qi.addIndex.mock.calls;
+
+    const oldSemanticIndex = indexCalls.find(([, fields]) =>
+      JSON.stringify(fields) === JSON.stringify([
+        'student_id', 'teacher_id', 'case_type', 'family', 'validation', 'recommendation_fingerprint',
+      ]));
+    expect(oldSemanticIndex).toBeUndefined();
+  });
+
   it('never creates a unique index on just (student_id, case_type, family)', async () => {
     const qi = makeQueryInterface();
     await migration.up(qi, Sequelize);
@@ -136,13 +173,27 @@ describe('up() — 12. no incorrect (student_id, case_type, family)-only unique 
       JSON.stringify(fields) === JSON.stringify(['student_id', 'case_type', 'family']));
     expect(wrongIndex).toBeUndefined();
   });
+});
 
-  it('no index call anywhere sets unique:true on fewer than 6 fields', async () => {
+describe('up() — 13. current-state lookup index exists (non-unique)', () => {
+  it('creates a (student_id, case_type, family, recommendation_fingerprint, created_at) index, not unique', async () => {
     const qi = makeQueryInterface();
     await migration.up(qi, Sequelize);
-    const uniqueIndexCalls = qi.addIndex.mock.calls.filter(([, , opts]) => opts && opts.unique);
-    for (const [, fields] of uniqueIndexCalls) {
-      expect(fields.length).toBeGreaterThanOrEqual(6);
-    }
+    const indexCalls = qi.addIndex.mock.calls;
+
+    const currentStateIndex = indexCalls.find(([, fields]) =>
+      JSON.stringify(fields) === JSON.stringify([
+        'student_id', 'case_type', 'family', 'recommendation_fingerprint', 'created_at',
+      ]));
+    expect(currentStateIndex).toBeDefined();
+    expect(currentStateIndex[2].unique).toBeFalsy();
+  });
+});
+
+describe('up() — 14. exactly 4 indexes total', () => {
+  it('creates student_created, stream_lookup, current_state, and action_id_uniq — nothing else', async () => {
+    const qi = makeQueryInterface();
+    await migration.up(qi, Sequelize);
+    expect(qi.addIndex).toHaveBeenCalledTimes(4);
   });
 });

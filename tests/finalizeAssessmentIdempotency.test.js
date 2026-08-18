@@ -9,6 +9,10 @@ const mockExplanationCreate    = jest.fn(); // ExplanationResult.create
 const mockRecommendationCreate = jest.fn(); // RecommendationHistory.create
 const mockAnalyzeMotorDifficulty     = jest.fn(); // explainabilityService.analyzeMotorDifficulty
 const mockCreateInitialMotorBaseline = jest.fn(); // motorBaselineService.createInitialMotorBaseline
+// Feature 2 final workflow integration — createInitialFamilyThresholds is
+// now called automatically from finalizeAssessment() right after the
+// baseline result, whenever a valid baseline row exists for this student.
+const mockCreateInitialFamilyThresholds = jest.fn();
 const mockLoggerInfo  = jest.fn();
 const mockLoggerWarn  = jest.fn();
 const mockLoggerError = jest.fn();
@@ -25,6 +29,11 @@ jest.mock('../src/services/explainabilityService', () => ({
 
 jest.mock('../src/services/motorBaselineService', () => ({
   createInitialMotorBaseline: mockCreateInitialMotorBaseline,
+}));
+
+jest.mock('../src/services/dynamicThresholdService', () => ({
+  createInitialFamilyThresholds: (...a) => mockCreateInitialFamilyThresholds(...a),
+  processDynamicThresholdAfterLetterSession: jest.fn(),
 }));
 
 jest.mock('../src/utils/logger', () => ({
@@ -96,6 +105,14 @@ beforeEach(() => {
   mockExplanationCreate.mockResolvedValue({ id: 1 });
   mockRecommendationCreate.mockResolvedValue({ id: 1 });
   mockCreateInitialMotorBaseline.mockResolvedValue({ status: 'created', baseline: { id: 5 }, reason: null });
+  mockCreateInitialFamilyThresholds.mockResolvedValue({
+    status: 'created', studentId: 10, baselineId: 5, baselineVersion: 'baseline-v1', mappingVersion: 'letter-baseline-family-v1', margin: 5,
+    created: {
+      straight: { status: 'created', historyId: 1, newThreshold: 90 },
+      curved:   { status: 'created', historyId: 2, newThreshold: 88 },
+      complex:  { status: 'created', historyId: 3, newThreshold: 73 },
+    },
+  });
 });
 
 // ─── Test 1 — First finalize ────────────────────────────────────────────────
@@ -366,5 +383,89 @@ describe('Test 12 — existing duplicate explanations', () => {
       expect.objectContaining({ assessmentId: 101 }),
     );
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ difficultyKey: 'NONE' }));
+  });
+});
+
+// ─── Test 13-17 — Feature 2 automatic family-threshold initialization ──────
+// (Final workflow integration — no manual admin script required.)
+
+describe('Test 13 — successful baseline finalize automatically initializes Feature 2', () => {
+  it('calls createInitialFamilyThresholds once, with only studentId, and reports its status', async () => {
+    const assessment = makeAssessmentInstance();
+    mockFindByPk.mockResolvedValueOnce(assessment);
+    mockExplanationFindAll.mockResolvedValueOnce([]);
+    mockCreateInitialMotorBaseline.mockResolvedValueOnce({ status: 'created', baseline: { id: 5 }, reason: null });
+
+    const res = makeRes();
+    await finalizeAssessment(makeReq(), res);
+
+    expect(mockCreateInitialFamilyThresholds).toHaveBeenCalledTimes(1);
+    expect(mockCreateInitialFamilyThresholds).toHaveBeenCalledWith({ studentId: 10 });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ familyThresholdStatus: 'created' }));
+  });
+});
+
+describe('Test 14 — repeated finalize does not duplicate thresholds', () => {
+  it('a resend still calls createInitialFamilyThresholds, which itself resolves to already_initialized (never a duplicate)', async () => {
+    const assessment = makeAssessmentInstance({ motor_score: 61, motor_profile: makeMotorProfile() });
+    mockFindByPk.mockResolvedValueOnce(assessment);
+    mockExplanationFindAll.mockResolvedValueOnce([{ id: 9, difficulty_label: 'x', difficulty_type: 'WEAK_CURVE_CONTROL' }]);
+    mockCreateInitialMotorBaseline.mockResolvedValueOnce({ status: 'already_exists', baseline: { id: 5 }, reason: null });
+    mockCreateInitialFamilyThresholds.mockResolvedValueOnce({
+      status: 'already_initialized', studentId: 10, baselineId: 5, baselineVersion: 'baseline-v1', mappingVersion: 'letter-baseline-family-v1', margin: 5,
+      created: { straight: { status: 'already_initialized', historyId: 1, newThreshold: 90 } },
+    });
+
+    const res = makeRes();
+    await finalizeAssessment(makeReq({ motor_score: 61, motor_profile: makeMotorProfile() }), res);
+
+    expect(mockCreateInitialFamilyThresholds).toHaveBeenCalledTimes(1);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ familyThresholdStatus: 'already_initialized' }));
+  });
+});
+
+describe('Test 15 — existing initialized student does not duplicate (student_baseline_already_exists)', () => {
+  it('still attempts initialization (which itself resolves to already_initialized), covering a baseline from an earlier assessment', async () => {
+    const assessment = makeAssessmentInstance();
+    mockFindByPk.mockResolvedValueOnce(assessment);
+    mockExplanationFindAll.mockResolvedValueOnce([]);
+    mockCreateInitialMotorBaseline.mockResolvedValueOnce({ status: 'student_baseline_already_exists', baseline: { id: 5 }, reason: null });
+
+    const res = makeRes();
+    await finalizeAssessment(makeReq(), res);
+
+    expect(mockCreateInitialFamilyThresholds).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Test 16 — no baseline yet -> Feature 2 initialization is skipped, never called', () => {
+  it.each(['invalid_motor_profile', 'save_failed', 'collection_assessment_not_eligible', 'not_initial_assessment'])(
+    'baselineStatus=%s never triggers createInitialFamilyThresholds',
+    async (baselineStatus) => {
+      const assessment = makeAssessmentInstance();
+      mockFindByPk.mockResolvedValueOnce(assessment);
+      mockExplanationFindAll.mockResolvedValueOnce([]);
+      mockCreateInitialMotorBaseline.mockResolvedValueOnce({ status: baselineStatus, baseline: null, reason: null });
+
+      const res = makeRes();
+      await finalizeAssessment(makeReq(), res);
+
+      expect(mockCreateInitialFamilyThresholds).not.toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ familyThresholdStatus: 'skipped_no_baseline' }));
+    }
+  );
+});
+
+describe('Test 17 — Feature 2 initialization failure is non-fatal', () => {
+  it('a thrown error from createInitialFamilyThresholds never rolls back finalize or changes its status code', async () => {
+    const assessment = makeAssessmentInstance();
+    mockFindByPk.mockResolvedValueOnce(assessment);
+    mockExplanationFindAll.mockResolvedValueOnce([]);
+    mockCreateInitialFamilyThresholds.mockRejectedValueOnce(new Error('DB down'));
+
+    const res = makeRes();
+    await finalizeAssessment(makeReq(), res);
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ familyThresholdStatus: 'save_failed', finalizeStatus: 'finalized' }));
   });
 });

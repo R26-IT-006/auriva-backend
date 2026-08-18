@@ -69,6 +69,7 @@ const TEACHER_ID = 4;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let idCounter;
+let actionIdCounter;
 beforeEach(() => {
   jest.clearAllMocks();
   mockLaFindAll.mockResolvedValue([]);
@@ -76,8 +77,20 @@ beforeEach(() => {
   mockTrvFindAll.mockResolvedValue([]);
   mockTrvFindOne.mockResolvedValue(null);
   idCounter = 1;
+  actionIdCounter = 1;
 });
 function nextId() { return idCounter++; }
+// Feature 9 repair (final integration audit finding) — every real
+// validateWorksheetRecommendation() call in this file now needs its own
+// actionId (the sole idempotency key). A deterministic per-test counter,
+// zero-padded into a valid UUID shape, keeps every call site's actionId
+// unique-by-default (matching real button-press behavior) while staying
+// fully reproducible; a test that specifically needs the SAME actionId
+// across two calls (retry semantics) passes one explicitly instead.
+function nextActionId() {
+  const n = String(actionIdCounter++).padStart(12, '0');
+  return `00000000-0000-4000-8000-${n}`;
+}
 
 function expectNoLetterAttemptWrites() {
   for (const fn of [mockLaCreate, mockLaBulkCreate, mockLaUpdate, mockLaDestroy, mockLaSave, mockLaIncrement, mockLaFindOrCreate]) {
@@ -147,10 +160,12 @@ describe('1. invalid input', () => {
     { studentId: STUDENT_ID, teacherId: TEACHER_ID, family: 'diagonal' },
     { studentId: STUDENT_ID, teacherId: TEACHER_ID, validation: 'approved' },
     { studentId: STUDENT_ID, teacherId: TEACHER_ID, recommendationFingerprint: 'not-a-hash' },
+    { studentId: STUDENT_ID, teacherId: TEACHER_ID, actionId: undefined },
+    { studentId: STUDENT_ID, teacherId: TEACHER_ID, actionId: 'not-a-uuid' },
   ])('%p -> invalid_input, zero reads/writes', async (overrides) => {
     const result = await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: 'a'.repeat(64),
+      validation: 'confirmed', recommendationFingerprint: 'a'.repeat(64), actionId: nextActionId(),
       ...overrides,
     });
     expect(result.status).toBe('invalid_input');
@@ -195,7 +210,7 @@ describe('5. confirmed validation accepted', () => {
     const rec = await getPersistentCurvedRecommendation();
     const result = await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     expect(result.status).toBe('validated');
   });
@@ -206,7 +221,7 @@ describe('6. trusted snapshot stored', () => {
     const rec = await getPersistentCurvedRecommendation();
     await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     const [{ defaults }] = mockTrvFindOrCreate.mock.calls[0];
     expect(defaults.recommendation_type).toBe(rec.recommendationType);
@@ -219,12 +234,12 @@ describe('6. trusted snapshot stored', () => {
 });
 
 describe('7. duplicate confirm idempotent', () => {
-  it('a second identical confirm resolves duplicate: true, findOrCreate reports created: false', async () => {
+  it('a retry of the same action (same actionId) resolves duplicate: true, findOrCreate reports created: false', async () => {
     const rec = await getPersistentCurvedRecommendation();
     mockTrvFindOrCreate.mockResolvedValueOnce([{ id: 7, created_at: new Date('2026-08-10T00:00:00.000Z') }, false]);
     const result = await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     expect(result.status).toBe('validated');
     expect(result.duplicate).toBe(true);
@@ -232,20 +247,43 @@ describe('7. duplicate confirm idempotent', () => {
 });
 
 describe('8. dismissed after confirmed creates a second event', () => {
-  it('two findOrCreate calls with different validation values, never an update', async () => {
+  it('two findOrCreate calls with different validation values (and different actionIds), never an update', async () => {
     const rec = await getPersistentCurvedRecommendation();
     await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'dismissed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'dismissed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     expect(mockTrvFindOrCreate).toHaveBeenCalledTimes(2);
-    expect(mockTrvFindOrCreate.mock.calls[0][0].where.validation).toBe('confirmed');
-    expect(mockTrvFindOrCreate.mock.calls[1][0].where.validation).toBe('dismissed');
+    expect(mockTrvFindOrCreate.mock.calls[0][0].defaults.validation).toBe('confirmed');
+    expect(mockTrvFindOrCreate.mock.calls[1][0].defaults.validation).toBe('dismissed');
+    expect(mockTrvFindOrCreate.mock.calls[0][0].where.action_id).not.toBe(mockTrvFindOrCreate.mock.calls[1][0].where.action_id);
     expectNoTeacherRecommendationValidationWrites();
+  });
+});
+
+// ─── Alternating-state acceptance test (repair spec §12) — real chain ──────
+describe('8b. Confirm -> Dismiss -> Confirm -> Dismiss (real Feature 7/8 chain)', () => {
+  it('creates 4 distinct history rows, in order, never colliding an old row', async () => {
+    const rec = await getPersistentCurvedRecommendation();
+    const sequence = ['confirmed', 'dismissed', 'confirmed', 'dismissed'];
+    for (const validation of sequence) {
+      await validateWorksheetRecommendation({
+        studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
+        validation, recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
+      });
+    }
+    expect(mockTrvFindOrCreate).toHaveBeenCalledTimes(4);
+    const calls = mockTrvFindOrCreate.mock.calls;
+    expect(calls.map((c) => c[0].defaults.validation)).toEqual(sequence);
+    // Every where-clause (action_id) is distinct — this is precisely what
+    // the old semantic key could not guarantee for calls 1 and 3 (both
+    // 'confirmed' against the identical recommendation_fingerprint).
+    const whereClauses = calls.map((c) => c[0].where.action_id);
+    expect(new Set(whereClauses).size).toBe(4);
   });
 });
 
@@ -313,7 +351,7 @@ describe('13. recommendation_changed blocks a stale validation', () => {
 
     const result = await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: original.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: original.recommendationFingerprint, actionId: nextActionId(),
     });
     expect(result.status).toBe('recommendation_changed');
     expect(result.currentRecommendationFingerprint).toMatch(SHA256_HEX);
@@ -334,7 +372,7 @@ describe('14. recommendation_not_found', () => {
     mockLaFindAll.mockResolvedValue(persistentStreamRows({ letters: ['c', 'o'] }));
     const result = await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'complex',
-      validation: 'confirmed', recommendationFingerprint: 'a'.repeat(64),
+      validation: 'confirmed', recommendationFingerprint: 'a'.repeat(64), actionId: nextActionId(),
     });
     expect(result.status).toBe('recommendation_not_found');
     expect(mockTrvFindOrCreate).not.toHaveBeenCalled();
@@ -348,7 +386,7 @@ describe('15. read failure', () => {
     mockLaFindAll.mockRejectedValue(new Error('boom'));
     const result = await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: 'a'.repeat(64),
+      validation: 'confirmed', recommendationFingerprint: 'a'.repeat(64), actionId: nextActionId(),
     });
     expect(result.status).toBe('read_failed');
     expect(mockTrvFindOrCreate).not.toHaveBeenCalled();
@@ -361,7 +399,7 @@ describe('16. write failure', () => {
     mockTrvFindOrCreate.mockRejectedValueOnce(new Error('DB down'));
     const result = await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     expect(result.status).toBe('write_failed');
   });
@@ -374,7 +412,7 @@ describe('17. teacherId comes from trusted input only', () => {
     const rec = await getPersistentCurvedRecommendation();
     await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: 777, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     const [{ defaults }] = mockTrvFindOrCreate.mock.calls[0];
     expect(defaults.teacher_id).toBe(777);
@@ -472,7 +510,7 @@ describe('31. recommendation snapshot exact', () => {
     const rec = await getPersistentCurvedRecommendation();
     await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     const [{ defaults }] = mockTrvFindOrCreate.mock.calls[0];
     expect(defaults.recommendation_type).toBe('motor_family_practice');
@@ -486,7 +524,7 @@ describe('32. provenance versions exact', () => {
     const rec = await getPersistentCurvedRecommendation();
     await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     const [{ defaults }] = mockTrvFindOrCreate.mock.calls[0];
     expect(defaults.persistent_policy_version).toBe(PERSISTENT_DIFFICULTY_POLICY_VERSION);
@@ -501,14 +539,14 @@ describe('33. note normalization', () => {
     const rec = await getPersistentCurvedRecommendation();
     await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', teacherNote: '   ', recommendationFingerprint: rec.recommendationFingerprint,
+      validation: 'confirmed', teacherNote: '   ', recommendationFingerprint: rec.recommendationFingerprint, actionId: nextActionId(),
     });
     expect(mockTrvFindOrCreate.mock.calls[0][0].defaults.teacher_note).toBeNull();
 
     const rec2 = await getPersistentCurvedRecommendation({ offsetMs: 60 * DAY_MS });
     await validateWorksheetRecommendation({
       studentId: STUDENT_ID, teacherId: TEACHER_ID, caseType: 'lowercase', family: 'curved',
-      validation: 'confirmed', teacherNote: '  Tired today  ', recommendationFingerprint: rec2.recommendationFingerprint,
+      validation: 'confirmed', teacherNote: '  Tired today  ', recommendationFingerprint: rec2.recommendationFingerprint, actionId: nextActionId(),
     });
     expect(mockTrvFindOrCreate.mock.calls[1][0].defaults.teacher_note).toBe('Tired today');
   });

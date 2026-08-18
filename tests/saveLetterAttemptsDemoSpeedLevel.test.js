@@ -129,7 +129,10 @@ function bulkCreateRows() {
 
 describe('Item 15 — valid demo_speed_level values persist exactly as sent, per attempt', () => {
   it('matches the HIGH->slow, MEDIUM->null, LOW->null shape from spec §37', async () => {
-    await recordLetterCompletion(makeReq(), makeRes());
+    // Coverage-fix audit: attempt_scores overridden to match makeReq's
+    // default 3-entry attempts array — see saveLetterAttemptsSupportLevel
+    // .test.js's identical note for why.
+    await recordLetterCompletion(makeReq({ attempt_scores: [90, 90, 90] }), makeRes());
     const rows = bulkCreateRows();
     expect(rows.map(r => r.demo_speed_level)).toEqual(['slow', null, null]);
     expect(mockLoggerWarn).not.toHaveBeenCalled();
@@ -258,6 +261,10 @@ describe('demo_speed_level is per-attempt, never copied across a session\'s rows
 describe('Backward compatibility — old client payload without demo_speed_level at all', () => {
   it('letter completion still succeeds; every row persists demo_speed_level = null', async () => {
     const req = makeReq({
+      // Coverage-fix audit: attempt_scores overridden to match this
+      // override's 3-entry attempts array — see saveLetterAttemptsSupportLevel
+      // .test.js's identical note for why.
+      attempt_scores: [90, 90, 90],
       attempts: [
         { attempt_number: 1, support_level: 'high', features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },
         { attempt_number: 2, support_level: 'medium', features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },

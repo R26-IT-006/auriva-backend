@@ -297,3 +297,29 @@ addition, not made in this step, and not made in Step 2.
 This design should be revisited once Step 3 begins (migration + model +
 services) — at that point the table in §4, the index in §11, and the
 length bound deferred in §7 all need a final, implemented decision.
+
+## 21. Addendum — §11 idempotency key repaired (pre-deployment)
+
+**§11's candidate index above was implemented as designed in Step 3, then
+found defective by a later final integration audit, and repaired before
+this table was ever deployed.** The semantic tuple `(student_id,
+teacher_id, case_type, family, validation, recommendation_fingerprint)`
+correctly prevented a literal double-POST of the same action, exactly as
+§11 intended — but a UNIQUE constraint has no concept of *recency*, so it
+also silently blocked the legitimate case §11 explicitly says should be
+allowed ("a teacher later appending a *different* `validation` value...
+are two valid, distinct history events"): a **third** action returning to
+an *already-used* value (Confirm→Dismiss→Confirm) collided against the
+FIRST historical row instead of appending a new one, so the newest
+judgement was never recorded as newest.
+
+The fix: an explicit, client-generated `action_id` (UUID), one per submit
+action (one button press), is now the table's sole idempotency key —
+see `migrations/20260814000001-create-teacher-recommendation-validations.js`'s
+own "Feature 9 repair" comment and
+`src/services/teacherRecommendationValidationService.js`'s module header
+for the full writeup. §12's latest-state semantics (resolve by
+`recommendation_fingerprint` + `created_at DESC, id DESC`) and §13's
+stream-level history are both unaffected — they already correctly used
+`created_at` ordering, which now works correctly because every genuine
+action reliably gets its own row.

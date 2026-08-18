@@ -23,6 +23,7 @@ const ApiError = require('../src/utils/ApiError');
 const { postWorksheetRecommendationValidation } = require('../src/controllers/handwritingController');
 
 const FP = 'a'.repeat(64);
+const ACTION_ID = '11111111-1111-4111-8111-111111111111';
 
 function makeReq({ studentId = '13', userId = 14, body = {} } = {}) {
   return {
@@ -30,7 +31,7 @@ function makeReq({ studentId = '13', userId = 14, body = {} } = {}) {
     user: { id: userId },
     body: {
       caseType: 'lowercase', family: 'curved', validation: 'confirmed',
-      recommendationFingerprint: FP,
+      recommendationFingerprint: FP, actionId: ACTION_ID,
       ...body,
     },
   };
@@ -244,7 +245,7 @@ describe('19. no write attempt if ownership fails', () => {
 });
 
 describe('20. client title/focusLetters (if present on the body) are ignored', () => {
-  it('only the 5 expected body fields are ever forwarded to the service', async () => {
+  it('only the 6 expected body fields are ever forwarded to the service', async () => {
     mockValidateWorksheetRecommendation.mockResolvedValueOnce({ status: 'validated', duplicate: false, id: 1, validatedAt: '2026-08-14T00:00:00.000Z' });
     const res = makeRes();
     await postWorksheetRecommendationValidation(
@@ -253,7 +254,17 @@ describe('20. client title/focusLetters (if present on the body) are ignored', (
     );
     const [callArgs] = mockValidateWorksheetRecommendation.mock.calls[0];
     expect(Object.keys(callArgs).sort()).toEqual(
-      ['studentId', 'teacherId', 'caseType', 'family', 'validation', 'teacherNote', 'recommendationFingerprint'].sort()
+      ['studentId', 'teacherId', 'caseType', 'family', 'validation', 'teacherNote', 'recommendationFingerprint', 'actionId'].sort()
     );
+  });
+});
+
+describe('21. actionId is forwarded to the service unchanged (Feature 9 repair)', () => {
+  it('passes the body actionId through verbatim', async () => {
+    mockValidateWorksheetRecommendation.mockResolvedValueOnce({ status: 'validated', duplicate: false, id: 1, validatedAt: '2026-08-14T00:00:00.000Z' });
+    const res = makeRes();
+    await postWorksheetRecommendationValidation(makeReq({ body: { actionId: ACTION_ID } }), res);
+    const [callArgs] = mockValidateWorksheetRecommendation.mock.calls[0];
+    expect(callArgs.actionId).toBe(ACTION_ID);
   });
 });

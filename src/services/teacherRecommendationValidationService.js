@@ -47,6 +47,23 @@
  *     generation, and never writes back into Feature 1-7's own state
  *     (Step 3 spec §60/§61).
  *
+ * ── Feature 9 repair: action_id idempotency (final integration audit) ──────
+ * `findOrCreate()`'s `where` clause keys on `action_id` ALONE — a
+ * client-generated UUID scoped to exactly one submit action (one
+ * Confirm/Not-suitable button press), NOT on the semantic tuple
+ * (student_id, teacher_id, case_type, family, validation,
+ * recommendation_fingerprint) this file used before. The old semantic key
+ * could not distinguish "a transport retry of the same action" from "a
+ * teacher legitimately choosing an earlier value again later" — both
+ * looked identical to a UNIQUE constraint with no concept of recency — so
+ * a Confirm→Dismiss→Confirm sequence silently collided the third action
+ * against the FIRST row and never appended a new "current" event. See
+ * migrations/20260814000001-create-teacher-recommendation-validations.js's
+ * own "Feature 9 repair" comment for the full writeup. `actionId` is still
+ * validated as untrusted input (must be a well-formed UUID) but is
+ * otherwise passed through verbatim — it carries no semantic meaning of
+ * its own, only action identity.
+ *
  * ── Research framing ────────────────────────────────────────────────────────
  * This module stores teacher judgement about educational handwriting
  * practice recommendations — never clinical validation, diagnosis
@@ -71,6 +88,12 @@ const CASE_TYPES = ['lowercase', 'uppercase'];
 const FAMILIES = ['straight', 'curved', 'complex'];
 const VALIDATION_VALUES = ['confirmed', 'dismissed'];
 const SHA256_HEX = /^[a-f0-9]{64}$/;
+// General RFC4122 UUID shape (8-4-4-4-12 hex groups), case-insensitive —
+// matches both the frontend's generateUuidV4() output and Postgres's own
+// UUID column acceptance. Not narrowed to version 4 specifically: this
+// column identifies a submit action, not a security-sensitive token, and a
+// future non-v4 generator should not require a service-layer change here.
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isPositiveInteger(value) {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
@@ -118,6 +141,10 @@ function invalidInput(extra = {}) {
  * @param {string} params.recommendationFingerprint - the fingerprint the
  *   client last fetched for the recommendation it is validating (race
  *   protection — Step 3 spec §45).
+ * @param {string} params.actionId - client-generated UUID identifying this
+ *   ONE submit action (Feature 9 repair — see module header). The sole
+ *   idempotency key: a transport retry of the same action reuses this same
+ *   value, a new button press always generates a new one.
  * @returns {Promise<Object>} one of:
  *   { status: 'invalid_input', reason }
  *   { status: 'read_failed' }
@@ -127,7 +154,7 @@ function invalidInput(extra = {}) {
  *   { status: 'validated', id, duplicate, validatedAt }
  */
 async function validateWorksheetRecommendation({
-  studentId, teacherId, caseType, family, validation, teacherNote, recommendationFingerprint,
+  studentId, teacherId, caseType, family, validation, teacherNote, recommendationFingerprint, actionId,
 } = {}) {
   // ── Input validation before any Feature 7/8 call (Step 3 spec §37) ────────
   if (!isPositiveInteger(studentId)) return invalidInput({ reason: 'invalid_student_id' });
@@ -137,6 +164,9 @@ async function validateWorksheetRecommendation({
   if (!VALIDATION_VALUES.includes(validation)) return invalidInput({ reason: 'invalid_validation' });
   if (typeof recommendationFingerprint !== 'string' || !SHA256_HEX.test(recommendationFingerprint)) {
     return invalidInput({ reason: 'malformed_recommendation_fingerprint' });
+  }
+  if (typeof actionId !== 'string' || !UUID_REGEX.test(actionId)) {
+    return invalidInput({ reason: 'invalid_action_id' });
   }
 
   const normalizedNote = normalizeTeacherNote(teacherNote);
@@ -222,15 +252,16 @@ async function validateWorksheetRecommendation({
   }
 
   // ── Server-trusted snapshot + idempotent append-only write (Step 3 spec §46-§49) ──
+  // Feature 9 repair: `where` keys on `action_id` ALONE (see module
+  // header) — never the old semantic tuple. This is what allows a genuine
+  // later action to append a new row even when it repeats an earlier
+  // student/teacher/case/family/validation/fingerprint combination, while
+  // still deduplicating a transport-level retry of THIS SAME action (same
+  // actionId).
   try {
     const [row, created] = await TeacherRecommendationValidation.findOrCreate({
       where: {
-        student_id: studentId,
-        teacher_id: teacherId,
-        case_type: caseType,
-        family,
-        validation,
-        recommendation_fingerprint: serverRecommendationFingerprint,
+        action_id: actionId,
       },
       defaults: {
         student_id: studentId,
@@ -243,6 +274,7 @@ async function validateWorksheetRecommendation({
         suggested_activities: recommendation.suggestedActivities,
         rationale: recommendation.rationale,
         validation,
+        action_id: actionId,
         teacher_note: normalizedNote.value,
         evidence_fingerprint: evidenceFingerprint,
         recommendation_fingerprint: serverRecommendationFingerprint,

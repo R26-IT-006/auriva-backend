@@ -287,6 +287,12 @@ describe('Save Test 10 — existing capture metadata unchanged', () => {
 describe('Backward compatibility — old client payload without support_level', () => {
   it('letter completion still succeeds; every row persists support_level = null', async () => {
     const req = makeReq({
+      // Coverage-fix audit: attempt_scores overridden to match this
+      // override's 3-entry attempts array — makeReq's default
+      // attempt_scores ([90], a single-element simplified default) would
+      // otherwise mismatch this test's 3-entry attempts and trip the new
+      // index-alignment fail-open warning, which this test isn't about.
+      attempt_scores: [90, 90, 90],
       attempts: [
         { attempt_number: 1, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },
         { attempt_number: 2, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },

@@ -778,6 +778,72 @@ async function getCurrentFamilyThreshold({ studentId, family } = {}) {
 }
 
 /**
+ * Teacher Dashboard integration fix — the smallest read-only aggregation
+ * needed to display a student's CURRENT Feature 2 targets for all three
+ * families together (no existing teacher-facing endpoint returned this
+ * before). Never duplicates the initial-threshold formula or the
+ * dynamic-update rule: reuses getCurrentFamilyThreshold() (read) and
+ * createInitialFamilyThresholds() (the same already-approved, idempotent
+ * write used by finalizeAssessment and progressionThresholdResolver's own
+ * lazy repair) exactly as-is.
+ *
+ * For any family still `no_target` after the first read, this attempts
+ * the SAME one-time lazy repair progressionThresholdResolver.js already
+ * performs on the real child-facing gating path — so opening the Teacher
+ * Dashboard for an old/historical student (baseline exists, Feature 2
+ * never initialized) safely brings their targets into existence exactly
+ * once, idempotently, using their real baseline. If no baseline exists
+ * yet, the repair harmlessly no-ops and the family is reported
+ * unavailable — never a fabricated/legacy value.
+ *
+ * @param {Object} params
+ * @param {number} params.studentId
+ * @returns {Promise<{
+ *   status: 'resolved'|'invalid_input',
+ *   families: {straight: FamilyThresholdEntry, curved: FamilyThresholdEntry, complex: FamilyThresholdEntry}|null,
+ * }>}
+ *   where FamilyThresholdEntry is
+ *   {status: 'available'|'unavailable', threshold: number|null, source: string|null}
+ */
+async function getCurrentFamilyThresholdsForStudent({ studentId } = {}) {
+  if (!isPositiveInteger(studentId)) {
+    return { status: 'invalid_input', families: null };
+  }
+
+  const families = {};
+  const pendingRepair = [];
+
+  for (const family of FAMILIES) {
+    const result = await getCurrentFamilyThreshold({ studentId, family });
+    if (result.status === 'found') {
+      families[family] = { status: 'available', threshold: result.currentThreshold, source: result.sourceEvent.source };
+    } else {
+      families[family] = { status: 'unavailable', threshold: null, source: null };
+      if (result.status === 'no_target') pendingRepair.push(family);
+    }
+  }
+
+  if (pendingRepair.length > 0) {
+    let repairResult = null;
+    try {
+      repairResult = await createInitialFamilyThresholds({ studentId });
+    } catch (err) {
+      logger.error('Family-threshold display: lazy repair threw unexpectedly', { studentId, errorMessage: err.message });
+    }
+    for (const family of pendingRepair) {
+      const familyResult = repairResult?.created?.[family];
+      if (familyResult && (familyResult.status === 'created' || familyResult.status === 'already_initialized')) {
+        families[family] = { status: 'available', threshold: familyResult.newThreshold, source: SOURCE_INITIAL };
+      }
+      // else: stays 'unavailable' — no baseline yet, requires_review score,
+      // or the repair itself failed. Never a fabricated value.
+    }
+  }
+
+  return { status: 'resolved', families };
+}
+
+/**
  * Builds one family's decision-simulation result from its current target
  * (already resolved) and its recent-performance window (already resolved by
  * getRecentFamilyPerformance() — see Step 4, never re-queried here).
@@ -1636,6 +1702,7 @@ module.exports = {
   getRecentFamilyPerformance,
   THRESHOLD_INCREASE_STEP,
   getCurrentFamilyThreshold,
+  getCurrentFamilyThresholdsForStudent,
   evaluateDynamicThresholds,
   setTeacherFamilyThreshold,
   getFamilyThresholdProtection,
