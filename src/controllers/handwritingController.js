@@ -24,6 +24,7 @@ const {
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../services/motorBaselineService');
 const teacherService = require('../services/teacherService');
+const wordWritingService = require('../services/wordWritingService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
 const { computeMotorScore } = require('../utils/motorScore');
 const { deriveMotorScoreFromStoredShape } = require('../utils/unifiedShapeScore');
@@ -1959,6 +1960,19 @@ async function postWorksheetRecommendationValidation(req, res) {
   }
 }
 
+async function postWordAttempt(req,res){const studentId=Number(req.body?.student_id);if(!Number.isInteger(studentId)||studentId<=0)throw new ApiError(422,'Invalid student ID');await teacherService.getOwnStudentById(req.user.id,studentId);const result=await wordWritingService.saveAttempt({studentId,actionId:req.body.action_id,word:req.body.word,stage:req.body.stage,attemptNumber:req.body.attempt_number,strokes:req.body.strokes,canvasWidth:req.body.canvas_width,canvasHeight:req.body.canvas_height});if(['invalid_input','unsupported_word','invalid_strokes'].includes(result.status))throw new ApiError(422,'Invalid word attempt',{reason:result.status});const a=result.attempt.get?result.attempt.get({plain:true}):result.attempt;
+  // Word-layout-metrics task: childFeedback ('size'|'spacing'|'both'|null)
+  // is the ONLY layout-derived field added to this response — a simple
+  // advisory for optional child-facing copy, never a number, never present
+  // for a duplicate/replayed request (result.childFeedback is undefined on
+  // that branch, and `?? null` keeps the response shape stable either way).
+  res.status(result.duplicate?200:201).json({duplicate:result.duplicate,attempt:{id:a.id,score:a.score,threshold:a.threshold_used,passed:a.passed,completion_passed:a.completion_passed,expected_letter_count:a.expected_letter_count,covered_letter_count:a.covered_letter_count,score_version:a.word_score_version},child_feedback:result.childFeedback??null});}
+async function postWordActivity(req,res){const studentId=Number(req.body?.student_id);if(!Number.isInteger(studentId)||studentId<=0)throw new ApiError(422,'Invalid student ID');await teacherService.getOwnStudentById(req.user.id,studentId);const result=await wordWritingService.upsertActivity({studentId,word:req.body.word,activity:req.body.activity,status:req.body.status});if(result.status!=='saved')throw new ApiError(422,'Invalid word activity');res.status(200).json({saved:true});}
+async function wordRead(req,res,reader){const studentId=Number(req.params.studentId);if(!Number.isInteger(studentId)||studentId<=0)throw new ApiError(422,'Invalid student ID');await teacherService.getOwnStudentById(req.user.id,studentId);res.json(await reader(studentId));}
+const getWordProgress=(req,res)=>wordRead(req,res,wordWritingService.getProgress);
+const getWordAttempts=(req,res)=>wordRead(req,res,wordWritingService.getAttempts);
+const getWordReport=(req,res)=>wordRead(req,res,wordWritingService.getReport);
+
 module.exports = {
   submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion,
   explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport,
@@ -1967,4 +1981,5 @@ module.exports = {
   getPersistentDifficulty, getWorksheetRecommendations,
   getWorksheetRecommendationValidations, getWorksheetRecommendationValidationState,
   postWorksheetRecommendationValidation,
+  postWordAttempt, postWordActivity, getWordProgress, getWordAttempts, getWordReport,
 };

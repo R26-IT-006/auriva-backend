@@ -23,6 +23,8 @@ const TeacherRecommendationValidation = require('./TeacherRecommendationValidati
 const StudentConceptProgress          = require('./StudentConceptProgress');
 const ConceptInteractionLog           = require('./ConceptInteractionLog');
 const StudentActivity                 = require('./StudentActivity');
+const WordWritingAttempt              = require('./WordWritingAttempt');
+const WordActivityProgress            = require('./WordActivityProgress');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -138,6 +140,10 @@ ConceptInteractionLog.belongsTo(Student, { foreignKey: 'student_id', as: 'studen
 // Student → cross-concept activities
 Student.hasMany(StudentActivity, { foreignKey: 'student_id', as: 'activities' });
 StudentActivity.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Student.hasMany(WordWritingAttempt, { foreignKey: 'student_id', as: 'wordWritingAttempts' });
+WordWritingAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Student.hasMany(WordActivityProgress, { foreignKey: 'student_id', as: 'wordActivityProgress' });
+WordActivityProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
@@ -146,4 +152,5 @@ module.exports = {
   CollectionSession, TeacherValidation, StudentMotorBaseline, ThresholdHistory,
   TeacherRecommendationValidation,
   StudentConceptProgress, ConceptInteractionLog, StudentActivity,
+  WordWritingAttempt, WordActivityProgress,
 };

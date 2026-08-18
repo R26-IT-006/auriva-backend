@@ -12,6 +12,11 @@ router.post('/assessment',                  ctrl.submitAssessment);
 router.post('/pre-writing-activity',        ctrl.submitPreWritingActivity);
 router.post('/letter-complete',             ctrl.recordLetterCompletion);
 router.get('/progress/:studentId',          ctrl.getProgress);
+router.post('/word-attempt',                ctrl.postWordAttempt);
+router.post('/word-activity',               ctrl.postWordActivity);
+router.get('/word-progress/:studentId',     ctrl.getWordProgress);
+router.get('/word-attempts/:studentId',     ctrl.getWordAttempts);
+router.get('/word-report/:studentId',       ctrl.getWordReport);
 
 // ── Explainability endpoints ──────────────────────────────────────────────────
 router.post('/explain',                     ctrl.explainAssessment);
