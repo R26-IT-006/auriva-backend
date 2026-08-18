@@ -27,7 +27,11 @@ function todayString() {
 const STANDALONE_ASSET_KEYS = ['cat3_yes', 'cat3_no'];
 
 // Cat3 teaching order is independent of dialogue_words teaching_order.
-const CAT3_ASSET_ORDER = ['cat3_yes', 'cat3_no', 'clap', 'run', 'walk', 'jump', 'talk', 'dance', 'sing'];
+const CAT3_ASSET_ORDER = [
+  'cat3_yes', 'cat3_no',
+  'clap', 'run', 'walk', 'jump', 'talk', 'dance', 'sing',
+  'brush', 'wash', 'eat', 'drink', 'write', 'play', 'sleep', 'watch',
+];
 
 // Avatar animation asset is derived from the word's asset_key.
 const ANIMATION_MAP = {
@@ -86,16 +90,16 @@ async function getOrCreateProgress(studentId, wordId) {
   return progress;
 }
 
-// Fetches all Cat3 abilities words (Yes, No + Clap–Sing) with this student's progress.
-// `difficulty: 1` is hardcoded — this is the only word source for every Cat3
-// screen (see Level1OverviewScreen.js routing 'abilities' through cat3Api,
-// not the generic dialogueApi). The 8 difficulty-2 action verbs seeded
-// 2026-08-15 (dialogueSeed.js) are NOT served by this query and are
-// currently unreachable through the live app by design — see
-// tasks/TASK-42-wire-abilities-difficulty2.md for what changing that requires.
+// Fetches all Cat3 abilities words (Yes, No + Clap–Sing + the 8 difficulty-2
+// action verbs, TASK-42) with this student's progress. This is the only word
+// source for every Cat3 screen (see Level1OverviewScreen.js routing
+// 'abilities' through cat3Api, not the generic dialogueApi). No difficulty
+// filter — cat3SortIndex() handles ordering, and the trajectory-conditioned
+// gate in getNextWord() controls when higher-difficulty words actually
+// become reachable candidates.
 async function fetchCat3WordsWithProgress(studentId) {
   const words = await DialogueWord.findAll({
-    where: { category: 'abilities', difficulty: 1 },
+    where: { category: 'abilities' },
     include: [{
       model: DialogueWordProgress,
       as: 'cat3Progress',
@@ -137,6 +141,34 @@ async function getCat3Overview(teacherId, studentId) {
 }
 
 /**
+ * Gate helpers for the multi-tier difficulty ladder (TASK-42).
+ * Mirror allLowerDifficultyMastered / isSessionUnlocked /
+ * anyLowerDifficultyMastered from dialogueService.js, applied to the
+ * entries array from fetchCat3WordsWithProgress.
+ */
+
+/** All words at difficulty < targetDifficulty are mastered — strict gate. */
+function allLowerDifficultyMastered(entries, targetDifficulty) {
+  return entries
+    .filter(({ word }) => word.difficulty < targetDifficulty)
+    .every(({ progress }) => progress?.status === 'mastered');
+}
+
+/** At least one word at difficulty < targetDifficulty has ≥1 session pass — relaxed gate. */
+function isSessionUnlocked(entries, targetDifficulty) {
+  return entries
+    .filter(({ word }) => word.difficulty < targetDifficulty)
+    .some(({ progress }) => (progress?.session_pass_count ?? 0) >= 1);
+}
+
+/** Any word at difficulty < targetDifficulty is mastered — fast-trajectory gate. */
+function anyLowerDifficultyMastered(entries, targetDifficulty) {
+  return entries
+    .filter(({ word }) => word.difficulty < targetDifficulty)
+    .some(({ progress }) => progress?.status === 'mastered');
+}
+
+/**
  * Returns the next word to teach in Cat3 order.
  * Yes and No (standalone) must both be mastered before any action_verb is returned.
  */
@@ -169,19 +201,37 @@ async function getNextWord(teacherId, studentId) {
     return true;
   });
 
-  // Trajectory-conditioned gate, evaluated per action-verb candidate (Scope
-  // Amendment A1: getNextWord() has no single "just passed" word to key a
-  // one-shot trajectory call off of). Standalone candidates are never
-  // subject to this gate.
+  // Trajectory-conditioned gate.
+  // Difficulty 1: binary standalone/action-verb gate unchanged from TASK-38.
+  // Difficulty 2+: three-gate ladder mirrors dialogueService.js pattern.
+  // 'typical' always resolves to today's pre-existing gate — fallback path
+  // until TRAJECTORY_ML_ENABLED=true and a trained model is loaded.
   const candidates = [];
   for (const e of basePool) {
-    if (isStandalone(e.word)) {
-      candidates.push(e);
+    const { word } = e;
+
+    if (word.difficulty === 1) {
+      // Existing standalone gate: standalones are always candidates; action
+      // verbs require all standalones mastered (typical/struggling) or at
+      // least one standalone session-passed (fast).
+      if (isStandalone(word)) {
+        candidates.push(e);
+        continue;
+      }
+      const trajectory = await getTrajectoryPrediction(studentId, word.id);
+      const gateOpen =
+        trajectory === 'fast' ? standaloneSessionUnlocked : allStandaloneMastered;
+      if (gateOpen) candidates.push(e);
       continue;
     }
-    const trajectory = await getTrajectoryPrediction(studentId, e.word.id);
-    const gateOpen = trajectory === 'fast' ? standaloneSessionUnlocked : allStandaloneMastered;
-    if (gateOpen) candidates.push(e);
+
+    // Difficulty 2+: trajectory-conditioned multi-tier gate.
+    const trajectory = await getTrajectoryPrediction(studentId, word.id);
+    const nextDiffGate =
+      trajectory === 'struggling' ? allLowerDifficultyMastered :
+      trajectory === 'fast'       ? anyLowerDifficultyMastered :
+      /* 'typical' — unchanged */   isSessionUnlocked;
+    if (nextDiffGate(entries, word.difficulty)) candidates.push(e);
   }
 
   const pick =
