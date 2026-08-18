@@ -232,3 +232,9 @@
       WHERE table_name='students' AND column_name='personal_thresholds'
 2026-08-18 23:52:06 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
       WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 23:53:06 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 23:54:06 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 23:55:06 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
