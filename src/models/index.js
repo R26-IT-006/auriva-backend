@@ -22,12 +22,15 @@ const Level2ProductionAttempt    = require('./Level2ProductionAttempt');
 const Level2NonVerbalAttempt     = require('./Level2NonVerbalAttempt');
 const ActionWordAttempt          = require('./ActionWordAttempt');
 const DialogueEvaluationAttempt  = require('./DialogueEvaluationAttempt');
+const StudentConceptProgress     = require('./StudentConceptProgress');
+const ConceptInteractionLog      = require('./ConceptInteractionLog');
+const StudentActivity            = require('./StudentActivity');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
 Teacher.belongsTo(Principal, { foreignKey: 'created_by', as: 'creator' });
 
-// Teacher → Student (max 3 enforced at service layer)
+// Teacher → Student (max 5 enforced at service layer)
 Teacher.hasMany(Student, { foreignKey: 'teacher_id', as: 'students' });
 Student.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
 
@@ -150,6 +153,17 @@ ActionWordAttempt.belongsTo(Session, { foreignKey: 'session_id', as: 'session' }
 Student.hasMany(DialogueEvaluationAttempt, { foreignKey: 'student_id', as: 'evaluationAttempts' });
 DialogueEvaluationAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → concept learning
+Student.hasMany(StudentConceptProgress, { foreignKey: 'student_id', as: 'conceptProgress' });
+StudentConceptProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+Student.hasMany(ConceptInteractionLog, { foreignKey: 'student_id', as: 'conceptLogs' });
+ConceptInteractionLog.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Student → cross-concept activities
+Student.hasMany(StudentActivity, { foreignKey: 'student_id', as: 'activities' });
+StudentActivity.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize,
   Principal,
@@ -173,4 +187,7 @@ module.exports = {
   Level2NonVerbalAttempt,
   ActionWordAttempt,
   DialogueEvaluationAttempt,
+  StudentConceptProgress,
+  ConceptInteractionLog,
+  StudentActivity,
 };
