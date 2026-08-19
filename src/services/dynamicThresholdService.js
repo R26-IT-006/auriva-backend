@@ -513,6 +513,12 @@ async function fetchFamilyWindow(studentId, family, windowSize) {
       attempt_number: CANDIDATE_ATTEMPT_NUMBER,
       collection_mode: false,
       capture_status: CANDIDATE_CAPTURE_STATUS,
+      // Feature 11B Phase 4 — belt-and-braces: reassessment rows always use
+      // attempt_number 1 (never 3), so CANDIDATE_ATTEMPT_NUMBER already
+      // excludes them naturally, but source_type: null is added everywhere
+      // per the Phase 4 query-exclusion audit rather than relying on that
+      // as the only guard.
+      source_type: null,
       ...letterClause,
     },
     order: [['created_at', 'DESC'], ['id', 'DESC']],
@@ -579,6 +585,8 @@ async function countUnmappedLetterAttempts(studentId) {
     attempt_number: CANDIDATE_ATTEMPT_NUMBER,
     collection_mode: false,
     capture_status: CANDIDATE_CAPTURE_STATUS,
+    // Feature 11B Phase 4 — same belt-and-braces exclusion as fetchFamilyWindow above.
+    source_type: null,
   };
 
   const totalCandidates = await LetterAttempt.count({ where: baseWhere });

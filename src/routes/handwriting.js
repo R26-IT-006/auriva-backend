@@ -33,6 +33,13 @@ router.get('/letter-progress-report/:studentId', ctrl.getLetterProgressReport);
 // nested /students/:studentId/... style — no PATCH/PUT/DELETE for this resource.
 router.get('/motor-baseline/:studentId',    ctrl.getMotorBaseline);
 
+// ── Feature 11 pilot model (motor_cluster_v1, read-only) ──────────────────────
+// Same path convention as motor-baseline above. Node computes this from the
+// SAME baseline motor-baseline exposes and calls auriva-ml-service — see
+// motorClusterService.js/mlServiceClient.js. Nothing persisted; no
+// PATCH/PUT/DELETE for this resource.
+router.get('/motor-cluster/:studentId',     ctrl.getMotorCluster);
+
 // ── Feature 2 current family thresholds (Teacher Dashboard integration fix,
 // read-only) ────────────────────────────────────────────────────────────────
 // Student-wide (all three families at once), matching motor-baseline's own
@@ -93,6 +100,16 @@ router.post('/worksheet-recommendation-validations/:studentId',      ctrl.postWo
 // avoid any Express route-precedence ambiguity against the plain
 // /:studentId route directly above.
 router.get('/worksheet-recommendation-validation-state/:studentId',  ctrl.getWorksheetRecommendationValidationState);
+
+// ── Standardized Letter Motor Reassessment (Feature 11B Phase 4) ──────────────
+// Narrow, non-side-effecting save path (POST attempt) + idempotent finalize
+// + two read-only endpoints. Deliberately separate from /letter-complete and
+// from collection-session/* below — see letterMotorReassessmentService.js's
+// header comment for why. No PUT/DELETE for this resource.
+router.post('/letter-motor-reassessment/attempt',        ctrl.saveLetterMotorReassessmentAttempt);
+router.post('/letter-motor-reassessment/finalize',        ctrl.finalizeLetterMotorReassessment);
+router.get('/letter-motor-reassessment/latest/:studentId', ctrl.getLatestLetterMotorReassessment);
+router.get('/letter-motor-reassessment/history/:studentId', ctrl.getLetterMotorReassessmentHistory);
 
 // ── Data Collection Mode: session tracking, teacher validation, ML export ─────
 router.post('/collection-session/start',           collectionCtrl.startCollectionSession);

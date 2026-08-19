@@ -228,7 +228,12 @@ async function evaluateRepetitionRecommendation({
       evaluateDynamicThresholds({ studentId }),
       evaluateSupportRecommendations({ studentId }),
       LetterAttempt.findAll({
-        where: { student_id: studentId, letter, case_type: caseType, collection_mode: false },
+        // Feature 11B Phase 4 — source_type: null excludes reassessment
+        // rows, which otherwise share this exact (student, letter,
+        // case_type, collection_mode:false) shape and would inflate the
+        // session/attempt history used for repetition recommendations
+        // (see the Phase 4 query-exclusion audit).
+        where: { student_id: studentId, letter, case_type: caseType, collection_mode: false, source_type: null },
         attributes: ['session_key', 'attempt_number'],
       }),
     ]);

@@ -182,6 +182,24 @@ const LetterAttempt = sequelize.define('LetterAttempt', {
   // stroke-order comparison was possible (single-stroke letter/template).
   stroke_order_matches_template: { type: DataTypes.BOOLEAN, allowNull: true },
 
+  // Feature 11B Phase 4 — see
+  // migrations/20260820000001-add-source-type-to-letter-attempts.js for the
+  // full rationale. NULL for every normal-practice row (existing rows are
+  // never backfilled; new normal rows stay NULL too — nothing about
+  // saveLetterAttempts()/recordLetterCompletion() sets this field).
+  // 'letter_motor_reassessment' for rows saved by
+  // letterMotorReassessmentService.js's saveReassessmentAttempt(). A SEPARATE
+  // concept from collection_mode — collection_mode is temporary
+  // pre-deployment research capture, unrelated to and untouched by this
+  // column. Every normal-learning query that reads letter_attempts MUST
+  // filter `source_type: null` so reassessment rows never leak into
+  // Features 1–10 (see the query-exclusion audit referenced in this
+  // feature's final report).
+  source_type: {
+    type:      DataTypes.STRING(40),
+    allowNull: true,
+  },
+
   created_at: {
     type:         DataTypes.DATE,
     defaultValue: DataTypes.NOW,

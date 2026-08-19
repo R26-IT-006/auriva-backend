@@ -23,6 +23,12 @@ const {
 } = require('../services/dynamicThresholdService');
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../services/motorBaselineService');
+const { predictInitialMotorCluster } = require('../services/motorClusterService');
+// Feature 11B Phase 4 — standardized Letter Motor Reassessment. Deliberately
+// imported as a namespace (not destructured) so the four new controller
+// functions below read as calls into a clearly separate module, matching
+// how teacherRecommendationValidationService is imported just below.
+const letterMotorReassessmentService = require('../services/letterMotorReassessmentService');
 const teacherService = require('../services/teacherService');
 const wordWritingService = require('../services/wordWritingService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
@@ -1119,7 +1125,11 @@ async function getInitialReport(req, res) {
   // already encodes case (e.g. 'l' vs 'L'), same as case_type, so lowercase
   // and uppercase mastery are never merged together.
   const letterMasteryRows = await LetterAttempt.findAll({
-    where: { student_id: studentId, collection_mode: false },
+    // Feature 11B Phase 4 — source_type: null excludes reassessment rows
+    // (which always have best_score: null) so a letter that has ONLY a
+    // reassessment observation never appears as spuriously "attempted"
+    // here. See the Phase 4 query-exclusion audit.
+    where: { student_id: studentId, collection_mode: false, source_type: null },
     attributes: ['letter', 'case_type', [fn('MAX', col('best_score')), 'best_score']],
     group: ['letter', 'case_type'],
     raw: true,
@@ -1213,7 +1223,10 @@ async function getLetterProgressReport(req, res) {
   if (!studentId) throw new ApiError(422, 'Invalid student ID');
 
   const attempts = await LetterAttempt.findAll({
-    where: { student_id: studentId, collection_mode: false },
+    // Feature 11B Phase 4 — source_type: null excludes reassessment rows so
+    // this report's session/attempt counts are never inflated by
+    // reassessment observations (see the Phase 4 query-exclusion audit).
+    where: { student_id: studentId, collection_mode: false, source_type: null },
     attributes: ['letter', 'case_type', 'session_key', 'best_score', 'created_at'],
     order: [['created_at', 'ASC']],
     raw: true,
@@ -1354,6 +1367,55 @@ async function getMotorBaseline(req, res) {
   // without exposing SQL/host/stack details. Let the project's normal
   // server-error handler format the response.
   throw new ApiError(500, 'Failed to retrieve motor baseline');
+}
+
+/**
+ * GET /handwriting/motor-cluster/:studentId
+ *
+ * Feature 11 pilot model integration — read-only. Returns the INITIAL
+ * motor-cluster prediction for a student, computed by
+ * auriva-ml-service's frozen motor_cluster_v1 pilot model from the SAME
+ * authoritative Feature 1 baseline getMotorBaseline above already exposes
+ * (never a separately-recalculated family score — see
+ * motorClusterService.js). Nothing is persisted by this endpoint; no
+ * Feature 11 observation/history table exists yet (see the integration
+ * task's own final report for the schema this would need).
+ *
+ * React Native never calls auriva-ml-service directly — this is the one
+ * and only path (integration task section 5).
+ */
+async function getMotorCluster(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await predictInitialMotorCluster({ studentId });
+
+  if (serviceResult.status === 'predicted') {
+    return res.json({ status: 'predicted', prediction: serviceResult.prediction });
+  }
+
+  if (serviceResult.status === 'baseline_not_found') {
+    return res.status(404).json({ status: 'baseline_not_found', prediction: null });
+  }
+
+  if (serviceResult.status === 'invalid_input') {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  if (serviceResult.status === 'ml_service_unavailable') {
+    logger.error('Motor cluster prediction failed — ML service unavailable', {
+      studentId, sourceBaselineId: serviceResult.sourceBaselineId, status: 'ml_service_unavailable',
+    });
+    throw new ApiError(503, 'Motor-cluster prediction is temporarily unavailable');
+  }
+
+  // read_failed — unexpected DB error, already logged inside the baseline
+  // service without exposing SQL/host/stack details.
+  throw new ApiError(500, 'Failed to compute motor-cluster prediction');
 }
 
 /**
@@ -1973,13 +2035,153 @@ const getWordProgress=(req,res)=>wordRead(req,res,wordWritingService.getProgress
 const getWordAttempts=(req,res)=>wordRead(req,res,wordWritingService.getAttempts);
 const getWordReport=(req,res)=>wordRead(req,res,wordWritingService.getReport);
 
+// ─── Feature 11B Phase 4: standardized Letter Motor Reassessment ──────────
+// All four endpoints below share the same ownership convention as every
+// other student-scoped endpoint in this controller
+// (teacherService.getOwnStudentById(req.user.id, studentId)). See
+// letterMotorReassessmentService.js for the full save/finalize design —
+// nothing here duplicates that logic, this layer only validates the HTTP
+// shape and maps service statuses to responses.
+
+/**
+ * POST /handwriting/letter-motor-reassessment/attempt
+ *
+ * Saves ONE raw reassessment observation. Narrow, non-side-effecting save
+ * path — see letterMotorReassessmentService.js's header comment for the
+ * full list of Features 1-10 behavior this deliberately never triggers.
+ */
+async function saveLetterMotorReassessmentAttempt(req, res) {
+  const { student_id, letter, case_type, reassessment_session_id, support_level,
+          features, strokes, device_type, app_version,
+          feature_version, template_version, normalization_version,
+          canvas_width, canvas_height } = req.body;
+
+  const studentId = Number(student_id);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await letterMotorReassessmentService.saveReassessmentAttempt({
+    studentId, letter, caseType: case_type,
+    reassessmentSessionId: reassessment_session_id,
+    supportLevel: support_level,
+    features, strokes,
+    meta: { device_type, app_version, feature_version, template_version, normalization_version, canvas_width, canvas_height },
+  });
+
+  if (serviceResult.status === 'saved') {
+    const a = serviceResult.attempt;
+    return res.status(201).json({
+      status: 'saved',
+      attempt: { id: a.id, letter: a.letter, case_type: a.case_type, session_key: a.session_key },
+    });
+  }
+  if (serviceResult.status === 'invalid_support_level') {
+    throw new ApiError(422, "support_level must be exactly 'low' for a reassessment attempt");
+  }
+  if (serviceResult.status === 'not_required_letter') {
+    throw new ApiError(422, 'This letter/case is not part of the 20-letter reassessment set');
+  }
+  if (serviceResult.status === 'invalid_input') {
+    throw new ApiError(422, `Invalid reassessment attempt (${serviceResult.reason})`);
+  }
+  // save_failed — unexpected DB error, already logged without exposing internals.
+  throw new ApiError(500, 'Failed to save reassessment attempt');
+}
+
+/**
+ * POST /handwriting/letter-motor-reassessment/finalize
+ *
+ * Idempotent — safe to call more than once for the same
+ * reassessment_session_id; a repeat call returns the already-finalized
+ * result rather than re-predicting.
+ */
+async function finalizeLetterMotorReassessment(req, res) {
+  const { student_id, reassessment_session_id } = req.body;
+
+  const studentId = Number(student_id);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await letterMotorReassessmentService.finalizeReassessment({
+    studentId, reassessmentSessionId: reassessment_session_id,
+  });
+
+  if (serviceResult.status === 'finalized' || serviceResult.status === 'already_finalized') {
+    return res.status(200).json({ status: serviceResult.status, result: serviceResult.result });
+  }
+  if (serviceResult.status === 'incomplete') {
+    return res.status(200).json({ status: 'incomplete', missing: serviceResult.missing });
+  }
+  if (serviceResult.status === 'invalid_features') {
+    return res.status(200).json({ status: 'invalid_features', invalidLetters: serviceResult.invalidLetters });
+  }
+  if (serviceResult.status === 'version_mismatch') {
+    return res.status(200).json({ status: 'version_mismatch' });
+  }
+  if (serviceResult.status === 'invalid_input') {
+    throw new ApiError(422, `Invalid finalize request (${serviceResult.reason})`);
+  }
+  if (serviceResult.status === 'ml_service_unavailable') {
+    throw new ApiError(503, 'Letter motor state prediction is temporarily unavailable');
+  }
+  // save_failed
+  throw new ApiError(500, 'Failed to finalize letter motor reassessment');
+}
+
+/**
+ * GET /handwriting/letter-motor-reassessment/latest/:studentId
+ *
+ * Read-only — never triggers ML prediction.
+ */
+async function getLatestLetterMotorReassessment(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await letterMotorReassessmentService.getLatestReassessment({ studentId });
+  if (serviceResult.status === 'found') {
+    return res.json({ status: 'found', result: serviceResult.result });
+  }
+  if (serviceResult.status === 'not_found') {
+    return res.status(404).json({ status: 'not_found', result: null });
+  }
+  throw new ApiError(500, 'Failed to read latest letter motor reassessment');
+}
+
+/**
+ * GET /handwriting/letter-motor-reassessment/history/:studentId
+ *
+ * Read-only, chronological (oldest -> newest) — never triggers ML prediction.
+ */
+async function getLetterMotorReassessmentHistory(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await letterMotorReassessmentService.getReassessmentHistory({ studentId });
+  if (serviceResult.status === 'found') {
+    return res.json({ status: 'found', results: serviceResult.results });
+  }
+  throw new ApiError(500, 'Failed to read letter motor reassessment history');
+}
+
 module.exports = {
   submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion,
   explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport,
-  getLetterProgressReport, getMotorBaseline, getFamilyThresholds, getSupportRecommendation,
+  getLetterProgressReport, getMotorBaseline, getMotorCluster, getFamilyThresholds, getSupportRecommendation,
   getPreWritingRecommendation, getRepetitionRecommendation, getDemoSpeedRecommendation,
   getPersistentDifficulty, getWorksheetRecommendations,
   getWorksheetRecommendationValidations, getWorksheetRecommendationValidationState,
   postWorksheetRecommendationValidation,
   postWordAttempt, postWordActivity, getWordProgress, getWordAttempts, getWordReport,
+  saveLetterMotorReassessmentAttempt, finalizeLetterMotorReassessment,
+  getLatestLetterMotorReassessment, getLetterMotorReassessmentHistory,
 };

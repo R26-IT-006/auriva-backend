@@ -352,6 +352,11 @@ async function getSupportPerformanceByFamily({ studentId, windowSize = SUPPORT_P
         student_id: studentId,
         collection_mode: false,
         capture_status: CANDIDATE_CAPTURE_STATUS,
+        // Feature 11B Phase 4 — excludes reassessment rows from this
+        // window's support-performance reconstruction (see the Phase 4
+        // query-exclusion audit; the two diagnostic counts below need no
+        // equivalent change — see their own comment).
+        source_type: null,
       },
       order: [['created_at', 'DESC'], ['id', 'DESC']],
     });

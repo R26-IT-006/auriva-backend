@@ -505,6 +505,10 @@ async function fetchCandidateCycles({ studentId } = {}) {
         attempt_number: CANDIDATE_ATTEMPT_NUMBER,
         collection_mode: false,
         capture_status: CANDIDATE_CAPTURE_STATUS,
+        // Feature 11B Phase 4 — belt-and-braces: reassessment rows always
+        // use attempt_number 1 (never 3), but source_type: null is added
+        // everywhere per the Phase 4 query-exclusion audit regardless.
+        source_type: null,
       },
       order: [['created_at', 'ASC'], ['id', 'ASC']],
     });
