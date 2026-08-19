@@ -221,7 +221,9 @@ async function getTrajectoryPrediction(studentId, wordId) {
   }
 
   // Confidence gate
-  const minConf = parseFloat(process.env.TRAJECTORY_MIN_CONFIDENCE ?? '0.5');
+  // Default 0.60 (2026-08-19): tuned against the uncalibrated raw-model probabilities
+  // the current artifact produces. .env overrides this — it is the authoritative value.
+  const minConf = parseFloat(process.env.TRAJECTORY_MIN_CONFIDENCE ?? '0.60');
   if (tier2Result && tier2Result.confidence >= minConf) {
     return tier2Result.trajectory;
   }
