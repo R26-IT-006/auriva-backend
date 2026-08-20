@@ -64,7 +64,14 @@ jest.mock('../src/utils/motorScore', () => ({
 
 jest.mock('../src/services/explainabilityService', () => ({ analyzeMotorDifficulty: jest.fn() }));
 jest.mock('../src/services/motorBaselineService', () => ({ createInitialMotorBaseline: jest.fn(), getStudentMotorBaseline: jest.fn() }));
-jest.mock('../src/services/teacherService', () => ({}));
+// Pre-device P0 fix (Blocker 2) — recordLetterCompletion now verifies
+// ownership before any write. mockGetOwnStudentById resolves successfully
+// by default; authorization-failure behavior is covered by
+// recordLetterCompletionAuthorization.test.js.
+const mockGetOwnStudentById = jest.fn();
+jest.mock('../src/services/teacherService', () => ({
+  getOwnStudentById: (...a) => mockGetOwnStudentById(...a),
+}));
 
 jest.mock('../src/utils/logger', () => ({
   info: jest.fn(), error: jest.fn(), debug: jest.fn(),
@@ -84,6 +91,7 @@ function makeAttempt(attemptNumber, overrides = {}) {
 
 function makeReq(overrides = {}) {
   return {
+    user: { id: 7 },
     body: {
       student_id: 13, letter: 'c', case_type: 'lowercase',
       attempt_scores: [90], wrote_correctly: true,
@@ -115,6 +123,7 @@ function orchestrationResult(overrides = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGetOwnStudentById.mockResolvedValue({ sid: 13, teacher_id: 7 });
   mockLetterAttemptBulkCreate.mockResolvedValue([]);
   mockLetterProgressFindOrCreate.mockResolvedValue([makeProgressRecord(), true]);
   mockLetterProgressFindOne.mockResolvedValue({ id: 1, blocked_attempts: 1 });

@@ -25,7 +25,8 @@ const ConceptInteractionLog           = require('./ConceptInteractionLog');
 const StudentActivity                 = require('./StudentActivity');
 const WordWritingAttempt              = require('./WordWritingAttempt');
 const WordActivityProgress            = require('./WordActivityProgress');
-const LetterMotorReassessment          = require('./LetterMotorReassessment');
+const LetterMotorMasteryEvidence       = require('./LetterMotorMasteryEvidence');
+const LetterMotorStateHistory          = require('./LetterMotorStateHistory');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -146,15 +147,18 @@ WordWritingAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' 
 Student.hasMany(WordActivityProgress, { foreignKey: 'student_id', as: 'wordActivityProgress' });
 WordActivityProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
-// Feature 11B Phase 4 — Student → LetterMotorReassessment (append-only,
-// idempotent finalize results — see src/models/LetterMotorReassessment.js
-// and src/services/letterMotorReassessmentService.js). No association to
-// LetterAttempt is declared: the link between a reassessment result and its
-// 20 source rows is via reassessment_session_id == LetterAttempt.session_key,
-// an application-layer-only relationship, matching this schema's no-FK
-// convention.
-Student.hasMany(LetterMotorReassessment, { foreignKey: 'student_id', as: 'letterMotorReassessments' });
-LetterMotorReassessment.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+// Feature 11B Phase 5 — Student → LetterMotorMasteryEvidence (append-only,
+// immutable frozen evidence — see src/models/LetterMotorMasteryEvidence.js
+// and src/services/letterMotorMasteryService.js). No association to
+// LetterAttempt is declared (matches this schema's no-FK convention) —
+// letter_attempt_id is recorded for auditability only.
+Student.hasMany(LetterMotorMasteryEvidence, { foreignKey: 'student_id', as: 'letterMotorMasteryEvidence' });
+LetterMotorMasteryEvidence.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Feature 11B Phase 5 — Student → LetterMotorStateHistory (append-only,
+// idempotent milestone snapshots).
+Student.hasMany(LetterMotorStateHistory, { foreignKey: 'student_id', as: 'letterMotorStateHistory' });
+LetterMotorStateHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
@@ -164,5 +168,5 @@ module.exports = {
   TeacherRecommendationValidation,
   StudentConceptProgress, ConceptInteractionLog, StudentActivity,
   WordWritingAttempt, WordActivityProgress,
-  LetterMotorReassessment,
+  LetterMotorMasteryEvidence, LetterMotorStateHistory,
 };

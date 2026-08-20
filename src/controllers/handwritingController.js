@@ -24,11 +24,12 @@ const {
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../services/motorBaselineService');
 const { predictInitialMotorCluster } = require('../services/motorClusterService');
-// Feature 11B Phase 4 — standardized Letter Motor Reassessment. Deliberately
-// imported as a namespace (not destructured) so the four new controller
-// functions below read as calls into a clearly separate module, matching
-// how teacherRecommendationValidationService is imported just below.
-const letterMotorReassessmentService = require('../services/letterMotorReassessmentService');
+// Feature 11B Phase 5 — mastery-evidence accumulation + milestone K=2
+// prediction (replaces Phase 4's rejected explicit-reassessment design).
+// Imported as namespaces (not destructured), matching how
+// teacherRecommendationValidationService is imported just below.
+const letterMotorMasteryService = require('../services/letterMotorMasteryService');
+const letterCategoryCompletionService = require('../services/letterCategoryCompletionService');
 const teacherService = require('../services/teacherService');
 const wordWritingService = require('../services/wordWritingService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
@@ -153,6 +154,13 @@ async function submitAssessment(req, res) {
     throw new ApiError(422, 'student_id, session_start, session_end, and shapes are required');
   }
 
+  // Pre-device P0 fix (Blocker 2) — ownership check BEFORE any write. Same
+  // convention every read endpoint in this controller already uses; throws
+  // ApiError(404) on an unowned/nonexistent student, before
+  // HandwritingAssessment.count/.create or any ShapeFeature/
+  // StudentMotorFeature row is touched.
+  await teacherService.getOwnStudentById(req.user.id, Number(student_id));
+
   const existingCount = await HandwritingAssessment.count({ where: { student_id } });
   const is_initial    = existingCount === 0;
 
@@ -250,6 +258,12 @@ async function submitPreWritingActivity(req, res) {
   if (!student_id || !Array.isArray(results) || results.length === 0) {
     throw new ApiError(422, 'student_id and a non-empty results array are required');
   }
+
+  // Pre-device P0 fix (Blocker 2) — ownership check BEFORE any write. Same
+  // convention every read endpoint in this controller already uses; throws
+  // ApiError(404) on an unowned/nonexistent student, before any
+  // ShapeFeature row is created.
+  await teacherService.getOwnStudentById(req.user.id, Number(student_id));
 
   // Warm-ups are additive practice, never part of the fixed research
   // protocol — reject rather than silently mislabeling collection-mode data.
@@ -494,6 +508,28 @@ async function runDynamicThresholdOrchestration({ studentId, letter, caseType, s
   }
 }
 
+// Feature 11B Phase 5 — the ONLY trigger point for mastery-evidence
+// freeze + milestone checking. Called ONLY on the FIRST mastery of a
+// letter (created === true from LetterProgress.findOrCreate — see the
+// call site below), after saveLetterAttempts has succeeded (the
+// attempt_number=3 row must already exist to be read back). Non-fatal by
+// design, exactly like runDynamicThresholdOrchestration above: a Feature
+// 11B bug must never turn a successful letter-completion response into a
+// server error, must never change what was already decided about this
+// session (threshold/pass/mastery are all already finalized before this
+// ever runs), and never touches the HTTP response shape — Feature 11B
+// state is exposed only via its own separate read endpoints.
+async function runLetterMotorMasteryEvidence({ studentId, letter, caseType, sessionKey }) {
+  try {
+    return await letterMotorMasteryService.onLetterMastered({ studentId, letter, caseType, sessionKey });
+  } catch (err) {
+    logger.error('Letter motor mastery evidence hook threw unexpectedly (non-fatal)', {
+      studentId, letter, caseType, sessionKey, errorMessage: err.message,
+    });
+    return { status: 'error', evidence: null, milestoneResults: null };
+  }
+}
+
 async function recordLetterCompletion(req, res) {
   const { student_id, letter, case_type, attempt_scores, quality_threshold, wrote_correctly,
           attempts, collection_mode,
@@ -507,6 +543,17 @@ async function recordLetterCompletion(req, res) {
   if (!['lowercase', 'uppercase'].includes(case_type)) {
     throw new ApiError(422, 'case_type must be lowercase or uppercase');
   }
+
+  // Pre-device P0 fix (Blocker 2) — ownership check BEFORE any side
+  // effect. Deliberately unconditional (runs identically whether
+  // collection_mode is true or false — spec §14: production/shared logic
+  // must never depend on collection_mode for its authorization boundary).
+  // Placed before sessionKey generation and before the collection-mode
+  // branch, so an unauthorized request never reaches saveLetterAttempts,
+  // LetterProgress.findOrCreate, threshold orchestration, or the Feature
+  // 11B mastery-evidence hook — none of those run for a request that never
+  // gets past this line.
+  await teacherService.getOwnStudentById(req.user.id, Number(student_id));
 
   // ML: one UUID groups all attempt rows from this single POST call
   const sessionKey = randomUUID();
@@ -717,6 +764,19 @@ async function recordLetterCompletion(req, res) {
     });
     dynamicThresholdStatus = orchestrationResult.status;
     dynamicThresholdNextThreshold = orchestrationResult.newThreshold;
+  }
+
+  // Feature 11B Phase 5 — evidence freeze + milestone check, ONLY on the
+  // very first mastery of this letter (created === true). A letter that
+  // already had a LetterProgress row (created === false — e.g. mastered
+  // previously, now being re-practiced) never re-triggers this: evidence
+  // is immutable, frozen once (spec §11). Runs only after attemptsSaved,
+  // same ordering guarantee as the Feature 2 orchestration above (the
+  // attempt_number=3 row this reads back must already be persisted).
+  if (attemptsSaved && created) {
+    await runLetterMotorMasteryEvidence({
+      studentId: student_id, letter, caseType: case_type, sessionKey,
+    });
   }
 
   logger.info(`Letter complete: student=${student_id} ` +
@@ -937,6 +997,18 @@ async function finalizeAssessment(req, res) {
 
   const assessment = await HandwritingAssessment.findByPk(assessmentId);
   if (!assessment) throw new ApiError(404, 'Assessment not found');
+
+  // Pre-device P0 fix (Blocker 2) — special case: this endpoint takes no
+  // student_id at all (only an assessment id in the URL). The authoritative
+  // student is whichever one the ALREADY-LOADED assessment row actually
+  // belongs to (assessment.student_id) — never a client-supplied value,
+  // since there isn't one to trust or distrust here. Ownership is verified
+  // BEFORE any mutation: before classifyFinalizeRequest, before
+  // assessment.update(), before any ExplanationResult/RecommendationHistory
+  // write, and before createInitialMotorBaseline can ever run later in this
+  // function. An attacker who somehow learns another teacher's assessment
+  // id still cannot finalize it or touch that student's baseline.
+  await teacherService.getOwnStudentById(req.user.id, assessment.student_id);
 
   const { previouslyFinalized, isResend } = classifyFinalizeRequest(assessment, motor_score, motor_profile);
 
@@ -2035,142 +2107,121 @@ const getWordProgress=(req,res)=>wordRead(req,res,wordWritingService.getProgress
 const getWordAttempts=(req,res)=>wordRead(req,res,wordWritingService.getAttempts);
 const getWordReport=(req,res)=>wordRead(req,res,wordWritingService.getReport);
 
-// ─── Feature 11B Phase 4: standardized Letter Motor Reassessment ──────────
-// All four endpoints below share the same ownership convention as every
-// other student-scoped endpoint in this controller
-// (teacherService.getOwnStudentById(req.user.id, studentId)). See
-// letterMotorReassessmentService.js for the full save/finalize design —
-// nothing here duplicates that logic, this layer only validates the HTTP
-// shape and maps service statuses to responses.
+// ─── Feature 11B Phase 5: mastery-based Letter Motor State ────────────────
+// All endpoints below share the same ownership convention as every other
+// student-scoped endpoint in this controller
+// (teacherService.getOwnStudentById(req.user.id, studentId)). Every one of
+// them is READ-ONLY — evidence freeze + milestone prediction happen only
+// as a side effect of recordLetterCompletion's own success path (see
+// runLetterMotorMasteryEvidence above), NEVER from any of these GET
+// handlers. This is deliberate (spec §24 Teacher-report requirement,
+// tested explicitly): opening a report can never trigger an ML call.
 
 /**
- * POST /handwriting/letter-motor-reassessment/attempt
+ * GET /handwriting/letter-motor-state/latest/:studentId
  *
- * Saves ONE raw reassessment observation. Narrow, non-side-effecting save
- * path — see letterMotorReassessmentService.js's header comment for the
- * full list of Features 1-10 behavior this deliberately never triggers.
+ * Read-only — the most recent persisted milestone snapshot, if any.
  */
-async function saveLetterMotorReassessmentAttempt(req, res) {
-  const { student_id, letter, case_type, reassessment_session_id, support_level,
-          features, strokes, device_type, app_version,
-          feature_version, template_version, normalization_version,
-          canvas_width, canvas_height } = req.body;
-
-  const studentId = Number(student_id);
-  if (!Number.isInteger(studentId) || studentId <= 0) {
-    throw new ApiError(422, 'Invalid student ID');
-  }
-  await teacherService.getOwnStudentById(req.user.id, studentId);
-
-  const serviceResult = await letterMotorReassessmentService.saveReassessmentAttempt({
-    studentId, letter, caseType: case_type,
-    reassessmentSessionId: reassessment_session_id,
-    supportLevel: support_level,
-    features, strokes,
-    meta: { device_type, app_version, feature_version, template_version, normalization_version, canvas_width, canvas_height },
-  });
-
-  if (serviceResult.status === 'saved') {
-    const a = serviceResult.attempt;
-    return res.status(201).json({
-      status: 'saved',
-      attempt: { id: a.id, letter: a.letter, case_type: a.case_type, session_key: a.session_key },
-    });
-  }
-  if (serviceResult.status === 'invalid_support_level') {
-    throw new ApiError(422, "support_level must be exactly 'low' for a reassessment attempt");
-  }
-  if (serviceResult.status === 'not_required_letter') {
-    throw new ApiError(422, 'This letter/case is not part of the 20-letter reassessment set');
-  }
-  if (serviceResult.status === 'invalid_input') {
-    throw new ApiError(422, `Invalid reassessment attempt (${serviceResult.reason})`);
-  }
-  // save_failed — unexpected DB error, already logged without exposing internals.
-  throw new ApiError(500, 'Failed to save reassessment attempt');
-}
-
-/**
- * POST /handwriting/letter-motor-reassessment/finalize
- *
- * Idempotent — safe to call more than once for the same
- * reassessment_session_id; a repeat call returns the already-finalized
- * result rather than re-predicting.
- */
-async function finalizeLetterMotorReassessment(req, res) {
-  const { student_id, reassessment_session_id } = req.body;
-
-  const studentId = Number(student_id);
-  if (!Number.isInteger(studentId) || studentId <= 0) {
-    throw new ApiError(422, 'Invalid student ID');
-  }
-  await teacherService.getOwnStudentById(req.user.id, studentId);
-
-  const serviceResult = await letterMotorReassessmentService.finalizeReassessment({
-    studentId, reassessmentSessionId: reassessment_session_id,
-  });
-
-  if (serviceResult.status === 'finalized' || serviceResult.status === 'already_finalized') {
-    return res.status(200).json({ status: serviceResult.status, result: serviceResult.result });
-  }
-  if (serviceResult.status === 'incomplete') {
-    return res.status(200).json({ status: 'incomplete', missing: serviceResult.missing });
-  }
-  if (serviceResult.status === 'invalid_features') {
-    return res.status(200).json({ status: 'invalid_features', invalidLetters: serviceResult.invalidLetters });
-  }
-  if (serviceResult.status === 'version_mismatch') {
-    return res.status(200).json({ status: 'version_mismatch' });
-  }
-  if (serviceResult.status === 'invalid_input') {
-    throw new ApiError(422, `Invalid finalize request (${serviceResult.reason})`);
-  }
-  if (serviceResult.status === 'ml_service_unavailable') {
-    throw new ApiError(503, 'Letter motor state prediction is temporarily unavailable');
-  }
-  // save_failed
-  throw new ApiError(500, 'Failed to finalize letter motor reassessment');
-}
-
-/**
- * GET /handwriting/letter-motor-reassessment/latest/:studentId
- *
- * Read-only — never triggers ML prediction.
- */
-async function getLatestLetterMotorReassessment(req, res) {
+async function getLatestLetterMotorState(req, res) {
   const studentId = Number(req.params.studentId);
   if (!Number.isInteger(studentId) || studentId <= 0) {
     throw new ApiError(422, 'Invalid student ID');
   }
   await teacherService.getOwnStudentById(req.user.id, studentId);
 
-  const serviceResult = await letterMotorReassessmentService.getLatestReassessment({ studentId });
+  const serviceResult = await letterMotorMasteryService.getLatestLetterMotorState({ studentId });
   if (serviceResult.status === 'found') {
     return res.json({ status: 'found', result: serviceResult.result });
   }
   if (serviceResult.status === 'not_found') {
     return res.status(404).json({ status: 'not_found', result: null });
   }
-  throw new ApiError(500, 'Failed to read latest letter motor reassessment');
+  throw new ApiError(500, 'Failed to read latest letter motor state');
 }
 
 /**
- * GET /handwriting/letter-motor-reassessment/history/:studentId
+ * GET /handwriting/letter-motor-state/history/:studentId
  *
- * Read-only, chronological (oldest -> newest) — never triggers ML prediction.
+ * Read-only, chronological (oldest -> newest). Only ever contains rows for
+ * the 14/17/20 milestones — never 3/7/10 (trend-only, see below).
  */
-async function getLetterMotorReassessmentHistory(req, res) {
+async function getLetterMotorStateHistory(req, res) {
   const studentId = Number(req.params.studentId);
   if (!Number.isInteger(studentId) || studentId <= 0) {
     throw new ApiError(422, 'Invalid student ID');
   }
   await teacherService.getOwnStudentById(req.user.id, studentId);
 
-  const serviceResult = await letterMotorReassessmentService.getReassessmentHistory({ studentId });
+  const serviceResult = await letterMotorMasteryService.getLetterMotorStateHistory({ studentId });
   if (serviceResult.status === 'found') {
     return res.json({ status: 'found', results: serviceResult.results });
   }
-  throw new ApiError(500, 'Failed to read letter motor reassessment history');
+  throw new ApiError(500, 'Failed to read letter motor state history');
+}
+
+/**
+ * GET /handwriting/letter-motor-evidence-trend/:studentId
+ *
+ * Read-only, descriptive-only — mean smoothness/dtw/speed_cv over whatever
+ * reference-letter evidence currently exists, plus its raw coverage count.
+ * NEVER implies a cluster/state (spec §12).
+ */
+async function getLetterMotorEvidenceTrend(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await letterMotorMasteryService.getMasteryEvidenceTrend({ studentId });
+  if (serviceResult.status === 'found') {
+    const { coverageN, meanSmoothness, meanDtw, meanSpeedCv } = serviceResult;
+    return res.json({ status: 'found', coverageN, meanSmoothness, meanDtw, meanSpeedCv });
+  }
+  throw new ApiError(500, 'Failed to read letter motor evidence trend');
+}
+
+/**
+ * GET /handwriting/mastered-letters/:studentId
+ *
+ * Read-only — the authoritative full list of every (letter, caseType) pair
+ * this student has mastered (a LetterProgress row exists), straight from
+ * the backend. This is the data the frontend resume/skip-mastered-letters
+ * fix (spec §3/§4/§5) filters its stored adaptive sequence against —
+ * frontend AsyncStorage "completed" flags are never authoritative.
+ */
+async function getMasteredLetters(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await letterCategoryCompletionService.getMasteredLetterPairs({ studentId });
+  if (serviceResult.status === 'found') {
+    return res.json({ status: 'found', pairs: serviceResult.pairs });
+  }
+  throw new ApiError(500, 'Failed to read mastered letters');
+}
+
+/**
+ * GET /handwriting/category-completion/:studentId
+ *
+ * Read-only — derived (never stored) completion status for all 6
+ * (caseType, category) pairs, straight from LetterProgress (spec §6).
+ */
+async function getCategoryCompletionStatus(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const serviceResult = await letterCategoryCompletionService.getAllCategoryCompletionStatus({ studentId });
+  if (serviceResult.status === 'found') {
+    return res.json({ status: 'found', categories: serviceResult.categories });
+  }
+  throw new ApiError(500, 'Failed to read category completion status');
 }
 
 module.exports = {
@@ -2182,6 +2233,6 @@ module.exports = {
   getWorksheetRecommendationValidations, getWorksheetRecommendationValidationState,
   postWorksheetRecommendationValidation,
   postWordAttempt, postWordActivity, getWordProgress, getWordAttempts, getWordReport,
-  saveLetterMotorReassessmentAttempt, finalizeLetterMotorReassessment,
-  getLatestLetterMotorReassessment, getLetterMotorReassessmentHistory,
+  getLatestLetterMotorState, getLetterMotorStateHistory, getLetterMotorEvidenceTrend,
+  getMasteredLetters, getCategoryCompletionStatus,
 };

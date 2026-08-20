@@ -3,32 +3,22 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-// Feature 11B Phase 4 — see
-// migrations/20260820000002-create-letter-motor-reassessments.js for the
-// full schema rationale. One row per COMPLETED standardized Letter Motor
-// Reassessment. Immutable: no route or service in this codebase ever calls
-// .update()/.destroy() on an existing row — only
-// letterMotorReassessmentService.js's own finalize path ever writes, and
-// only to insert a brand-new row (idempotent — see that service's own
-// finalize logic).
-const LetterMotorReassessment = sequelize.define('LetterMotorReassessment', {
+// Feature 11B Phase 5 — see
+// migrations/20260821000002-create-letter-motor-state-history.js for the
+// full schema rationale. One immutable row per (student, milestone,
+// model_version) persisted K=2 prediction snapshot — only ever created at
+// the 14/17/20 pilot milestones, never at 3/7/10.
+const LetterMotorStateHistory = sequelize.define('LetterMotorStateHistory', {
   id: {
     type:          DataTypes.INTEGER,
     primaryKey:    true,
     autoIncrement: true,
   },
-  student_id: {
-    type:      DataTypes.INTEGER,
-    allowNull: false,
-  },
-  reassessment_session_id: {
-    type:      DataTypes.UUID,
-    allowNull: false,
-  },
-  completed_at: {
-    type:      DataTypes.DATE,
-    allowNull: false,
-  },
+  student_id: { type: DataTypes.INTEGER,    allowNull: false },
+  milestone:  { type: DataTypes.STRING(40), allowNull: false },
+  coverage_n: { type: DataTypes.INTEGER,    allowNull: false },
+  completed_category: { type: DataTypes.JSONB, allowNull: false },
+  observed_at:         { type: DataTypes.DATE,   allowNull: false },
 
   smoothness_score: { type: DataTypes.FLOAT, allowNull: false },
   dtw_distance:     { type: DataTypes.FLOAT, allowNull: false },
@@ -51,12 +41,12 @@ const LetterMotorReassessment = sequelize.define('LetterMotorReassessment', {
   created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   updated_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
 }, {
-  tableName:  'letter_motor_reassessments',
-  timestamps: false, // created_at/updated_at are plain columns above, matching this schema's existing convention elsewhere
+  tableName:  'letter_motor_state_history',
+  timestamps: false,
   indexes: [
-    { fields: ['student_id', 'completed_at'] },
-    { unique: true, fields: ['student_id', 'reassessment_session_id', 'model_version'] },
+    { fields: ['student_id', 'observed_at'] },
+    { unique: true, fields: ['student_id', 'milestone', 'model_version'] },
   ],
 });
 
-module.exports = LetterMotorReassessment;
+module.exports = LetterMotorStateHistory;

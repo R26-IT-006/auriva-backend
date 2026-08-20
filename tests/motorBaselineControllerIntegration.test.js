@@ -24,6 +24,16 @@ jest.mock('../src/services/motorBaselineService', () => ({
   createInitialMotorBaseline: mockCreateInitialMotorBaseline,
 }));
 
+// Pre-device P0 fix (Blocker 2) — finalizeAssessment now verifies ownership
+// (via assessment.student_id, loaded from HandwritingAssessment.findByPk)
+// before any mutation. mockGetOwnStudentById resolves successfully by
+// default; authorization-failure behavior is covered by
+// finalizeAssessmentAuthorization.test.js.
+const mockGetOwnStudentById = jest.fn();
+jest.mock('../src/services/teacherService', () => ({
+  getOwnStudentById: (...a) => mockGetOwnStudentById(...a),
+}));
+
 const { finalizeAssessment } = require('../src/controllers/handwritingController');
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -48,6 +58,7 @@ function makeAssessmentInstance(overrides = {}) {
 
 function makeReq(overrides = {}) {
   return {
+    user: { id: 7 },
     params: { id: '101' },
     body: {
       motor_score:   61,
@@ -72,6 +83,7 @@ const DEFAULT_DIFFICULTY_RESULT = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGetOwnStudentById.mockResolvedValue({ sid: 10, teacher_id: 7 });
   mockAnalyzeMotorDifficulty.mockReturnValue(DEFAULT_DIFFICULTY_RESULT);
   mockExplanationFindAll.mockResolvedValue([]); // no existing row by default — every test here is a first-time finalize
   mockExplanationCreate.mockResolvedValue({ id: 1 });

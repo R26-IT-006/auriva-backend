@@ -40,6 +40,15 @@ jest.mock('../src/utils/logger', () => ({
   info: mockLoggerInfo, warn: mockLoggerWarn, error: mockLoggerError, debug: jest.fn(), http: jest.fn(),
 }));
 
+// Pre-device P0 fix (Blocker 2) — finalizeAssessment now verifies ownership
+// (via assessment.student_id) before any mutation. mockGetOwnStudentById
+// resolves successfully by default; authorization-failure behavior is
+// covered by finalizeAssessmentAuthorization.test.js.
+const mockGetOwnStudentById = jest.fn();
+jest.mock('../src/services/teacherService', () => ({
+  getOwnStudentById: (...a) => mockGetOwnStudentById(...a),
+}));
+
 const { finalizeAssessment } = require('../src/controllers/handwritingController');
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -81,6 +90,7 @@ function makeAssessmentInstance(overrides = {}) {
 
 function makeReq(overrides = {}) {
   return {
+    user: { id: 7 },
     params: { id: '101' },
     body: { motor_score: 61, motor_profile: makeMotorProfile(), ...overrides },
   };
@@ -101,6 +111,7 @@ const WEAK_RESULT = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGetOwnStudentById.mockResolvedValue({ sid: 10, teacher_id: 7 });
   mockAnalyzeMotorDifficulty.mockReturnValue(WEAK_RESULT);
   mockExplanationCreate.mockResolvedValue({ id: 1 });
   mockRecommendationCreate.mockResolvedValue({ id: 1 });

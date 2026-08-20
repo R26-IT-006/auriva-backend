@@ -14,6 +14,14 @@ jest.mock('../src/models', () => ({
   LetterAttempt:         { bulkCreate: jest.fn() },
 }));
 
+// Pre-device P0 fix (Blocker 2) — both endpoints now verify ownership
+// before any write. Resolves successfully by default; authorization-
+// failure behavior itself is covered by dedicated
+// *Authorization.test.js files.
+jest.mock('../src/services/teacherService', () => ({
+  getOwnStudentById: jest.fn().mockResolvedValue({ sid: 10, teacher_id: 7 }),
+}));
+
 const models = require('../src/models');
 const { submitAssessment, recordLetterCompletion } = require('../src/controllers/handwritingController');
 
@@ -32,6 +40,7 @@ describe('collection_session_id propagation', () => {
 
     const SESSION_ID = '11111111-1111-4111-8111-111111111111';
     const req = {
+      user: { id: 7 },
       body: {
         student_id: 10,
         session_start: 1000,
@@ -67,6 +76,7 @@ describe('collection_session_id propagation', () => {
 
     const SESSION_ID = '22222222-2222-4222-8222-222222222222';
     const req = {
+      user: { id: 7 },
       body: {
         student_id: 10,
         letter: 'i',

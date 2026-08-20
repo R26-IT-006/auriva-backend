@@ -6,6 +6,17 @@ const {
 } = require('../models');
 const ApiError = require('../utils/ApiError');
 const { validateSession } = require('../utils/collectionProtocolValidation');
+// Pre-device P0 fix (Blocker 2, collection-mode scope) — collection mode is
+// temporary, pre-deployment research-only code (will be removed before
+// deployment), but the same ownership gap found in the production write
+// endpoints existed here too. Fixed where trivial/regression-safe using
+// the SAME established pattern — see handwritingController.js's identical
+// usage. exportMlSamples is deliberately NOT touched here: it is a
+// multi-student research export with no single studentId to check
+// ownership against — a per-student ownership check does not apply to it,
+// and fixing it would need a different (role-based) authorization model,
+// out of scope for this fix. Reported separately.
+const teacherService = require('../services/teacherService');
 
 // POST /handwriting/collection-session/start
 // Called once when a teacher taps "Data Collection" — the id returned here
@@ -17,6 +28,8 @@ async function startCollectionSession(req, res) {
   if (!id || !student_id) {
     throw new ApiError(422, 'id and student_id are required');
   }
+
+  await teacherService.getOwnStudentById(req.user.id, Number(student_id));
 
   const session = await CollectionSession.create({
     id, student_id, protocol_version, device_type, app_version,
@@ -34,6 +47,8 @@ async function completeCollectionSession(req, res) {
 
   const session = await CollectionSession.findByPk(id);
   if (!session) throw new ApiError(404, 'Collection session not found');
+
+  await teacherService.getOwnStudentById(req.user.id, session.student_id);
 
   const [shapeRows, letterRows] = await Promise.all([
     ShapeFeature.findAll({ where: { collection_session_id: id }, raw: true }),
@@ -67,6 +82,8 @@ async function submitTeacherValidation(req, res) {
     throw new ApiError(422, 'student_id and collection_session_id are required');
   }
 
+  await teacherService.getOwnStudentById(req.user.id, Number(student_id));
+
   const [record] = await TeacherValidation.findOrCreate({
     where:    { student_id, collection_session_id },
     defaults: { student_id, collection_session_id },
@@ -89,6 +106,8 @@ async function getTeacherValidation(req, res) {
 
   const record = await TeacherValidation.findOne({ where: { collection_session_id: sessionId } });
   if (!record) return res.json({ data: null });
+
+  await teacherService.getOwnStudentById(req.user.id, record.student_id);
 
   res.json({ data: record });
 }

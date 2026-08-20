@@ -101,15 +101,21 @@ router.post('/worksheet-recommendation-validations/:studentId',      ctrl.postWo
 // /:studentId route directly above.
 router.get('/worksheet-recommendation-validation-state/:studentId',  ctrl.getWorksheetRecommendationValidationState);
 
-// ── Standardized Letter Motor Reassessment (Feature 11B Phase 4) ──────────────
-// Narrow, non-side-effecting save path (POST attempt) + idempotent finalize
-// + two read-only endpoints. Deliberately separate from /letter-complete and
-// from collection-session/* below — see letterMotorReassessmentService.js's
-// header comment for why. No PUT/DELETE for this resource.
-router.post('/letter-motor-reassessment/attempt',        ctrl.saveLetterMotorReassessmentAttempt);
-router.post('/letter-motor-reassessment/finalize',        ctrl.finalizeLetterMotorReassessment);
-router.get('/letter-motor-reassessment/latest/:studentId', ctrl.getLatestLetterMotorReassessment);
-router.get('/letter-motor-reassessment/history/:studentId', ctrl.getLetterMotorReassessmentHistory);
+// ── Mastery-based Letter Motor State (Feature 11B Phase 5) ────────────────────
+// Replaces Phase 4's explicit-reassessment routes (deleted — see
+// letterMotorMasteryService.js's header comment). Every route here is
+// READ-ONLY: evidence freeze + milestone prediction happen only inside
+// recordLetterCompletion's own success path above, never from a GET.
+// No POST/PUT/DELETE for this resource.
+router.get('/letter-motor-state/latest/:studentId',        ctrl.getLatestLetterMotorState);
+router.get('/letter-motor-state/history/:studentId',       ctrl.getLetterMotorStateHistory);
+router.get('/letter-motor-evidence-trend/:studentId',      ctrl.getLetterMotorEvidenceTrend);
+
+// ── Mastered-letter lookup + category completion (normal-progression fix,
+// Feature 11B Phase 5 §3/§4/§5/§6 — NOT a Feature 11B adaptation change;
+// see letterCategoryCompletionService.js) ──────────────────────────────────
+router.get('/mastered-letters/:studentId',                 ctrl.getMasteredLetters);
+router.get('/category-completion/:studentId',               ctrl.getCategoryCompletionStatus);
 
 // ── Data Collection Mode: session tracking, teacher validation, ML export ─────
 router.post('/collection-session/start',           collectionCtrl.startCollectionSession);
