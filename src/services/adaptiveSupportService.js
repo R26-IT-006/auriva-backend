@@ -49,11 +49,16 @@
  * header for the full priority/collection-mode rationale.
  *
  * ── Source of truth for performance score ────────────────────────────────
- * src/utils/attemptPerformanceScore.js's deriveAttemptPerformanceScore() —
- * reused completely unmodified (same function Feature 2 uses). Never
+ * Motor Score Unification — LetterAttempt.motor_score, the persisted,
+ * backend-AUTHORITATIVE computeMotorScore() output for that exact attempt
+ * row (already computed and stored by saveLetterAttempts() at ingest
+ * time — no recomputation here). Previously this read the
+ * featuresToScore()-domain mirror, attemptPerformanceScore.js's
+ * deriveAttemptPerformanceScore(); that mirror is now non-authoritative
+ * (see that file's own header) and no longer used here. Never
  * best_score/passed/threshold_passed, which are session-level values copied
- * across every row of a session (see that file's own header) and cannot
- * tell one attempt's performance apart from another's.
+ * across every row of a session and cannot tell one attempt's performance
+ * apart from another's.
  *
  * ── Source of truth for family mapping ───────────────────────────────────
  * src/config/letterBaselineFamilies.js's getBaselineFamily() only — never a
@@ -64,7 +69,6 @@
 const { Op } = require('sequelize');
 const { LetterAttempt } = require('../models');
 const { getBaselineFamily } = require('../config/letterBaselineFamilies');
-const { deriveAttemptPerformanceScore } = require('../utils/attemptPerformanceScore');
 const { resolveAttemptSupportLevel, SUPPORT_SOURCE } = require('../utils/attemptSupportResolution');
 const { LETTER_SUPPORT_LEVELS } = require('../config/letterSupportLevels');
 // Feature 3 Step 5 — reuses Feature 2's existing, unmodified, read-only
@@ -203,8 +207,12 @@ function buildWindows(rows, windowSize) {
       continue;
     }
 
-    const scoreResult = deriveAttemptPerformanceScore(row);
-    if (scoreResult.status !== 'valid') {
+    // Motor Score Unification (spec §12) — the authoritative, already-
+    // persisted computeMotorScore() output for this exact attempt row,
+    // never a recomputed featuresToScore()-domain estimate. Support-level
+    // decision LOGIC below is completely unchanged — only the performance-
+    // score source changed.
+    if (row.motor_score == null) {
       malformedFeatures++;
       continue;
     }
@@ -221,7 +229,7 @@ function buildWindows(rows, windowSize) {
       attemptNumber: row.attempt_number,
       supportLevel: supportResult.supportLevel,
       supportSource: supportResult.source,
-      performanceScore: scoreResult.score,
+      performanceScore: row.motor_score,
       createdAt: row.created_at,
     });
   }

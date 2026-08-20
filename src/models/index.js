@@ -27,6 +27,9 @@ const WordWritingAttempt              = require('./WordWritingAttempt');
 const WordActivityProgress            = require('./WordActivityProgress');
 const LetterMotorMasteryEvidence       = require('./LetterMotorMasteryEvidence');
 const LetterMotorStateHistory          = require('./LetterMotorStateHistory');
+// Proposal FR-16, Phase 7B — current live-session snapshot (see
+// src/services/liveSessionService.js). One row per student.
+const StudentLiveHandwritingSession    = require('./StudentLiveHandwritingSession');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -160,6 +163,11 @@ LetterMotorMasteryEvidence.belongsTo(Student, { foreignKey: 'student_id', as: 's
 Student.hasMany(LetterMotorStateHistory, { foreignKey: 'student_id', as: 'letterMotorStateHistory' });
 LetterMotorStateHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Proposal FR-16, Phase 7B — Student ↔ StudentLiveHandwritingSession
+// (one-to-one: student_id is the live-session table's own primary key).
+Student.hasOne(StudentLiveHandwritingSession, { foreignKey: 'student_id', as: 'liveHandwritingSession' });
+StudentLiveHandwritingSession.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize, Principal, Teacher, Student, Session, StudentAvatar, PasswordResetOtp,
   HandwritingAssessment, LetterProgress, Stroke, ShapeFeature, LetterAttempt,
@@ -169,4 +177,5 @@ module.exports = {
   StudentConceptProgress, ConceptInteractionLog, StudentActivity,
   WordWritingAttempt, WordActivityProgress,
   LetterMotorMasteryEvidence, LetterMotorStateHistory,
+  StudentLiveHandwritingSession,
 };

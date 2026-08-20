@@ -105,6 +105,14 @@ function routeLaFindAll({ where }) {
   return Promise.resolve(familyRowsFixture?.[family] ?? []);
 }
 
+// Motor Score Unification — Feature 2/3 now read LetterAttempt.motor_score
+// directly (the persisted, backend-authoritative computeMotorScore()
+// output) rather than reconstructing a featuresToScore()-domain estimate
+// from `features` via the now-retired deriveAttemptPerformanceScore()
+// mirror. Every fixture row here therefore needs its own `motor_score`
+// set explicitly — `features` is retained on the fixture (still a real
+// stored column) but is no longer what these services read for
+// performance evidence.
 function makeAttemptRow(overrides = {}) {
   return {
     id: 1,
@@ -116,17 +124,17 @@ function makeAttemptRow(overrides = {}) {
     collection_mode: false,
     capture_status: 'complete',
     features: { smoothness: 0.1, dtw_distance: 15, pauseCount: 0, strokeCount: 1, completionTime: 1000 },
+    motor_score: 74, // default, matches the default `features` above under the pre-unification mirror's own output — kept numerically stable so unrelated tests are unaffected
     threshold_passed: true,
     created_at: new Date('2026-08-01T10:00:00.000Z'),
     ...overrides,
   };
 }
 
-// Feature 2 Step 5 — builds a `features` object whose reconstructed
-// performanceScore is EXACTLY `score` (verified by round-trip check through
-// the real deriveAttemptPerformanceScore before these tests were written —
-// smoothness fixed at 0, dtw_distance solved from the inverse of the
-// formula; exact for score >= 30, which covers every fixture used below).
+// Feature 2 Step 5 — still shapes a `features` object for realism (some
+// assertions/logging paths may inspect it), but the actual performance
+// score a test controls is now `motor_score` directly, set alongside it
+// on the same row — see makeScoredAttempts() below.
 function featuresForScore(score) {
   const dtw = (45 * (100 - score)) / 70;
   return { smoothness: 0, dtw_distance: dtw, pauseCount: 0, strokeCount: 1, completionTime: 1000 };
@@ -138,6 +146,7 @@ function makeScoredAttempts(scores, { letter = 'o', caseType = 'lowercase' } = {
     letter, case_type: caseType,
     session_key: `session-${i}`,
     features: featuresForScore(score),
+    motor_score: score,
     created_at: new Date(2026, 0, 10 - i),
   }));
 }
@@ -1018,7 +1027,11 @@ describe('Test 28 — custom windowSize is honored end-to-end', () => {
   it('a malformed row mid-list is skipped and counted, without shrinking the eventual window below capacity', async () => {
     familyRowsFixture.curved = [
       makeAttemptRow({ id: 1, letter: 'o', session_key: 's1' }),
-      makeAttemptRow({ id: 2, letter: 'o', session_key: 's2', features: { smoothness: 'bad', dtw_distance: 10 } }),
+      // motor_score: null represents a row whose motor_score could not be
+      // computed at ingest time (no usable normalized features) — the
+      // authoritative-domain equivalent of the old "malformed features"
+      // fixture, which relied on the now-retired featuresToScore() mirror.
+      makeAttemptRow({ id: 2, letter: 'o', session_key: 's2', motor_score: null }),
       makeAttemptRow({ id: 3, letter: 'o', session_key: 's3' }),
     ];
 

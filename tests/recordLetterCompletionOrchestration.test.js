@@ -46,8 +46,12 @@ jest.mock('../src/utils/featureNormalization', () => ({
   normalizeLetterFeatures: jest.fn().mockReturnValue({ normalized: { stroke_order_meta: null }, validity: {} }),
 }));
 
+// Motor Score Unification — computeMotorScore() is now the authoritative
+// score source for recordLetterCompletion's own pass/fail decision, so
+// this mock is controllable per-test (default 80) rather than fixed.
+const mockComputeMotorScore = jest.fn();
 jest.mock('../src/utils/motorScore', () => ({
-  computeMotorScore: jest.fn().mockReturnValue({ motor_score: 80, quality_score: 80, score_version: 'v1' }),
+  computeMotorScore: (...a) => mockComputeMotorScore(...a),
 }));
 
 jest.mock('../src/services/explainabilityService', () => ({ analyzeMotorDifficulty: jest.fn() }));
@@ -98,12 +102,18 @@ function orchestrationResult(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetOwnStudentById.mockResolvedValue({ sid: 13, teacher_id: 7 });
+  mockComputeMotorScore.mockReturnValue({ motor_score: 80, quality_score: 80, score_version: 'v1' });
   mockLetterAttemptBulkCreate.mockResolvedValue([]);
   mockLetterProgressFindOrCreate.mockResolvedValue([makeProgressRecord(), true]);
   mockLetterProgressFindOne.mockResolvedValue({ id: 1, blocked_attempts: 1 });
   mockLetterProgressFindAll.mockResolvedValue([]);
   mockStudentFindByPk.mockResolvedValue({ personal_thresholds: {}, update: jest.fn().mockResolvedValue(undefined) });
   mockGetStudentThreshold.mockResolvedValue(55);
+  // jest.clearAllMocks() (above) does NOT clear a mock's queued
+  // .mockResolvedValueOnce() entries, only its call history — an explicit
+  // .mockReset() is needed so a once-value queued by one test can never
+  // leak into the next test that also calls resolveProgressionThreshold.
+  mockResolveProgressionThreshold.mockReset();
   mockResolveProgressionThreshold.mockResolvedValue(feature2Result());
   mockProcessDynamicThresholdAfterLetterSession.mockResolvedValue(orchestrationResult());
 });
@@ -126,6 +136,9 @@ describe('Section 35 — Failure branch', () => {
   it('Test 4: original completed:false response is preserved', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88 }));
     mockProcessDynamicThresholdAfterLetterSession.mockResolvedValueOnce(orchestrationResult({ status: 'insufficient_data', family: 'curved' }));
+    // Motor Score Unification — bestScore is now the backend-computed
+    // authoritative score, not attempt_scores (diagnostic-only below).
+    mockComputeMotorScore.mockReturnValue({ motor_score: 70, quality_score: 70, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ attempt_scores: [70] }), res);
 
@@ -139,6 +152,7 @@ describe('Section 35 — Failure branch', () => {
   it('Test 5: the automatic adaptation result is additive only — every existing field still present', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88 }));
     mockProcessDynamicThresholdAfterLetterSession.mockResolvedValueOnce(orchestrationResult({ status: 'automatic_created', family: 'curved', newThreshold: 93 }));
+    mockComputeMotorScore.mockReturnValue({ motor_score: 70, quality_score: 70, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ attempt_scores: [70] }), res);
 
@@ -181,6 +195,7 @@ describe('Section 35 — Success branch', () => {
 
   it('Test 9: original success response shape is preserved', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88 }));
+    mockComputeMotorScore.mockReturnValue({ motor_score: 90, quality_score: 90, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ attempt_scores: [90] }), res);
 
@@ -191,6 +206,7 @@ describe('Section 35 — Success branch', () => {
   it('Test 10: the automatic adaptation result is additive only in the success response too', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88 }));
     mockProcessDynamicThresholdAfterLetterSession.mockResolvedValueOnce(orchestrationResult({ status: 'hold', family: 'curved' }));
+    mockComputeMotorScore.mockReturnValue({ motor_score: 90, quality_score: 90, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ attempt_scores: [90] }), res);
 
@@ -233,6 +249,7 @@ describe('Non-fatal error handling', () => {
   it('an orchestration throw does not turn a successful completion into a server error', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88 }));
     mockProcessDynamicThresholdAfterLetterSession.mockRejectedValueOnce(new Error('unexpected orchestration bug'));
+    mockComputeMotorScore.mockReturnValue({ motor_score: 90, quality_score: 90, score_version: 'v1' });
     const res = makeRes();
 
     await expect(recordLetterCompletion(makeReq({ attempt_scores: [90] }), res)).resolves.toBeUndefined();

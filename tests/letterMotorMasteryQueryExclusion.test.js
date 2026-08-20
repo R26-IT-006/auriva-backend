@@ -14,6 +14,12 @@
 
 const mockLaFindAll = jest.fn();
 const mockLaCount   = jest.fn();
+// Final pre-PP2 fix (B-3) — getInitialReport/getLetterProgressReport now
+// check ownership before any read; mocked here exactly like every other
+// controller test in this suite, resolving successfully by default so
+// this file's own (unrelated) source_type-exclusion assertions are
+// unaffected by the fix.
+const mockGetOwnStudentById = jest.fn();
 
 jest.mock('../src/models', () => ({
   LetterAttempt: {
@@ -21,11 +27,15 @@ jest.mock('../src/models', () => ({
     count:   (...a) => mockLaCount(...a),
   },
 }));
+jest.mock('../src/services/teacherService', () => ({
+  getOwnStudentById: (...a) => mockGetOwnStudentById(...a),
+}));
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockLaFindAll.mockResolvedValue([]);
   mockLaCount.mockResolvedValue(0);
+  mockGetOwnStudentById.mockResolvedValue({ sid: 13, teacher_id: 7 });
 });
 
 describe('handwritingController.getInitialReport — letterMasteryRows query excludes source_type', () => {
@@ -36,7 +46,7 @@ describe('handwritingController.getInitialReport — letterMasteryRows query exc
       expect(where.source_type).toBeNull();
       return [];
     });
-    const req = { params: { studentId: '13' } };
+    const req = { params: { studentId: '13' }, user: { id: 7 } };
     const res = { json: jest.fn() };
     try { await getInitialReport(req, res); } catch (_e) { /* unrelated downstream dependency, ignored */ }
     expect(mockLaFindAll).toHaveBeenCalled();
@@ -51,7 +61,7 @@ describe('handwritingController.getLetterProgressReport — attempts query exclu
       expect(where.source_type).toBeNull();
       return [];
     });
-    const req = { params: { studentId: '13' } };
+    const req = { params: { studentId: '13' }, user: { id: 7 } };
     const res = { json: jest.fn() };
     await getLetterProgressReport(req, res);
     expect(mockLaFindAll).toHaveBeenCalled();

@@ -82,6 +82,7 @@ function attemptRow(overrides = {}) {
     session_key: 'session-1', attempt_number: 3, support_level: null,
     collection_mode: false, capture_status: 'complete',
     features: featuresForScore(80),
+    motor_score: 80, // Motor Score Unification — the service now reads this directly.
     created_at: new Date('2026-08-01T10:00:00.000Z'),
     ...overrides,
   };
@@ -102,6 +103,7 @@ function makeLevelAttempts(level, scores, { family = 'curved', explicit = false,
       attempt_number: resolvedAttemptNumber,
       support_level: explicit ? level : null,
       features: featuresForScore(score),
+      motor_score: score, // Motor Score Unification — authoritative score source
       created_at: new Date(2026, 0, 1, 0, 0, id),
     });
   });
@@ -209,9 +211,9 @@ describe('E2E Test 6 — explicit adaptive rows used instead of proxy (§6/§7 c
     // Simulates exactly what Step 3's buildSessionAttemptRecord() would have
     // persisted for a recommend_medium session (medium → low → low).
     const persistedAdaptiveSession = [
-      attemptRow({ id: 1, letter: 'o', session_key: 'adaptive-session', attempt_number: 1, support_level: 'medium', features: featuresForScore(82) }),
-      attemptRow({ id: 2, letter: 'o', session_key: 'adaptive-session', attempt_number: 2, support_level: 'low',    features: featuresForScore(81) }),
-      attemptRow({ id: 3, letter: 'o', session_key: 'adaptive-session', attempt_number: 3, support_level: 'low',    features: featuresForScore(83) }),
+      attemptRow({ id: 1, letter: 'o', session_key: 'adaptive-session', attempt_number: 1, support_level: 'medium', features: featuresForScore(82), motor_score: 82 }),
+      attemptRow({ id: 2, letter: 'o', session_key: 'adaptive-session', attempt_number: 2, support_level: 'low',    features: featuresForScore(81), motor_score: 81 }),
+      attemptRow({ id: 3, letter: 'o', session_key: 'adaptive-session', attempt_number: 3, support_level: 'low',    features: featuresForScore(83), motor_score: 83 }),
     ];
     setupRows(persistedAdaptiveSession);
 
@@ -235,7 +237,7 @@ describe('E2E Test 6 — explicit adaptive rows used instead of proxy (§6/§7 c
 
 describe('E2E Test 7 — explicit support dominates forever, even for a lone future-shaped row', () => {
   it('attempt_number=1 + support_level=low resolves to low, never the attempt-number proxy (high)', async () => {
-    setupRows([attemptRow({ id: 1, letter: 'o', attempt_number: 1, support_level: 'low', features: featuresForScore(90) })]);
+    setupRows([attemptRow({ id: 1, letter: 'o', attempt_number: 1, support_level: 'low', features: featuresForScore(90), motor_score: 90 })]);
     const result = await evaluateSupportRecommendations({ studentId: 13 });
     expect(result.families.curved.supportResults.low.count).toBe(1);
     expect(result.families.curved.supportResults.high.count).toBe(0);
@@ -248,12 +250,12 @@ describe('E2E Test 8 — mixed historical + explicit evidence in one family wind
   it('honors explicit values, still uses historical rows, evidenceBasis=mixed, no duplication/misclassification', async () => {
     setupRows([
       // 2 old historical rows (no explicit support_level) — proxy-resolved.
-      attemptRow({ id: 1, letter: 'o', session_key: 'old-1', attempt_number: 2, support_level: null, features: featuresForScore(82) }),
-      attemptRow({ id: 2, letter: 'o', session_key: 'old-2', attempt_number: 2, support_level: null, features: featuresForScore(83) }),
+      attemptRow({ id: 1, letter: 'o', session_key: 'old-1', attempt_number: 2, support_level: null, features: featuresForScore(82), motor_score: 82 }),
+      attemptRow({ id: 2, letter: 'o', session_key: 'old-2', attempt_number: 2, support_level: null, features: featuresForScore(83), motor_score: 83 }),
       // 3 new explicit rows from a post-Step-3 adaptive session.
-      attemptRow({ id: 3, letter: 'o', session_key: 'new-1', attempt_number: 1, support_level: 'medium', features: featuresForScore(81) }),
-      attemptRow({ id: 4, letter: 'o', session_key: 'new-2', attempt_number: 2, support_level: 'medium', features: featuresForScore(84) }),
-      attemptRow({ id: 5, letter: 'o', session_key: 'new-3', attempt_number: 3, support_level: 'medium', features: featuresForScore(79) }),
+      attemptRow({ id: 3, letter: 'o', session_key: 'new-1', attempt_number: 1, support_level: 'medium', features: featuresForScore(81), motor_score: 81 }),
+      attemptRow({ id: 4, letter: 'o', session_key: 'new-2', attempt_number: 2, support_level: 'medium', features: featuresForScore(84), motor_score: 84 }),
+      attemptRow({ id: 5, letter: 'o', session_key: 'new-3', attempt_number: 3, support_level: 'medium', features: featuresForScore(79), motor_score: 79 }),
     ]);
     const result = await evaluateSupportRecommendations({ studentId: 13 });
     const curved = result.families.curved;
@@ -451,9 +453,9 @@ describe('§31 Full acceptance scenario — Student X, curved, target 80', () =>
     // reconstruction reads it back correctly as explicit, not proxy —
     // closing the full feedback loop end-to-end.
     setupRows([
-      attemptRow({ id: 101, letter: 'o', session_key: 'next-session', attempt_number: 1, support_level: 'medium', features: featuresForScore(83) }),
-      attemptRow({ id: 102, letter: 'o', session_key: 'next-session', attempt_number: 2, support_level: 'low',    features: featuresForScore(85) }),
-      attemptRow({ id: 103, letter: 'o', session_key: 'next-session', attempt_number: 3, support_level: 'low',    features: featuresForScore(81) }),
+      attemptRow({ id: 101, letter: 'o', session_key: 'next-session', attempt_number: 1, support_level: 'medium', features: featuresForScore(83), motor_score: 83 }),
+      attemptRow({ id: 102, letter: 'o', session_key: 'next-session', attempt_number: 2, support_level: 'low',    features: featuresForScore(85), motor_score: 85 }),
+      attemptRow({ id: 103, letter: 'o', session_key: 'next-session', attempt_number: 3, support_level: 'low',    features: featuresForScore(81), motor_score: 81 }),
     ]);
     const nextResult = await evaluateSupportRecommendations({ studentId: 13 });
     const nextCurved = nextResult.families.curved;

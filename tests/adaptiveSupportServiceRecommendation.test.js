@@ -71,6 +71,7 @@ function attemptRow(overrides = {}) {
     collection_mode: false,
     capture_status: 'complete',
     features: featuresForScore(80),
+    motor_score: 80, // Motor Score Unification — the service now reads this directly, not a reconstruction from `features`.
     created_at: new Date('2026-08-01T10:00:00.000Z'),
     ...overrides,
   };
@@ -93,6 +94,7 @@ function makeLevelAttempts(level, scores, { family = 'curved', explicit = false 
       attempt_number: attemptNumber,
       support_level: explicit ? level : null,
       features: featuresForScore(score),
+      motor_score: score, // Motor Score Unification — authoritative score source now
       created_at: new Date(2026, 0, 1, 0, 0, id),
     });
   });

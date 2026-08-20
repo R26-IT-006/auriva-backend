@@ -3,6 +3,21 @@
 /**
  * attemptPerformanceScore.js
  *
+ * ⚠ NON-AUTHORITATIVE (Motor Score Unification, 2026-08) — this module's
+ * output is the retired featuresToScore()-domain mirror. It is no longer
+ * read by any runtime code path: dynamicThresholdService.js and
+ * adaptiveSupportService.js were switched to read LetterAttempt.motor_score
+ * (computeMotorScore()-domain — src/utils/motorScore.js) directly. Mastery,
+ * threshold updates, and Feature 2/3 evidence never consult this file.
+ * Kept only because its own parity tests (tests/attemptPerformanceScore.test.js)
+ * remain a useful, verified historical record of the frontend's real-time
+ * featuresToScore() formula. Do not wire this back into any decision path —
+ * see tests/motorScoreAuthority.test.js's "Contradiction regression" case
+ * for a concrete example of the two domains disagreeing.
+ *
+ * Original doc (still accurate for what this file computes, just not for
+ * who — nobody — currently consumes it):
+ *
  * Feature 2 Step 4 — reconstructs a single LetterAttempt row's own
  * performance score from its stored PER-ATTEMPT `features` JSONB
  * ({smoothness, dtw_distance, ...} — see src/models/LetterAttempt.js and

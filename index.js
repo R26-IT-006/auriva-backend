@@ -21,9 +21,20 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
+// PATCH added (final pre-PP2 fix) — PATCH /handwriting/assessment/:id/finalize
+// and PATCH /handwriting/collection-session/:id/complete both already exist
+// as real routes; this list previously omitted the verb entirely. The React
+// Native app itself is unaffected either way (CORS preflight is a browser
+// mechanism, not enforced by native fetch/axios), but a future browser-based
+// admin tool or a CORS-aware HTTP client would otherwise be silently blocked
+// on these two routes.
+//
+// origin: CORS_ORIGIN falls back to '*' when unset — an accepted, documented
+// development/pilot-stage default (see .env.example), not tightened here to
+// avoid an unreviewed production-security change immediately before PP2.
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
 }));
 
 // ─── HTTP request logging ─────────────────────────────────────────────────────

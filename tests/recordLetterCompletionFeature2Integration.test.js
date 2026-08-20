@@ -54,8 +54,12 @@ jest.mock('../src/utils/featureNormalization', () => ({
   normalizeLetterFeatures: jest.fn().mockReturnValue({ normalized: { stroke_order_meta: null }, validity: {} }),
 }));
 
+// Motor Score Unification — computeMotorScore() is now the authoritative
+// score source for recordLetterCompletion's own pass/fail decision, so
+// this mock is controllable per-test (default 80) rather than fixed.
+const mockComputeMotorScore = jest.fn();
 jest.mock('../src/utils/motorScore', () => ({
-  computeMotorScore: jest.fn().mockReturnValue({ motor_score: 80, quality_score: 80, score_version: 'v1' }),
+  computeMotorScore: (...a) => mockComputeMotorScore(...a),
 }));
 
 jest.mock('../src/services/explainabilityService', () => ({ analyzeMotorDifficulty: jest.fn() }));
@@ -94,6 +98,11 @@ function makeProgressRecord(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetOwnStudentById.mockResolvedValue({ sid: 13, teacher_id: 7 });
+  mockComputeMotorScore.mockReturnValue({ motor_score: 80, quality_score: 80, score_version: 'v1' });
+  // jest.clearAllMocks() does NOT clear a mock's queued
+  // .mockResolvedValueOnce() entries, only its call history — reset here so
+  // a once-value queued by one test can never leak into the next test.
+  mockResolveProgressionThreshold.mockReset();
   mockLetterAttemptBulkCreate.mockResolvedValue([]);
   mockLetterProgressFindOrCreate.mockResolvedValue([makeProgressRecord(), true]);
   mockLetterProgressFindOne.mockResolvedValue({ id: 1, blocked_attempts: 1 });
@@ -191,6 +200,9 @@ describe('Controller 6 — explicit quality_threshold is passed through and wins
 describe('Controller 7 — Feature 2 target causes a correct fail when bestScore is below it', () => {
   it('completed:false, bestScore/threshold reported', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88 }));
+    // Motor Score Unification — bestScore is now the backend-computed
+    // authoritative score, not attempt_scores (diagnostic-only below).
+    mockComputeMotorScore.mockReturnValue({ motor_score: 70, quality_score: 70, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ letter: 'c', attempt_scores: [70] }), res);
 
@@ -205,6 +217,7 @@ describe('Controller 7 — Feature 2 target causes a correct fail when bestScore
 describe('Controller 8 — Feature 2 target allows a correct pass when bestScore meets it', () => {
   it('enters the existing success branch (201/200 + record id)', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88 }));
+    mockComputeMotorScore.mockReturnValue({ motor_score: 88, quality_score: 88, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ letter: 'c', attempt_scores: [88] }), res); // exactly meets -> >= passes
 
@@ -218,6 +231,7 @@ describe('Controller 8 — Feature 2 target allows a correct pass when bestScore
 describe('Controller 9 — LetterAttempt persistence still receives the resolved threshold', () => {
   it('bulkCreate rows carry the Feature 2-resolved threshold value', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88 }));
+    mockComputeMotorScore.mockReturnValue({ motor_score: 90, quality_score: 90, score_version: 'v1' });
     await recordLetterCompletion(makeReq({ letter: 'c', attempt_scores: [90] }), makeRes());
 
     expect(mockLetterAttemptBulkCreate).toHaveBeenCalledTimes(1);
@@ -269,6 +283,7 @@ describe('Controller 12 — legacy auto-raise still fires on 5 clean consecutive
     ]);
     const studentUpdate = jest.fn().mockResolvedValue(undefined);
     mockStudentFindByPk.mockResolvedValueOnce({ personal_thresholds: { default: 55 }, update: studentUpdate });
+    mockComputeMotorScore.mockReturnValue({ motor_score: 90, quality_score: 90, score_version: 'v1' });
 
     await recordLetterCompletion(makeReq({ letter: 'c', attempt_scores: [90] }), makeRes());
 
@@ -294,6 +309,7 @@ describe('Controller 13 — collection mode never touches the new resolver', () 
 describe('Controller 14 — threshold source metadata is additive only', () => {
   it('failure response keeps every existing field and adds the two new ones', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88, family: 'curved' }));
+    mockComputeMotorScore.mockReturnValue({ motor_score: 70, quality_score: 70, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ letter: 'c', attempt_scores: [70] }), res);
 
@@ -305,6 +321,7 @@ describe('Controller 14 — threshold source metadata is additive only', () => {
 
   it('success response keeps every existing field and adds the two new ones', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce(feature2Result({ threshold: 88, family: 'curved' }));
+    mockComputeMotorScore.mockReturnValue({ motor_score: 90, quality_score: 90, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ letter: 'c', attempt_scores: [90] }), res);
 
@@ -341,6 +358,7 @@ describe('Controller 15 — recordLetterCompletion never calls Step 5/6B functio
 describe('Section 33 — byte-identical behavior for a student with no family target', () => {
   it('a legacy-sourced resolution produces the exact same completed:false shape the pre-Step-7 code would have', async () => {
     mockResolveProgressionThreshold.mockResolvedValueOnce({ status: 'resolved', threshold: 57, source: 'legacy_default', family: null, historyId: null });
+    mockComputeMotorScore.mockReturnValue({ motor_score: 50, quality_score: 50, score_version: 'v1' });
     const res = makeRes();
     await recordLetterCompletion(makeReq({ letter: 'z', attempt_scores: [50] }), res); // 50 < 57
 

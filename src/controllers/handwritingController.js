@@ -23,6 +23,12 @@ const {
 } = require('../services/dynamicThresholdService');
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../services/motorBaselineService');
+// Motor Score Unification — computes/attaches the AUTHORITATIVE
+// (computeMotorScore-domain) family baseline alongside the existing,
+// untouched Feature 11A baseline. See that service's own header.
+const { attachAuthoritativeFamilyProfile } = require('../services/authoritativeMotorBaselineService');
+const { computeAuthoritativeBestScore } = require('../utils/authoritativeAttemptScoring');
+const { PROGRESSION_SCORE_VERSION } = require('../config/motorScoreRegime');
 const { predictInitialMotorCluster } = require('../services/motorClusterService');
 // Feature 11B Phase 5 — mastery-evidence accumulation + milestone K=2
 // prediction (replaces Phase 4's rejected explicit-reassessment design).
@@ -35,7 +41,6 @@ const wordWritingService = require('../services/wordWritingService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
 const { computeMotorScore } = require('../utils/motorScore');
 const { deriveMotorScoreFromStoredShape } = require('../utils/unifiedShapeScore');
-const { computeCoverageFilteredBestScore } = require('../utils/attemptCoverageValidity');
 const { isValidLetterSupportLevel } = require('../config/letterSupportLevels');
 const { isValidDemoSpeedLevel } = require('../config/demoSpeedPolicy');
 // Feature 3 Step 6 — read-only support-recommendation endpoint. Reuses
@@ -317,6 +322,12 @@ async function getProgress(req, res) {
   const studentId = parseInt(req.params.studentId, 10);
   if (!studentId) throw new ApiError(422, 'Invalid student ID');
 
+  // Final pre-PP2 fix (B-3) — ownership check BEFORE any student-specific
+  // read. This endpoint's response (lowercase/uppercase mastery counts) is
+  // exactly the data the word-unlock gate is derived from, so it must be
+  // just as protected as every write endpoint — same established pattern.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
   const [latest, lowercase_completed, uppercase_completed] = await Promise.all([
     HandwritingAssessment.findOne({
       where: { student_id: studentId },
@@ -405,6 +416,8 @@ function saveLetterAttempts(attempts, {
   student_id, letter, case_type, sessionKey, passed, bestScore, threshold, collection_mode,
   collection_session_id, protocol_version, device_type, app_version,
   feature_version, template_version, normalization_version, task_order, canvas_width, canvas_height,
+  // Motor Score Unification (spec §24/§26) — see config/motorScoreRegime.js.
+  progressionScoreVersion = null,
 }) {
   if (!Array.isArray(attempts) || attempts.length === 0) return Promise.resolve();
 
@@ -461,6 +474,11 @@ function saveLetterAttempts(attempts, {
         motor_score,
         quality_score,
         score_version,
+        // Motor Score Unification (spec §24) — marks whether THIS row's
+        // own pass/best_score/threshold_passed were decided under the new
+        // authoritative regime. Null on collection_mode-independent legacy
+        // rows and on any row saved before this phase.
+        progression_score_version: progressionScoreVersion,
 
         // collection_accepted = row saved successfully — NEVER an ML quality
         // label. threshold_passed is the real bestScore >= threshold
@@ -584,6 +602,11 @@ async function recordLetterCompletion(req, res) {
         student_id, letter, case_type, sessionKey,
         passed: true, bestScore: colBestScore, threshold: colThreshold,
         collection_mode: true,
+        // Motor Score Unification (spec §26) — collection rows' own
+        // motor_score was always computeMotorScore()-derived (unchanged);
+        // this only marks that fact. Collection-mode gating/isolation
+        // itself is completely untouched by this phase.
+        progressionScoreVersion: PROGRESSION_SCORE_VERSION,
         ...metaFields,
       });
     } catch (dbErr) {
@@ -599,27 +622,39 @@ async function recordLetterCompletion(req, res) {
   let thresholdSource = null;
   let thresholdFamily = null;
 
-  if (Array.isArray(attempt_scores) && attempt_scores.length > 0) {
-    // Coverage-fix audit: bestScore now excludes any attempt whose drawing
-    // fails the coverage/geometry check (see
-    // utils/attemptCoverageValidity.js — mirrors ONLY didPassAttempt's
-    // coverage sub-check, not its smoothness/DTW conditions, which are out
-    // of scope here). The index-alignment guard inside
-    // computeCoverageFilteredBestScore fails open (reverts to the old
-    // Math.max(...attempt_scores) behavior) if attempt_scores and attempts
-    // aren't the same length — logged below since that should never happen
-    // with the real client.
-    const coverageResult = computeCoverageFilteredBestScore({
-      attemptScores: attempt_scores, attempts, canvasWidth: canvas_width, canvasHeight: canvas_height,
-    });
-    if (coverageResult.skippedForMismatch) {
-      logger.warn('attempt_scores/attempts length mismatch — coverage filter skipped, failing open', {
+  // Motor Score Unification (spec §2/§4/§10) — bestScore is now computed
+  // ENTIRELY on the backend, from this session's own attempts[].features/
+  // .strokes, via computeAuthoritativeBestScore() (the same
+  // normalizeLetterFeatures() -> computeMotorScore() pipeline
+  // saveLetterAttempts() already uses for persistence, reused here so
+  // mastery/threshold gating uses it too — spec §5). It preserves the
+  // exact same coverage/geometry eligibility rule
+  // (isAttemptCoverageValid()) the old client-score path used.
+  //
+  // The client-supplied `attempt_scores` array (featuresToScore()-domain)
+  // is READ ONLY for a diagnostic length-mismatch log below — it is NEVER
+  // used to compute bestScore. A client sending inflated or suppressed
+  // attempt_scores cannot change the pass/fail outcome; only the actual
+  // captured features/strokes can (see tests/motorScoreAuthority.test.js's
+  // explicit adversarial-client tests).
+  //
+  // Gated on `attempts` (the array carrying the real captured data), not
+  // on `attempt_scores` — closing a pre-existing gap where an
+  // attempt_scores-less request used to skip the threshold gate entirely
+  // and fall through to an automatic pass.
+  if (Array.isArray(attempts) && attempts.length > 0) {
+    if (Array.isArray(attempt_scores) && attempt_scores.length !== attempts.length) {
+      logger.warn('attempt_scores/attempts length mismatch — attempt_scores is diagnostic-only and never affects the authoritative score', {
         student_id, letter, case_type,
         attemptScoresLength: attempt_scores.length,
-        attemptsLength: Array.isArray(attempts) ? attempts.length : null,
+        attemptsLength: attempts.length,
       });
     }
-    bestScore = coverageResult.bestScore;
+
+    const authoritativeResult = computeAuthoritativeBestScore({
+      attempts, canvasWidth: canvas_width, canvasHeight: canvas_height,
+    });
+    bestScore = authoritativeResult.bestScore;
 
     // Feature 2 Step 7: resolveProgressionThreshold() replaces the old
     // inline ternary (`typeof quality_threshold === 'number' ? ... :
@@ -675,6 +710,7 @@ async function recordLetterCompletion(req, res) {
         await saveLetterAttempts(attempts, {
           student_id, letter, case_type, sessionKey, passed: false, bestScore, threshold,
           collection_mode: false,
+          progressionScoreVersion: PROGRESSION_SCORE_VERSION,
           ...metaFields,
         });
         attemptsSaved = true;
@@ -709,9 +745,15 @@ async function recordLetterCompletion(req, res) {
     }
   }
 
+  // Motor Score Unification (spec §24) — progression_score_version is only
+  // ever set via `defaults`, so it is written ONLY at the moment this row
+  // is genuinely CREATED (this letter's first-ever mastery event) — never
+  // retroactively applied if the row already existed (findOrCreate ignores
+  // `defaults` on an existing row), preserving historical rows exactly as
+  // they are (spec §25).
   const [record, created] = await LetterProgress.findOrCreate({
     where:    { student_id, letter, case_type },
-    defaults: { student_id, letter, case_type, blocked_attempts: 0 },
+    defaults: { student_id, letter, case_type, blocked_attempts: 0, progression_score_version: PROGRESSION_SCORE_VERSION },
   });
 
   const recentPasses = await LetterProgress.findAll({
@@ -744,6 +786,7 @@ async function recordLetterCompletion(req, res) {
     await saveLetterAttempts(attempts, {
       student_id, letter, case_type, sessionKey, passed: true, bestScore, threshold,
       collection_mode: false,
+      progressionScoreVersion: PROGRESSION_SCORE_VERSION,
       ...metaFields,
     });
     attemptsSaved = true;
@@ -812,6 +855,15 @@ async function explainAssessment(req, res) {
     throw new ApiError(422, 'student_id and shapes array are required');
   }
 
+  // Final pre-PP2 fix (B-3) — ownership check BEFORE any analysis or write.
+  // Without this, a teacher could persist ExplanationResult/
+  // RecommendationHistory rows against an arbitrary student_id they do not
+  // own. Placed immediately after input validation, before
+  // analyzeMotorDifficulty even runs, so an unauthorized request performs
+  // zero work of any kind — same established pattern as every other write
+  // endpoint in this file.
+  await teacherService.getOwnStudentById(req.user.id, Number(student_id));
+
   const result = analyzeMotorDifficulty(shapes, letter_metrics ?? {}, motor_score ?? null);
 
   // Persist explanation result (fire-and-forget — don't block response on DB error)
@@ -878,6 +930,9 @@ async function explainAssessment(req, res) {
 async function getLatestExplanation(req, res) {
   const studentId = parseInt(req.params.studentId, 10);
   if (!studentId) throw new ApiError(422, 'Invalid student ID');
+
+  // Final pre-PP2 fix (B-3) — ownership check BEFORE any read.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
 
   const record = await ExplanationResult.findOne({
     where: { student_id: studentId },
@@ -1131,6 +1186,26 @@ async function finalizeAssessment(req, res) {
     });
   }
 
+  // Motor Score Unification (spec §7/§8) — attaches the AUTHORITATIVE
+  // (computeMotorScore-domain) family profile onto the SAME baseline row
+  // just created/confirmed above, computed from this assessment's own
+  // already-persisted ShapeFeature.motor_score rows (submitAssessment's
+  // own computeMotorScore() calls — no new shape-scoring formula). Runs
+  // only when a baseline row genuinely exists for THIS assessment
+  // ('created' or 'already_exists' — not 'student_baseline_already_exists',
+  // which means a DIFFERENT, earlier assessment owns the baseline row, so
+  // this assessment's own ShapeFeature rows are not the right source for
+  // it). Non-fatal: never blocks or changes this endpoint's response.
+  if (['created', 'already_exists'].includes(baselineResult.status)) {
+    try {
+      await attachAuthoritativeFamilyProfile({ studentId: assessment.student_id, assessmentId: assessment.id });
+    } catch (error) {
+      logger.error('Authoritative family profile attachment threw unexpectedly during finalize', {
+        studentId: assessment.student_id, assessmentId: assessment.id, errorMessage: error.message,
+      });
+    }
+  }
+
   // Feature 2 — automatic family-threshold initialization (final workflow
   // integration). Runs immediately after Feature 1's baseline result above,
   // whenever a valid baseline row now exists for this student — whether
@@ -1190,6 +1265,9 @@ async function finalizeAssessment(req, res) {
 async function getInitialReport(req, res) {
   const studentId = parseInt(req.params.studentId, 10);
   if (!studentId) throw new ApiError(422, 'Invalid student ID');
+
+  // Final pre-PP2 fix (B-3) — ownership check BEFORE any read.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
 
   // Best real score ever achieved per letter, from actual practice attempts —
   // excludes research/protocol rows. Independent of whether a shape
@@ -1293,6 +1371,9 @@ async function getInitialReport(req, res) {
 async function getLetterProgressReport(req, res) {
   const studentId = parseInt(req.params.studentId, 10);
   if (!studentId) throw new ApiError(422, 'Invalid student ID');
+
+  // Final pre-PP2 fix (B-3) — ownership check BEFORE any read.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
 
   const attempts = await LetterAttempt.findAll({
     // Feature 11B Phase 4 — source_type: null excludes reassessment rows so

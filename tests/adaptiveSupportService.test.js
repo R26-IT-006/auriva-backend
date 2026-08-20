@@ -55,7 +55,7 @@ function row(overrides = {}) {
     support_level: null,
     collection_mode: false,
     capture_status: 'complete',
-    features: featuresForScore(80),
+    features: featuresForScore(80), motor_score: 80,
     created_at: new Date('2026-08-01T10:00:00.000Z'),
     ...overrides,
   };
@@ -175,7 +175,7 @@ describe('Window Test 18 — failed performance still included', () => {
     // tests/dynamicThresholdService.test.js's identical helper). 35 is
     // still a clearly poor/"failed" score, well below any plausible
     // passing threshold, while still round-tripping exactly.
-    mockRows([row({ id: 1, letter: 'o', attempt_number: 1, features: featuresForScore(35) })]);
+    mockRows([row({ id: 1, letter: 'o', attempt_number: 1, features: featuresForScore(35), motor_score: 35 })]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
 
     expect(result.families.curved.high.count).toBe(1);
@@ -185,7 +185,10 @@ describe('Window Test 18 — failed performance still included', () => {
 
 describe('Window Test 19 — malformed features excluded', () => {
   it('a row with non-numeric/missing feature data is excluded and counted as malformedFeatures', async () => {
-    mockRows([row({ id: 1, letter: 'o', attempt_number: 1, features: { smoothness: 'bad', dtw_distance: 10 } })]);
+    // motor_score: null — the authoritative-domain equivalent of "no usable
+    // normalized features at ingest time" (the now-retired featuresToScore()
+    // mirror's own 'malformed' outcome).
+    mockRows([row({ id: 1, letter: 'o', attempt_number: 1, motor_score: null })]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
 
     expect(result.families.curved.high.count).toBe(0);
@@ -193,7 +196,7 @@ describe('Window Test 19 — malformed features excluded', () => {
   });
 
   it('a row with features: null is excluded and counted as malformedFeatures', async () => {
-    mockRows([row({ id: 1, letter: 'o', attempt_number: 1, features: null })]);
+    mockRows([row({ id: 1, letter: 'o', attempt_number: 1, features: null, motor_score: null })]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
 
     expect(result.families.curved.high.count).toBe(0);
@@ -331,8 +334,8 @@ describe('Dedup Test 27 — same session, same support, different attempt number
 describe('Dedup Test 28 — duplicate newest/oldest deterministic winner', () => {
   it('the NEWEST of two duplicate rows (session_key + attempt_number) is the one retained', async () => {
     mockRows([
-      row({ id: 99, letter: 'o', attempt_number: 1, session_key: 'dup-session', features: featuresForScore(90), created_at: new Date('2026-08-05T10:00:02.000Z') }), // newer
-      row({ id: 1,  letter: 'o', attempt_number: 1, session_key: 'dup-session', features: featuresForScore(40), created_at: new Date('2026-08-05T10:00:01.000Z') }), // older
+      row({ id: 99, letter: 'o', attempt_number: 1, session_key: 'dup-session', features: featuresForScore(90), motor_score: 90, created_at: new Date('2026-08-05T10:00:02.000Z') }), // newer
+      row({ id: 1,  letter: 'o', attempt_number: 1, session_key: 'dup-session', features: featuresForScore(40), motor_score: 40, created_at: new Date('2026-08-05T10:00:01.000Z') }), // older
     ]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
 
@@ -345,9 +348,9 @@ describe('Dedup Test 28 — duplicate newest/oldest deterministic winner', () =>
 describe('Dedup Test 29 — duplicate anomaly does not inflate the average', () => {
   it('averageScore is computed only from the deduped, unique attempts', async () => {
     mockRows([
-      row({ id: 3, letter: 'o', attempt_number: 1, session_key: 'dup-session', features: featuresForScore(90), created_at: new Date('2026-08-05T10:00:03.000Z') }), // dup winner
-      row({ id: 2, letter: 'o', attempt_number: 1, session_key: 'dup-session', features: featuresForScore(10), created_at: new Date('2026-08-05T10:00:02.000Z') }), // dup loser — must NOT count
-      row({ id: 1, letter: 'o', attempt_number: 2, session_key: 'other-session', features: featuresForScore(70), created_at: new Date('2026-08-05T10:00:01.000Z') }), // different bucket (medium)
+      row({ id: 3, letter: 'o', attempt_number: 1, session_key: 'dup-session', features: featuresForScore(90), motor_score: 90, created_at: new Date('2026-08-05T10:00:03.000Z') }), // dup winner
+      row({ id: 2, letter: 'o', attempt_number: 1, session_key: 'dup-session', features: featuresForScore(10), motor_score: 10, created_at: new Date('2026-08-05T10:00:02.000Z') }), // dup loser — must NOT count
+      row({ id: 1, letter: 'o', attempt_number: 2, session_key: 'other-session', features: featuresForScore(70), motor_score: 70, created_at: new Date('2026-08-05T10:00:01.000Z') }), // different bucket (medium)
     ]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
 
@@ -364,8 +367,8 @@ describe('Dedup Test 29 — duplicate anomaly does not inflate the average', () 
 describe('Aggregate Test 30 — correct average', () => {
   it('averages exactly the included scores', async () => {
     mockRows([
-      row({ id: 1, letter: 'o', attempt_number: 1, session_key: 's1', features: featuresForScore(70), created_at: new Date(2026, 0, 3) }),
-      row({ id: 2, letter: 'o', attempt_number: 1, session_key: 's2', features: featuresForScore(90), created_at: new Date(2026, 0, 2) }),
+      row({ id: 1, letter: 'o', attempt_number: 1, session_key: 's1', features: featuresForScore(70), motor_score: 70, created_at: new Date(2026, 0, 3) }),
+      row({ id: 2, letter: 'o', attempt_number: 1, session_key: 's2', features: featuresForScore(90), motor_score: 90, created_at: new Date(2026, 0, 2) }),
     ]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
     expect(result.families.curved.high.averageScore).toBe(80);
@@ -375,8 +378,8 @@ describe('Aggregate Test 30 — correct average', () => {
 describe('Aggregate Test 31 — correct min', () => {
   it('minScore is the lowest included score', async () => {
     mockRows([
-      row({ id: 1, letter: 'o', attempt_number: 1, session_key: 's1', features: featuresForScore(70) }),
-      row({ id: 2, letter: 'o', attempt_number: 1, session_key: 's2', features: featuresForScore(90) }),
+      row({ id: 1, letter: 'o', attempt_number: 1, session_key: 's1', features: featuresForScore(70), motor_score: 70 }),
+      row({ id: 2, letter: 'o', attempt_number: 1, session_key: 's2', features: featuresForScore(90), motor_score: 90 }),
     ]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
     expect(result.families.curved.high.minScore).toBe(70);
@@ -386,8 +389,8 @@ describe('Aggregate Test 31 — correct min', () => {
 describe('Aggregate Test 32 — correct max', () => {
   it('maxScore is the highest included score', async () => {
     mockRows([
-      row({ id: 1, letter: 'o', attempt_number: 1, session_key: 's1', features: featuresForScore(70) }),
-      row({ id: 2, letter: 'o', attempt_number: 1, session_key: 's2', features: featuresForScore(90) }),
+      row({ id: 1, letter: 'o', attempt_number: 1, session_key: 's1', features: featuresForScore(70), motor_score: 70 }),
+      row({ id: 2, letter: 'o', attempt_number: 1, session_key: 's2', features: featuresForScore(90), motor_score: 90 }),
     ]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
     expect(result.families.curved.high.maxScore).toBe(90);
@@ -408,7 +411,7 @@ describe('Aggregate Test 33 — empty → null aggregates, never 0', () => {
 
 describe('Aggregate Test 34 — one value handled correctly', () => {
   it('average/min/max all equal the single included score', async () => {
-    mockRows([row({ id: 1, letter: 'o', attempt_number: 1, features: featuresForScore(77) })]);
+    mockRows([row({ id: 1, letter: 'o', attempt_number: 1, features: featuresForScore(77), motor_score: 77 })]);
     const result = await getSupportPerformanceByFamily({ studentId: 13 });
     const w = result.families.curved.high;
     expect(w.count).toBe(1);

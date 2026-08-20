@@ -84,6 +84,7 @@ function attemptRow(overrides = {}) {
     session_key: `s-${idCounter}`, attempt_number: 3, support_level: null,
     collection_mode: false, capture_status: 'complete',
     features: featuresForScore(80),
+    motor_score: 80, // Motor Score Unification — Feature 2/3 now read this directly.
     created_at: new Date(2026, 0, 1, 0, 0, idCounter),
     ...overrides,
   };
@@ -91,13 +92,13 @@ function attemptRow(overrides = {}) {
 
 /** attempt_number=3 rows for Feature 2's per-family window (curved: c/o). */
 function feature2Attempts(scores) {
-  return scores.map(score => attemptRow({ letter: 'o', attempt_number: 3, features: featuresForScore(score) }));
+  return scores.map(score => attemptRow({ letter: 'o', attempt_number: 3, features: featuresForScore(score), motor_score: score }));
 }
 
 /** attempt_number rows for Feature 3's support-level windows (1=high, 2=medium, 3=low). */
 function feature3Attempts(level, scores) {
   const attemptNumber = { high: 1, medium: 2, low: 3 }[level];
-  return scores.map(score => attemptRow({ letter: 'o', attempt_number: attemptNumber, features: featuresForScore(score) }));
+  return scores.map(score => attemptRow({ letter: 'o', attempt_number: attemptNumber, features: featuresForScore(score), motor_score: score }));
 }
 
 function makeThresholdRow(overrides = {}) {

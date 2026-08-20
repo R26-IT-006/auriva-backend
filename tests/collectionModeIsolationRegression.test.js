@@ -9,9 +9,17 @@
 // via getLetterProgressReport with a mocked LetterAttempt.findAll.
 
 const mockLaFindAll = jest.fn();
+// Final pre-PP2 fix (B-3) — getLetterProgressReport now checks ownership
+// before any read; mocked here exactly like every other controller test,
+// resolving successfully by default so this file's own (unrelated)
+// collection-mode-isolation assertions are unaffected by the fix.
+const mockGetOwnStudentById = jest.fn();
 
 jest.mock('../src/models', () => ({
   LetterAttempt: { findAll: (...a) => mockLaFindAll(...a) },
+}));
+jest.mock('../src/services/teacherService', () => ({
+  getOwnStudentById: (...a) => mockGetOwnStudentById(...a),
 }));
 
 const { evaluatePersistentDifficulty } = require('../src/services/persistentDifficultyService');
@@ -25,6 +33,7 @@ let idCounter;
 beforeEach(() => {
   jest.clearAllMocks();
   idCounter = 1;
+  mockGetOwnStudentById.mockResolvedValue({ sid: STUDENT_ID, teacher_id: 7 });
 });
 function nextId() { return idCounter++; }
 
@@ -140,7 +149,7 @@ describe('Progress-report strongest regression (mandatory) — 20 collection-mod
       ];
     });
 
-    const req = { params: { studentId: String(STUDENT_ID) } };
+    const req = { params: { studentId: String(STUDENT_ID) }, user: { id: 7 } };
     const jsonMock = jest.fn();
     const res = { json: jsonMock };
 

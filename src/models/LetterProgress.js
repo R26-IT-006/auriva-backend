@@ -34,6 +34,16 @@ const LetterProgress = sequelize.define('LetterProgress', {
     type:      DataTypes.JSONB,
     allowNull: true,   // null on rows written by old clients
   },
+  // Motor Score Unification (spec §24) — see
+  // src/config/motorScoreRegime.js. NULL means this letter's mastery
+  // (completed_at) was decided under the legacy regime (client
+  // featuresToScore()-derived bestScore). A real value means mastery was
+  // decided under the new authoritative computeMotorScore()-governed
+  // regime. Never backfilled on historical rows (spec §25).
+  progression_score_version: {
+    type:      DataTypes.STRING(20),
+    allowNull: true,
+  },
 }, {
   tableName: 'letter_progress',
   timestamps: false,

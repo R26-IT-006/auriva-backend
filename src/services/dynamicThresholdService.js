@@ -73,9 +73,14 @@ const { Op } = require('sequelize');
 const crypto = require('crypto');
 const { getStudentMotorBaseline } = require('./motorBaselineService');
 const { MAPPING_VERSION, getMappedLettersForFamily, getBaselineFamily } = require('../config/letterBaselineFamilies');
-const { deriveAttemptPerformanceScore } = require('../utils/attemptPerformanceScore');
 const { sequelize, ThresholdHistory, LetterAttempt, Student } = require('../models');
 const logger = require('../utils/logger');
+// Motor Score Unification (spec §11) — Feature 2 evidence now reads the
+// persisted, backend-authoritative LetterAttempt.motor_score directly
+// (computeMotorScore()'s own output, already stored per attempt) rather
+// than recomputing a featuresToScore()-domain estimate via
+// deriveAttemptPerformanceScore(). See getRecentFamilyPerformance() below.
+const { PROGRESSION_SCORE_VERSION } = require('../config/motorScoreRegime');
 
 // Pilot engineering default — NOT clinically validated. Centralized here so
 // it is never scattered as a bare "+5" magic number.
@@ -210,12 +215,36 @@ async function deriveInitialFamilyThresholds({ studentId, margin = INITIAL_THRES
 
   const baseline = baselineResult.baseline;
 
-  // Family scores only — overall_motor_score is intentionally never read here.
-  const thresholds = {
-    straight: deriveFamilyThreshold(baseline.straight_score, margin),
-    curved:   deriveFamilyThreshold(baseline.curved_score, margin),
-    complex:  deriveFamilyThreshold(baseline.complex_score, margin),
-  };
+  // Motor Score Unification (spec §6/§9) — the family score a threshold is
+  // derived from must live in the SAME domain as the letter-attempt score
+  // it will gate (computeMotorScore()). progression_straight/curved/complex
+  // _score are the authoritative (computeMotorScore-domain) family
+  // averages, attached alongside the existing baseline at finalize time
+  // (authoritativeMotorBaselineService.js) — used whenever present.
+  //
+  // Fallback to the legacy straight_score/curved_score/complex_score
+  // (computeUnifiedShapeScore domain) ONLY for a baseline row created
+  // before this phase, where the progression_* columns are still null
+  // (never backfilled — spec §8/§25). This preserves EXACT legacy
+  // threshold behavior for existing students; it does not mix domains
+  // within one student's own threshold — a given baseline row's three
+  // family thresholds always come from the same domain as each other,
+  // never a partial mix of old/new per family.
+  const usesAuthoritativeDomain = baseline.progression_straight_score != null
+    && baseline.progression_curved_score != null
+    && baseline.progression_complex_score != null;
+
+  const thresholds = usesAuthoritativeDomain
+    ? {
+        straight: deriveFamilyThreshold(baseline.progression_straight_score, margin),
+        curved:   deriveFamilyThreshold(baseline.progression_curved_score, margin),
+        complex:  deriveFamilyThreshold(baseline.progression_complex_score, margin),
+      }
+    : {
+        straight: deriveFamilyThreshold(baseline.straight_score, margin),
+        curved:   deriveFamilyThreshold(baseline.curved_score, margin),
+        complex:  deriveFamilyThreshold(baseline.complex_score, margin),
+      };
 
   return {
     status: 'derived',
@@ -225,6 +254,10 @@ async function deriveInitialFamilyThresholds({ studentId, margin = INITIAL_THRES
     mappingVersion: MAPPING_VERSION,
     margin,
     thresholds,
+    // Motor Score Unification — lets callers/tests/response metadata
+    // distinguish which domain this student's thresholds are currently in,
+    // without needing to separately re-query the baseline row.
+    scoreDomain: usesAuthoritativeDomain ? PROGRESSION_SCORE_VERSION : 'legacy_unified_shape_score',
   };
 }
 
@@ -538,8 +571,13 @@ async function fetchFamilyWindow(studentId, family, windowSize) {
     }
     seenSessionKeys.add(row.session_key);
 
-    const scoreResult = deriveAttemptPerformanceScore(row);
-    if (scoreResult.status !== 'valid') {
+    // Motor Score Unification (spec §11) — the authoritative, already-
+    // persisted computeMotorScore() output for this exact attempt row,
+    // never a recomputed featuresToScore()-domain estimate. A row whose
+    // motor_score is null (no usable normalized features at ingest time)
+    // is malformed for this purpose, same as the old mirror's 'invalid'
+    // status was.
+    if (row.motor_score == null) {
       malformedCount++;
       continue;
     }
@@ -551,7 +589,7 @@ async function fetchFamilyWindow(studentId, family, windowSize) {
       caseType: row.case_type,
       family,
       attemptNumber: row.attempt_number,
-      performanceScore: scoreResult.score,
+      performanceScore: row.motor_score,
       thresholdPassed: row.threshold_passed,
       createdAt: row.created_at,
     });

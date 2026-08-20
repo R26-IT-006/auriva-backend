@@ -200,6 +200,18 @@ const LetterAttempt = sequelize.define('LetterAttempt', {
     allowNull: true,
   },
 
+  // Motor Score Unification (spec §24) — see
+  // src/config/motorScoreRegime.js. NULL for every row created before this
+  // phase (legacy regime: client featuresToScore()-derived attempt_scores
+  // governed pass/fail). A real value means this row's own
+  // pass/best_score/threshold_passed were decided under the new
+  // authoritative computeMotorScore()-governed regime. Never backfilled on
+  // historical rows.
+  progression_score_version: {
+    type:      DataTypes.STRING(20),
+    allowNull: true,
+  },
+
   created_at: {
     type:         DataTypes.DATE,
     defaultValue: DataTypes.NOW,

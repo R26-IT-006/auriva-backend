@@ -73,6 +73,27 @@ const StudentMotorBaseline = sequelize.define('StudentMotorBaseline', {
     allowNull: true,
   },
 
+  // Motor Score Unification (spec §6-§9) — the AUTHORITATIVE
+  // (computeMotorScore-domain) family-averaged baseline, computed from
+  // this same source assessment's ShapeFeature.motor_score rows. NULL on
+  // every row created before this phase (never backfilled — spec §8/§25).
+  // straight_score/curved_score/complex_score above are UNTOUCHED by this
+  // phase and remain Feature 11A's frozen research feature-representation
+  // input (computeUnifiedShapeScore domain) — see motorClusterService.js,
+  // which still reads only those three, never these.
+  progression_straight_score: {
+    type:      DataTypes.FLOAT,
+    allowNull: true,
+  },
+  progression_curved_score: {
+    type:      DataTypes.FLOAT,
+    allowNull: true,
+  },
+  progression_complex_score: {
+    type:      DataTypes.FLOAT,
+    allowNull: true,
+  },
+
   created_at: {
     type:         DataTypes.DATE,
     defaultValue: DataTypes.NOW,

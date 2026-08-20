@@ -53,8 +53,15 @@ jest.mock('../src/utils/featureNormalization', () => ({
   normalizeLetterFeatures: jest.fn().mockReturnValue({ normalized: { stroke_order_meta: null }, validity: {} }),
 }));
 
+// Motor Score Unification — computeMotorScore() is now the authoritative
+// score source for recordLetterCompletion's own pass/fail decision (not
+// just for persistence), so this mock is a controllable jest.fn() (default
+// 80, matching every previous test's assumed "passing" score) rather than
+// a fixed inline return value, so the one test that needs a genuinely
+// LOW authoritative score can override it.
+const mockComputeMotorScore = jest.fn();
 jest.mock('../src/utils/motorScore', () => ({
-  computeMotorScore: jest.fn().mockReturnValue({ motor_score: 80, quality_score: 80, score_version: 'v1' }),
+  computeMotorScore: (...a) => mockComputeMotorScore(...a),
 }));
 
 jest.mock('../src/services/explainabilityService', () => ({ analyzeMotorDifficulty: jest.fn() }));
@@ -102,6 +109,7 @@ function orchestrationResult(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetOwnStudentById.mockResolvedValue({ sid: 13, teacher_id: 7 });
+  mockComputeMotorScore.mockReturnValue({ motor_score: 80, quality_score: 80, score_version: 'v1' });
   mockLetterAttemptBulkCreate.mockResolvedValue([]);
   mockLetterProgressFindOrCreate.mockResolvedValue([makeProgressRecord(), true]); // created === true by default
   mockLetterProgressFindOne.mockResolvedValue({ id: 1, blocked_attempts: 1 });
@@ -150,8 +158,12 @@ describe('Repeat mastery (created === false) never re-triggers the hook', () => 
 
 describe('Failed session (blocked branch) never triggers the hook', () => {
   it('a below-threshold session does not call onLetterMastered (LetterProgress is never created there)', async () => {
+    // Motor Score Unification — attempt_scores is no longer authoritative;
+    // the below-threshold outcome must come from the backend-computed
+    // motor score instead (20 < the 55 threshold).
+    mockComputeMotorScore.mockReturnValue({ motor_score: 20, quality_score: 20, score_version: 'v1' });
     const res = makeRes();
-    await recordLetterCompletion(makeReq({ attempt_scores: [20] }), res); // 20 < 55
+    await recordLetterCompletion(makeReq({ attempt_scores: [20] }), res); // diagnostic-only, does not itself drive the outcome
     expect(mockOnLetterMastered).not.toHaveBeenCalled();
     expect(mockLetterProgressFindOrCreate).toHaveBeenCalledTimes(1); // only the blocked_attempts bookkeeping row
   });

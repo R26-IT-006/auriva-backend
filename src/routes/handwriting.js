@@ -5,6 +5,8 @@ const { verifyToken } = require('../middleware/auth');
 const { isTeacher }   = require('../middleware/roleGuard');
 const ctrl            = require('../controllers/handwritingController');
 const collectionCtrl  = require('../controllers/collectionController');
+const liveSessionCtrl = require('../controllers/liveSessionController');
+const reportCtrl      = require('../controllers/reportController');
 
 router.use(verifyToken, isTeacher);
 
@@ -123,5 +125,22 @@ router.patch('/collection-session/:id/complete',   collectionCtrl.completeCollec
 router.post('/teacher-validation',                 collectionCtrl.submitTeacherValidation);
 router.get('/teacher-validation/:sessionId',        collectionCtrl.getTeacherValidation);
 router.get('/ml-samples/export',                    collectionCtrl.exportMlSamples);
+
+// ── Real-Time Teacher Session Monitoring (Proposal FR-16, Phase 7B) ───────────
+// Near-real-time snapshot, not a stroke/biometric stream — see
+// services/liveSessionService.js's header. PUT is called from the child-side
+// learning screens (via LearningSessionContext.js) on meaningful events
+// only, never per pen-movement (spec §8); GET is polled by the teacher UI
+// every ~5s (spec §15, TeacherStudentDetailScreen's Live Session card). No
+// DELETE — "Finish for Now"/natural navigation-out uses status='ended'
+// instead (spec §11's documented alternative).
+router.put('/live-session/:studentId',              liveSessionCtrl.putLiveSession);
+router.get('/live-session/:studentId',               liveSessionCtrl.getLiveSession);
+
+// ── Periodic Progress Report (Proposal FR-19/FR-20, Phase 7C/7D) ──────────
+// Read-only — see services/periodicReportService.js's own header for the
+// full read-only guarantee. Explicit start_date/end_date query params
+// (YYYY-MM-DD, UTC, inclusive — see utils/reportDateRange.js).
+router.get('/report/:studentId',                     reportCtrl.getPeriodicReport);
 
 module.exports = router;
