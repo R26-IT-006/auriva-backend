@@ -131,6 +131,24 @@ async function getTrajectory(req, res) {
   res.json({ trajectory });
 }
 
+// TASK-43 — XAI teacher reports. Same auth treatment as getTrajectory above
+// (verifyToken + isTeacher at router level). Read-only: neither handler changes
+// what any trajectory is, only surfaces why it is what it is.
+async function getTrajectoryExplanation(req, res) {
+  const result = await trajectoryService.getTrajectoryExplanation(
+    req.params.studentId,
+    req.params.wordId
+  );
+  res.json(result);
+}
+
+// The batch report the Trajectory Report screen calls — every in-scope dialogue
+// word for the student in one request, plus overview totals.
+async function getTrajectoryReport(req, res) {
+  const report = await trajectoryService.getTrajectoryReport(req.params.studentId);
+  res.json(report);
+}
+
 // TASK-12 — Non-Verbal Adaptive Wait-Time Escalation
 // Same auth middleware as all sibling routes (verifyToken + isTeacher applied at
 // router level). No assertStudentBelongsToTeacher here — mirrors getTrajectory pattern.
@@ -152,5 +170,7 @@ module.exports = {
   getProbeCandidate,
   recordProbeResult,
   getTrajectory,
+  getTrajectoryExplanation,
+  getTrajectoryReport,
   getDailySpeechState,
 };

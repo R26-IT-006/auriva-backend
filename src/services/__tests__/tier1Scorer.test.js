@@ -1,4 +1,11 @@
-const { computeTier1Trajectory, MAX_PROMPTS } = require('../tier1Scorer');
+const {
+  computeTier1Trajectory,
+  explainTier1,
+  MAX_PROMPTS,
+  WEIGHTS,
+  T_FAST,
+  T_STRUGGLING,
+} = require('../tier1Scorer');
 
 test('1. clearly fast input returns fast', () => {
   const result = computeTier1Trajectory({
@@ -130,4 +137,134 @@ test('8. non-verbal incorrect answer does not throw and reweights around missing
 
   expect(result).not.toBeNaN();
   expect(['fast', 'typical', 'struggling']).toContain(result);
+});
+
+// ---------------------------------------------------------------------------
+// TASK-43 — explainTier1
+// ---------------------------------------------------------------------------
+
+// AC5 — a fixed feature-payload corpus with the labels computeTier1Trajectory
+// produced BEFORE TASK-43's buildTerms/labelForScore extraction (captured by
+// running git HEAD's copy of the module). Any drift in the scoring arithmetic,
+// including a floating-point shift from reordering the terms, fails here.
+const AC5_CORPUS = [
+  [{ speech_score: 3, phoneme_accuracy: 1, echolalia_flag: false, prompt_count: 1, response_latency_ms_phase2: 0, match_type: 'exact' }, 'fast'],
+  [{ speech_score: 3, phoneme_accuracy: 0.81, echolalia_flag: false, prompt_count: 1, response_latency_ms_phase2: 1200, match_type: 'exact' }, 'fast'],
+  [{ speech_score: 2, phoneme_accuracy: 0.81, echolalia_flag: false, prompt_count: 1, response_latency_ms_phase2: 1200, match_type: 'exact' }, 'fast'],
+  [{ speech_score: 2, phoneme_accuracy: 0.5, echolalia_flag: false, prompt_count: 2, response_latency_ms_phase2: 4000, match_type: 'exact' }, 'typical'],
+  [{ speech_score: 1, phoneme_accuracy: 0.5, echolalia_flag: false, prompt_count: 2, response_latency_ms_phase2: 4000, match_type: 'exact' }, 'typical'],
+  [{ speech_score: 1, phoneme_accuracy: 0.22, echolalia_flag: true, prompt_count: 3, response_latency_ms_phase2: 8000, match_type: 'exact' }, 'struggling'],
+  [{ speech_score: 0, phoneme_accuracy: 0, echolalia_flag: true, prompt_count: 3, response_latency_ms_phase2: 12000, match_type: 'exact' }, 'struggling'],
+  [{ speech_score: 0, phoneme_accuracy: 0.5, echolalia_flag: false, prompt_count: 1, response_latency_ms_phase2: 1200, match_type: 'exact' }, 'typical'],
+  [{ speech_score: 3, phoneme_accuracy: 0, echolalia_flag: true, prompt_count: 1, response_latency_ms_phase2: 0, match_type: 'exact' }, 'typical'],
+  [{ speech_score: 1, echolalia_flag: false, prompt_count: 1, match_type: 'non_verbal' }, 'fast'],
+  [{ speech_score: 0, echolalia_flag: false, prompt_count: 3, match_type: 'non_verbal' }, 'struggling'],
+  [{ speech_score: 1, echolalia_flag: true, prompt_count: 2, match_type: 'non_verbal' }, 'typical'],
+  [{ speech_score: 2.4, echolalia_flag: false, prompt_count: 1, response_latency_ms_phase2: 500 }, 'fast'],
+  [{ speech_score: 2.4, phoneme_accuracy: 0.1, echolalia_flag: false, prompt_count: 1, response_latency_ms_phase2: 500 }, 'typical'],
+  [{ speech_score: 3, phoneme_accuracy: 0.81, prompt_count: 1, response_latency_ms_phase2: 1200 }, 'fast'],
+  [{ phoneme_accuracy: 0.5, echolalia_flag: false, prompt_count: 2, response_latency_ms_phase2: 4000 }, 'typical'],
+  [{ speech_score: 2, phoneme_accuracy: 0.81, echolalia_flag: false }, 'fast'],
+  [{ prompt_count: 3 }, 'struggling'],
+  [{ echolalia_flag: true }, 'struggling'],
+  [{ speech_score: 3, phoneme_accuracy: 1, echolalia_flag: false, prompt_count: 1, response_latency_ms_phase2: 12000, match_type: 'exact' }, 'fast'],
+  [{ speech_score: 0, phoneme_accuracy: 0, echolalia_flag: false, prompt_count: 1, response_latency_ms_phase2: 0, match_type: 'exact' }, 'struggling'],
+];
+
+test('AC5. computeTier1Trajectory labels the fixed corpus exactly as it did before TASK-43', () => {
+  for (const [features, expected] of AC5_CORPUS) {
+    expect([JSON.stringify(features), computeTier1Trajectory(features)])
+      .toEqual([JSON.stringify(features), expected]);
+  }
+});
+
+test('AC4. explainTier1 contributions sum to the score, within 1e-9', () => {
+  for (const [features] of AC5_CORPUS) {
+    const e = explainTier1(features);
+    if (!e.scored) continue;
+    const sum = e.terms.reduce((acc, t) => acc + t.contribution, 0);
+    expect(Math.abs(sum - e.score)).toBeLessThan(1e-9);
+  }
+});
+
+test('AC4. explainTier1 reproduces computeTier1Trajectory\'s own internal score and label', () => {
+  for (const [features, expected] of AC5_CORPUS) {
+    const e = explainTier1(features);
+    // The label explainTier1 derives from its decomposition must be the very
+    // label the scorer returns — an explanation of a different verdict would be
+    // worse than no explanation at all.
+    expect(e.label).toBe(computeTier1Trajectory(features));
+    expect(e.label).toBe(expected);
+    if (e.scored) {
+      // Independently re-derived here, not copied from the implementation.
+      const total = e.terms.reduce((acc, t) => acc + t.weight, 0);
+      const manual = e.terms.reduce((acc, t) => acc + (t.weight / total) * t.normalizedValue, 0);
+      expect(Math.abs(manual - e.score)).toBeLessThan(1e-9);
+    }
+  }
+});
+
+test('AC4. explainTier1 never mutates or influences what computeTier1Trajectory returns', () => {
+  for (const [features, expected] of AC5_CORPUS) {
+    const snapshot = JSON.stringify(features);
+    explainTier1(features);
+    expect(JSON.stringify(features)).toBe(snapshot);
+    expect(computeTier1Trajectory(features)).toBe(expected);
+  }
+});
+
+test('9. explainTier1 reports every term with its raw input, weight and renormalized weight', () => {
+  const e = explainTier1({
+    speech_score: 2,
+    phoneme_accuracy: 0.8,
+    echolalia_flag: false,
+    prompt_count: 2,
+    response_latency_ms_phase2: 2000,
+  });
+
+  expect(e.terms.map((t) => t.term)).toEqual(['speech', 'phoneme', 'echolalia', 'prompt', 'latency']);
+  expect(e.absentTerms).toEqual([]);
+  expect(e.thresholds).toEqual({ fast: T_FAST, struggling: T_STRUGGLING });
+  expect(e.scored).toBe(true);
+
+  const speech = e.terms.find((t) => t.term === 'speech');
+  expect(speech.input).toBe('speech_score');
+  expect(speech.rawValue).toBe(2);
+  expect(speech.normalizedValue).toBeCloseTo(2 / 3, 12);
+  expect(speech.weight).toBe(WEIGHTS.speech);
+  // All five terms present → no redistribution, so the renormalized weight is
+  // the declared weight (the weights already sum to 1).
+  expect(speech.renormalizedWeight).toBeCloseTo(WEIGHTS.speech, 12);
+  expect(speech.contribution).toBeCloseTo(speech.renormalizedWeight * speech.normalizedValue, 12);
+});
+
+test('10. explainTier1 names the absent terms and shows their weight redistributed', () => {
+  const e = explainTier1({
+    speech_score: 3,
+    echolalia_flag: false,
+    prompt_count: 1,
+    match_type: 'non_verbal',
+  });
+
+  // A teacher must be able to see that phoneme/latency were missing and that
+  // the remaining terms silently absorbed their weight.
+  expect(e.absentTerms.sort()).toEqual(['latency', 'phoneme']);
+  const speech = e.terms.find((t) => t.term === 'speech');
+  expect(speech.renormalizedWeight).toBeGreaterThan(speech.weight);
+
+  const renormalizedTotal = e.terms.reduce((acc, t) => acc + t.renormalizedWeight, 0);
+  expect(Math.abs(renormalizedTotal - 1)).toBeLessThan(1e-9);
+});
+
+test('11. explainTier1 on a fully-degenerate payload reports no score rather than inventing one', () => {
+  for (const features of [{}, undefined]) {
+    const e = explainTier1(features);
+    expect(e.scored).toBe(false);
+    expect(e.score).toBeNull();
+    expect(e.terms).toEqual([]);
+    expect(e.absentTerms.sort()).toEqual(['echolalia', 'latency', 'phoneme', 'prompt', 'speech']);
+    // Matches computeTier1Trajectory's own degenerate default.
+    expect(e.label).toBe('typical');
+    expect(e.label).toBe(computeTier1Trajectory(features));
+  }
 });

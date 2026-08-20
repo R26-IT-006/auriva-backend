@@ -27,16 +27,29 @@ function isPresent(value) {
   return value !== null && value !== undefined;
 }
 
+// TASK-43: the feature-payload field each scoring term is derived from, for the
+// teacher-facing explanation. Declaration order here is also the order terms are
+// inserted below, which the weighted sum depends on — see buildTerms().
+const TERM_INPUTS = {
+  speech:    'speech_score',
+  phoneme:   'phoneme_accuracy',
+  echolalia: 'echolalia_flag',
+  prompt:    'prompt_count',
+  latency:   'response_latency_ms_phase2',
+};
+
 /**
- * Tier 1 literature-grounded baseline scorer. Pure, deterministic, no
- * network/DB access — the fallback used when Tier 2 (calibrated ML model)
- * is unavailable or below TRAJECTORY_MIN_CONFIDENCE.
+ * Normalizes the present terms to 0-1. Extracted from computeTier1Trajectory
+ * (TASK-43) so explainTier1 decomposes exactly the same arithmetic rather than
+ * a second copy of it that could drift.
  *
- * `features` is the same shape as the feature payload buildSession1Features
- * (or its equivalent) assembles: { speech_score, phoneme_accuracy,
- * echolalia_flag, prompt_count, response_latency_ms_phase2, match_type, ... }.
+ * Insertion order is load-bearing: the weighted sum below reduces over
+ * Object.keys(terms), and floating-point addition is not associative, so
+ * reordering these blocks could shift a borderline score across a threshold.
+ * Keep them in the original speech → phoneme → echolalia → prompt → latency
+ * order.
  */
-function computeTier1Trajectory(features = {}) {
+function buildTerms(features = {}) {
   const {
     speech_score,
     phoneme_accuracy,
@@ -70,6 +83,28 @@ function computeTier1Trajectory(features = {}) {
     terms.latency = clip(1 - response_latency_ms_phase2 / L_CEILING, 0, 1);
   }
 
+  return terms;
+}
+
+/** The one place the thresholds turn a score into a label. */
+function labelForScore(score) {
+  if (score >= T_FAST) return 'fast';
+  if (score <= T_STRUGGLING) return 'struggling';
+  return 'typical';
+}
+
+/**
+ * Tier 1 literature-grounded baseline scorer. Pure, deterministic, no
+ * network/DB access — the fallback used when Tier 2 (calibrated ML model)
+ * is unavailable or below TRAJECTORY_MIN_CONFIDENCE.
+ *
+ * `features` is the same shape as the feature payload buildSession1Features
+ * (or its equivalent) assembles: { speech_score, phoneme_accuracy,
+ * echolalia_flag, prompt_count, response_latency_ms_phase2, match_type, ... }.
+ */
+function computeTier1Trajectory(features = {}) {
+  const terms = buildTerms(features);
+
   const availableTermKeys = Object.keys(terms);
 
   if (availableTermKeys.length === 0) {
@@ -84,14 +119,78 @@ function computeTier1Trajectory(features = {}) {
     return sum + normalizedWeight * terms[key];
   }, 0);
 
-  if (score >= T_FAST) return 'fast';
-  if (score <= T_STRUGGLING) return 'struggling';
-  return 'typical';
+  return labelForScore(score);
+}
+
+/**
+ * TASK-43 — the exact additive decomposition of the Tier 1 score.
+ *
+ * `normalizedWeight * termValue` per term IS the attribution: the
+ * contributions sum to the score by construction, so no post-hoc method
+ * (SHAP, LIME) is applicable or needed here.
+ *
+ * `absentTerms` is not incidental. Weight renormalization means a term that is
+ * missing from the payload silently redistributes its weight across the terms
+ * that remain — a teacher reading the report has to be able to see that
+ * happened, and which term it was.
+ *
+ * Read-only: this never influences what computeTier1Trajectory returns.
+ */
+function explainTier1(features = {}) {
+  const terms = buildTerms(features);
+  const availableTermKeys = Object.keys(terms);
+
+  const absentTerms = Object.keys(TERM_INPUTS).filter((key) => !(key in terms));
+  const thresholds = { fast: T_FAST, struggling: T_STRUGGLING };
+
+  // Same degenerate case computeTier1Trajectory short-circuits: no terms, so no
+  // score was ever computed. 'typical' here is a default, not a finding.
+  if (availableTermKeys.length === 0) {
+    return {
+      terms: [],
+      absentTerms,
+      score: null,
+      thresholds,
+      label: 'typical',
+      scored: false,
+    };
+  }
+
+  const availableWeightTotal = availableTermKeys.reduce((sum, key) => sum + WEIGHTS[key], 0);
+
+  const score = availableTermKeys.reduce((sum, key) => {
+    const normalizedWeight = WEIGHTS[key] / availableWeightTotal;
+    return sum + normalizedWeight * terms[key];
+  }, 0);
+
+  const breakdown = availableTermKeys.map((key) => {
+    const renormalizedWeight = WEIGHTS[key] / availableWeightTotal;
+    return {
+      term:                key,
+      input:               TERM_INPUTS[key],
+      rawValue:            (features || {})[TERM_INPUTS[key]],
+      normalizedValue:     terms[key],
+      weight:              WEIGHTS[key],
+      renormalizedWeight,
+      contribution:        renormalizedWeight * terms[key],
+    };
+  });
+
+  return {
+    terms: breakdown,
+    absentTerms,
+    score,
+    thresholds,
+    label: labelForScore(score),
+    scored: true,
+  };
 }
 
 module.exports = {
   computeTier1Trajectory,
+  explainTier1,
   WEIGHTS,
+  TERM_INPUTS,
   MAX_PROMPTS,
   T_FAST,
   T_STRUGGLING,

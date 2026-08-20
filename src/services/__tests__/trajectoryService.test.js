@@ -4,6 +4,9 @@
 jest.mock('axios');
 jest.mock('../tier1Scorer', () => ({
   computeTier1Trajectory: jest.fn(),
+  // TASK-43 — additive; no existing test touches it, so every assertion below
+  // this line behaves exactly as it did before.
+  explainTier1: jest.fn(),
 }));
 jest.mock('../../utils/logger', () => ({
   warn: jest.fn(),
@@ -15,7 +18,8 @@ jest.mock('../../utils/logger', () => ({
 // (resolves to src/models from the service's perspective, src/models from test's
 // perspective via ../../models).
 jest.mock('../../models', () => ({
-  DialogueWord: { findByPk: jest.fn() },
+  // findAll added for TASK-43's batch trajectory report; findByPk is unchanged.
+  DialogueWord: { findByPk: jest.fn(), findAll: jest.fn() },
   DialogueWordProgress: { findOne: jest.fn() },
   DialogueWordAttempt: { findOne: jest.fn() },
   DialoguePhase3Attempt: { findOne: jest.fn() },
@@ -30,7 +34,8 @@ jest.mock('sequelize', () => {
 });
 
 const axios = require('axios');
-const { computeTier1Trajectory } = require('../tier1Scorer');
+const { Op } = require('sequelize');
+const { computeTier1Trajectory, explainTier1 } = require('../tier1Scorer');
 const logger = require('../../utils/logger');
 const {
   DialogueWord,
@@ -41,7 +46,11 @@ const {
 } = require('../../models');
 
 // Import the service AFTER mocks are set up.
-const { getTrajectoryPrediction } = require('../trajectoryService');
+const {
+  getTrajectoryPrediction,
+  getTrajectoryExplanation,
+  getTrajectoryReport,
+} = require('../trajectoryService');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -566,5 +575,367 @@ describe('AC7 — abilities words read Phase 1/2 features from the correct table
     const result = await getTrajectoryPrediction(1, 10);
     expect(result).toBe('typical');
     expect(computeTier1Trajectory).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// TASK-43 — getTrajectoryExplanation / getTrajectoryReport
+//
+// Read-and-explain surface only. The invariant running through every test
+// below: adding an explanation must never change which trajectory, or which
+// tier, would have been produced without it.
+// ===========================================================================
+
+/** Routes axios.post by URL so the prediction and explanation calls can be
+ *  primed (and asserted) independently — AC8 turns on exactly that. */
+function primeMicroservice({ predict, explain }) {
+  axios.post.mockImplementation(async (url) => {
+    if (url.endsWith('/predict-trajectory')) {
+      if (predict instanceof Error) throw predict;
+      return predict;
+    }
+    if (url.endsWith('/explain-trajectory')) {
+      if (explain instanceof Error) throw explain;
+      return explain;
+    }
+    throw new Error(`unexpected URL: ${url}`);
+  });
+}
+
+const explainUrls = () =>
+  axios.post.mock.calls.filter(([url]) => url.endsWith('/explain-trajectory'));
+
+const TIER1_EXPLANATION = {
+  terms: [{ term: 'speech', input: 'speech_score', rawValue: 2, normalizedValue: 2 / 3, weight: 0.35, renormalizedWeight: 0.35, contribution: 0.2333 }],
+  absentTerms: [],
+  score: 0.62,
+  thresholds: { fast: 0.75, struggling: 0.4 },
+  label: 'typical',
+  scored: true,
+};
+
+const SHAP_EXPLANATION = {
+  trajectory: 'struggling',
+  confidence: 0.9,
+  base_value: 0.333,
+  attributions: [
+    { feature: 'prompt_count', value: 3, contribution: 0.18 },
+    { feature: 'phoneme_accuracy', value: 0.05, contribution: 0.11 },
+  ],
+};
+
+describe('AC6 — kill switch off yields tier "disabled" and no microservice call', () => {
+  it('returns disabled with no explanation when TRAJECTORY_ML_ENABLED is unset', async () => {
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result).toMatchObject({
+      trajectory:  'typical',
+      tier:        'disabled',
+      explanation: null,
+    });
+    expect(axios.post).not.toHaveBeenCalled();
+  });
+
+  it('states plainly in the caveat that "typical" is a default, not a prediction', async () => {
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result.caveat).toMatch(/switched off/i);
+    expect(result.caveat).toMatch(/not a prediction/i);
+  });
+
+  it('does not touch Tier 1 either when the kill switch is off', async () => {
+    await getTrajectoryExplanation(1, 10);
+    expect(computeTier1Trajectory).not.toHaveBeenCalled();
+    expect(explainTier1).not.toHaveBeenCalled();
+  });
+
+  it('returns disabled when feature assembly fails, with a different caveat', async () => {
+    process.env.TRAJECTORY_ML_ENABLED = 'true';
+    process.env.MICROSERVICE_URL = 'http://localhost:5001';
+    DialogueWord.findByPk.mockResolvedValue(null);
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result).toMatchObject({ trajectory: 'typical', tier: 'disabled', explanation: null });
+    expect(result.caveat).toMatch(/not enough recorded session data/i);
+    expect(axios.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('AC7 — non-verbal attempts explain via Tier 1 and never call /explain-trajectory', () => {
+  beforeEach(() => {
+    process.env.TRAJECTORY_ML_ENABLED = 'true';
+    process.env.MICROSERVICE_URL = 'http://localhost:5001';
+    process.env.TRAJECTORY_MIN_CONFIDENCE = '0.5';
+    primeNonVerbalDbMocks();
+    computeTier1Trajectory.mockReturnValue('typical');
+    explainTier1.mockReturnValue(TIER1_EXPLANATION);
+  });
+
+  it('returns tier "tier1" with the Tier 1 decomposition', async () => {
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result.tier).toBe('tier1');
+    expect(result.trajectory).toBe('typical');
+    expect(result.explanation).toBe(TIER1_EXPLANATION);
+    expect(result.confidence).toBeNull();
+  });
+
+  it('never calls the microservice at all — neither predict nor explain', async () => {
+    await getTrajectoryExplanation(1, 10);
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(explainUrls()).toHaveLength(0);
+  });
+
+  it('says in the caveat that the Tier 2 model has never seen a non-verbal attempt', async () => {
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result.caveat).toMatch(/non-verbal/i);
+  });
+});
+
+describe('AC8 — a failing explanation never changes the trajectory or the tier', () => {
+  beforeEach(() => {
+    process.env.TRAJECTORY_ML_ENABLED = 'true';
+    process.env.MICROSERVICE_URL = 'http://localhost:5001';
+    process.env.TRAJECTORY_MIN_CONFIDENCE = '0.5';
+    primeValidDbMocks();
+    computeTier1Trajectory.mockReturnValue('fast');
+    explainTier1.mockReturnValue(TIER1_EXPLANATION);
+  });
+
+  it('keeps tier2 and its trajectory when /explain-trajectory times out', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.9 } },
+      explain: new Error('timeout of 8000ms exceeded'),
+    });
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result.tier).toBe('tier2');
+    expect(result.trajectory).toBe('struggling');
+    expect(result.confidence).toBe(0.9);
+    expect(result.explanation).toBeNull();
+    expect(result.caveat).toMatch(/trajectory itself is unaffected/i);
+    // Never silently downgraded to the Tier 1 answer because SHAP failed.
+    expect(result.trajectory).not.toBe('fast');
+    expect(computeTier1Trajectory).not.toHaveBeenCalled();
+  });
+
+  it('keeps tier2 and its trajectory when /explain-trajectory returns 503', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.9 } },
+      explain: { status: 503, data: { error: 'trajectory explainer not available' } },
+    });
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result).toMatchObject({ tier: 'tier2', trajectory: 'struggling', explanation: null });
+  });
+
+  it('keeps tier2 when /explain-trajectory answers 200 with a malformed body', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'fast', confidence: 0.88 } },
+      explain: { status: 200, data: { trajectory: 'fast' } }, // no attributions
+    });
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result).toMatchObject({ tier: 'tier2', trajectory: 'fast', explanation: null });
+  });
+
+  it('gives the explanation call a longer budget than the 2s prediction call', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.9 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+    await getTrajectoryExplanation(1, 10);
+    const predictCfg = axios.post.mock.calls.find(([u]) => u.endsWith('/predict-trajectory'))[2];
+    const explainCfg = explainUrls()[0][2];
+    expect(predictCfg.timeout).toBe(2000);
+    expect(explainCfg.timeout).toBeGreaterThan(predictCfg.timeout);
+  });
+});
+
+describe('TASK-43 — tier2 accepted, tier1 fallbacks', () => {
+  beforeEach(() => {
+    process.env.TRAJECTORY_ML_ENABLED = 'true';
+    process.env.MICROSERVICE_URL = 'http://localhost:5001';
+    process.env.TRAJECTORY_MIN_CONFIDENCE = '0.5';
+    primeValidDbMocks();
+    computeTier1Trajectory.mockReturnValue('typical');
+    explainTier1.mockReturnValue(TIER1_EXPLANATION);
+  });
+
+  it('returns the SHAP attributions when Tier 2 clears the confidence gate', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.93 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result.tier).toBe('tier2');
+    expect(result.trajectory).toBe('struggling');
+    expect(result.confidence).toBe(0.93);
+    expect(result.explanation).toEqual(SHAP_EXPLANATION);
+    // The DEC-07 reliability caveat is display copy owned by the screen, so a
+    // healthy tier2 row carries no backend note of its own.
+    expect(result.caveat).toBeNull();
+  });
+
+  it('sends the same 13-feature payload to both endpoints, match_type stripped', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.93 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+    await getTrajectoryExplanation(1, 10);
+    const predictBody = axios.post.mock.calls.find(([u]) => u.endsWith('/predict-trajectory'))[1];
+    const explainBody = explainUrls()[0][1];
+    expect(explainBody).toEqual(predictBody);
+    expect(explainBody).not.toHaveProperty('match_type');
+  });
+
+  it('falls back to tier1 when Tier 2 is below the confidence gate, and skips /explain-trajectory', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'fast', confidence: 0.31 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result.tier).toBe('tier1');
+    expect(result.trajectory).toBe('typical');
+    expect(result.explanation).toBe(TIER1_EXPLANATION);
+    expect(result.caveat).toMatch(/confidence threshold/i);
+    expect(explainUrls()).toHaveLength(0);
+  });
+
+  it('falls back to tier1 when the microservice is unreachable', async () => {
+    primeMicroservice({
+      predict: new Error('ECONNREFUSED'),
+      explain: new Error('ECONNREFUSED'),
+    });
+    const result = await getTrajectoryExplanation(1, 10);
+    expect(result.tier).toBe('tier1');
+    expect(result.explanation).toBe(TIER1_EXPLANATION);
+    expect(result.caveat).toMatch(/could not be reached/i);
+    expect(explainUrls()).toHaveLength(0);
+  });
+
+  it('returns the same trajectory getTrajectoryPrediction would, for the same inputs', async () => {
+    for (const predict of [
+      { status: 200, data: { trajectory: 'struggling', confidence: 0.93 } },
+      { status: 200, data: { trajectory: 'fast', confidence: 0.31 } },
+      { status: 503, data: {} },
+    ]) {
+      jest.clearAllMocks();
+      primeValidDbMocks();
+      computeTier1Trajectory.mockReturnValue('typical');
+      explainTier1.mockReturnValue(TIER1_EXPLANATION);
+      primeMicroservice({ predict, explain: { status: 200, data: SHAP_EXPLANATION } });
+
+      const explained = await getTrajectoryExplanation(1, 10);
+      const predicted = await getTrajectoryPrediction(1, 10);
+      expect(explained.trajectory).toBe(predicted);
+    }
+  });
+});
+
+describe('TASK-43 — getTrajectoryReport (batch, one report per student)', () => {
+  const WORDS = [
+    { id: 10, word: 'hello',  category: 'greetings',   difficulty: 1, teaching_order: 1 },
+    { id: 11, word: 'please', category: 'magic_words', difficulty: 2, teaching_order: 1 },
+    { id: 12, word: 'clap',   category: 'abilities',   difficulty: 1, teaching_order: 1 },
+  ];
+
+  beforeEach(() => {
+    process.env.TRAJECTORY_ML_ENABLED = 'true';
+    process.env.MICROSERVICE_URL = 'http://localhost:5001';
+    process.env.TRAJECTORY_MIN_CONFIDENCE = '0.5';
+    DialogueWord.findAll.mockResolvedValue(WORDS.map((w) => mockRow(w)));
+    primeValidDbMocks();
+    computeTier1Trajectory.mockReturnValue('typical');
+    explainTier1.mockReturnValue(TIER1_EXPLANATION);
+  });
+
+  it('HARD RULE 4 — restricts the word query to the three in-scope categories', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.9 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+    await getTrajectoryReport(1);
+
+    const where = DialogueWord.findAll.mock.calls[0][0].where;
+    const clause = where.category[Op.in];
+    expect(clause.slice().sort()).toEqual(['abilities', 'greetings', 'magic_words']);
+    expect(clause).not.toContain('days_of_week');
+  });
+
+  it('returns one row per word, carrying trajectory, tier, confidence, explanation and caveat', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.9 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+    const report = await getTrajectoryReport(1);
+
+    expect(report.words).toHaveLength(3);
+    expect(report.words.map((w) => w.word_id)).toEqual([10, 11, 12]);
+    for (const row of report.words) {
+      expect(row).toHaveProperty('trajectory');
+      expect(row).toHaveProperty('tier');
+      expect(row).toHaveProperty('confidence');
+      expect(row).toHaveProperty('explanation');
+      expect(row).toHaveProperty('caveat');
+      expect(row).toHaveProperty('category');
+    }
+  });
+
+  it('reports overview totals, counting tiers and trajectories separately', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.9 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+    const { totals } = await getTrajectoryReport(1);
+
+    expect(totals.words_total).toBe(3);
+    expect(totals.tier2).toBe(3);
+    expect(totals.struggling).toBe(3);
+    expect(totals.explained).toBe(3);
+    expect(totals.fast + totals.typical + totals.struggling).toBe(totals.words_predicted);
+  });
+
+  it('excludes "disabled" rows from the trajectory counts — that "typical" is a default, not a finding', async () => {
+    DialogueWord.findByPk.mockResolvedValue(null); // every word fails assembly
+    const { totals, words } = await getTrajectoryReport(1);
+
+    expect(words.every((w) => w.tier === 'disabled')).toBe(true);
+    expect(totals.disabled).toBe(3);
+    expect(totals.words_predicted).toBe(0);
+    expect(totals.typical).toBe(0);
+  });
+
+  it('degrades per row — one word failing to explain does not fail the report', async () => {
+    let explainCalls = 0;
+    axios.post.mockImplementation(async (url) => {
+      if (url.endsWith('/predict-trajectory')) {
+        return { status: 200, data: { trajectory: 'struggling', confidence: 0.9 } };
+      }
+      explainCalls += 1;
+      if (explainCalls === 2) throw new Error('timeout of 8000ms exceeded');
+      return { status: 200, data: SHAP_EXPLANATION };
+    });
+
+    const { words, totals } = await getTrajectoryReport(1);
+
+    expect(words).toHaveLength(3);
+    expect(words[1].explanation).toBeNull();
+    expect(words[1].tier).toBe('tier2');           // tier survives the failure
+    expect(words[1].trajectory).toBe('struggling'); // so does the trajectory
+    expect(words[1].caveat).toMatch(/could not be generated/i);
+    expect(words[0].explanation).toEqual(SHAP_EXPLANATION);
+    expect(words[2].explanation).toEqual(SHAP_EXPLANATION);
+    expect(totals.explained).toBe(2);
+  });
+
+  it('survives a row that throws outright', async () => {
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'fast', confidence: 0.9 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+    DialogueWord.findByPk
+      .mockResolvedValueOnce({ difficulty: 2, category: 'greetings' })
+      .mockRejectedValueOnce(new Error('connection terminated unexpectedly'))
+      .mockResolvedValueOnce({ difficulty: 2, category: 'greetings' });
+
+    const { words } = await getTrajectoryReport(1);
+    expect(words).toHaveLength(3);
+    expect(words[1].tier).toBe('disabled');
+    expect(words[0].tier).toBe('tier2');
+    expect(words[2].tier).toBe('tier2');
   });
 });
