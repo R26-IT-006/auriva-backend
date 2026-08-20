@@ -26,6 +26,23 @@ async function getQuestionnaire(req, res) {
   res.json({ data: q });
 }
 
+/**
+ * PATCH — partial questionnaire update for friend/pet fields (FriendNameStep.js,
+ * PetPicker.js). Reuses saveQuestionnaire's existing findOrCreate-then-update
+ * (already partial, already calls validateFriendPet) — no service change
+ * needed, only this route was missing. Unlike the PUT route, no self-
+ * introduction fields are required here.
+ */
+async function patchQuestionnaire(req, res) {
+  validate(req);
+  const q = await level2Service.saveQuestionnaire(
+    req.user.id,
+    req.params.studentId,
+    req.body
+  );
+  res.status(200).json({ message: 'Questionnaire updated', data: q });
+}
+
 async function savePortraitStrokes(req, res) {
   validate(req);
   const q = await level2Service.savePortraitStrokes(
@@ -174,6 +191,7 @@ async function recordNonVerbalWordMatch(req, res) {
 module.exports = {
   saveQuestionnaire,
   getQuestionnaire,
+  patchQuestionnaire,
   savePortraitStrokes,
   startSession,
   completeSession,

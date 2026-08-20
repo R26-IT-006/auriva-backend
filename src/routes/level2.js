@@ -27,6 +27,13 @@ router.put('/student/:studentId/level2/questionnaire', [
     .withMessage(`favourite_activities items must be one of: ${VALID_ACTIVITIES.join(', ')}`),
 ], ctrl.saveQuestionnaire);
 
+// Partial update for friend/pet fields (FriendNameStep.js, PetPicker.js).
+// Unlike PUT above, no self-introduction fields are required — business-rule
+// validation (pet_type closed set, friend_gender pairing, etc.) happens
+// inside saveQuestionnaire's own validateFriendPet(), not here, so this
+// route doesn't duplicate those closed-set constants from level2Service.js.
+router.patch('/student/:studentId/level2/questionnaire', ctrl.patchQuestionnaire);
+
 // ── Portrait (self-portrait drawing, TASK-17 Fix 2) ──────────────────────
 
 router.patch('/level2/questionnaire/:studentId/portrait', [
