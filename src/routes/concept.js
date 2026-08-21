@@ -28,6 +28,11 @@ router.post('/tier1/attempt', [
   body('selected_key').isString().notEmpty(),
   body('correct_key').isString().notEmpty(),
   body('was_correct').isBoolean(),
+  // Optional so older app builds keep working — they simply log null and their
+  // rounds stay unusable for distractor evaluation, which is the status quo.
+  body('option_keys').optional().isArray({ max: 12 }),
+  body('option_keys.*').isString(),
+  body('distractor_source').optional().isString().isLength({ max: 40 }),
 ], ctrl.logMatchAttempt);
 
 router.post('/tier1/complete', [
@@ -46,6 +51,9 @@ router.post('/adaptive/attempt', [
   body('confused_concept_key').isString().notEmpty(),
   body('round_number').isInt({ min: 1 }),
   body('was_correct').isBoolean(),
+  body('option_keys').optional().isArray({ max: 12 }),
+  body('option_keys.*').isString(),
+  body('distractor_source').optional().isString().isLength({ max: 40 }),
 ], ctrl.logAdaptiveAttempt);
 
 router.post('/adaptive/complete', [

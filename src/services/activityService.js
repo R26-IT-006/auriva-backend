@@ -487,6 +487,10 @@ function syncActivityConfusions(studentId, activity, roundResults) {
         category_key:  activity.category_key,
         confused_with: [...confusedSet],
         kind,
+        // The activity row id is the observation: one completed activity yields at
+        // most one increment per (correct, confused) pair, so a retried delivery
+        // cannot inflate the weight. confusedSet already de-duplicates within it.
+        observation_id: activity.id,
       });
     });
   });

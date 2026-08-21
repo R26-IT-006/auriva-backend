@@ -115,9 +115,28 @@ async function start() {
   await sequelize.authenticate();
   logger.info('Database connection established');
 
-  if (process.env.NODE_ENV === 'development') {
-    await sequelize.sync({ alter: true });
-    logger.info('Database schema synced');
+  // Schema changes belong in migrations (see migrations/), not in sync().
+  //
+  // This used to be `if (NODE_ENV === 'development') sequelize.sync({ alter: true })`,
+  // which ran ALTER TABLE against the live schema on every boot. NODE_ENV is
+  // 'development' on every developer machine, but they all point at the SHARED
+  // Azure database — and alter:true defaults to drop:true, so booting this branch
+  // dropped students.reduce_stimulation and students.personal_thresholds, which
+  // this branch's Student model does not declare. ddl_audit_log recorded six such
+  // drop/restore cycles between 2026-08-08 and 2026-08-16, from five different
+  // developer machines, each one 500-ing the app for everyone else.
+  //
+  // Now opt-in and non-destructive:
+  //   ALLOW_DB_SYNC=true   — explicit, and absent from .env by default
+  //   alter: { drop: false } — never remove a column this branch's models
+  //                            happen not to know about
+  // Only ever enable it against a disposable local database.
+  const allowSync = process.env.ALLOW_DB_SYNC === 'true' && process.env.NODE_ENV !== 'production';
+  if (allowSync) {
+    await sequelize.sync({ alter: { drop: false } });
+    logger.warn('Database schema synced via ALLOW_DB_SYNC=true (alter, drop: false) — local/dev databases only');
+  } else {
+    logger.info('Schema sync skipped — use migrations for schema changes');
   }
 
   app.listen(PORT, () => {

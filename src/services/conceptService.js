@@ -306,8 +306,10 @@ async function completeTier1(studentId, categoryKey, conceptKey, passed, score, 
     await row.update(updateFields);
   }
 
-  // Log the outcome event
-  await ConceptInteractionLog.create({
+  // Log the outcome event. Its id is the observation id sent to the GKB, which
+  // makes the confusion increments idempotent — a retried delivery is a no-op
+  // rather than an inflated weight.
+  const outcomeLog = await ConceptInteractionLog.create({
     student_id:   studentId,
     category_key: categoryKey,
     concept_key:  conceptKey,
@@ -330,6 +332,7 @@ async function completeTier1(studentId, categoryKey, conceptKey, passed, score, 
       attempt_count: attemptCount,
       passed,
       confused_with: confusedWith || [],
+      observation_id: outcomeLog.id,
     });
 
     // Aggregate image-tap logs to build the T1_ENGAGEMENT edge
@@ -356,7 +359,7 @@ async function completeTier1(studentId, categoryKey, conceptKey, passed, score, 
 /**
  * Logs a single adaptive (2-image) quiz attempt to concept_interaction_logs.
  */
-async function logAdaptiveAttempt(studentId, sessionId, categoryKey, conceptKey, confusedConceptKey, roundNumber, wasCorrect, timeTakenMs) {
+async function logAdaptiveAttempt(studentId, sessionId, categoryKey, conceptKey, confusedConceptKey, roundNumber, wasCorrect, timeTakenMs, exposure = {}) {
   const log = await ConceptInteractionLog.create({
     student_id:   studentId,
     session_id:   sessionId || null,
@@ -369,6 +372,10 @@ async function logAdaptiveAttempt(studentId, sessionId, categoryKey, conceptKey,
       round_number:         roundNumber,
       was_correct:          wasCorrect,
       time_taken_ms:        timeTakenMs || null,
+      // What the child was shown, and which distractor source picked it. See the
+      // note in conceptController.logMatchAttempt.
+      option_keys:          exposure.option_keys || null,
+      distractor_source:    exposure.distractor_source || null,
     },
     created_at: new Date(),
   });
@@ -380,7 +387,7 @@ async function logAdaptiveAttempt(studentId, sessionId, categoryKey, conceptKey,
  * remaining confusion increments to GKB (fire-and-forget).
  */
 async function completeAdaptive(studentId, sessionId, categoryKey, conceptKey, confusedKeys, roundResults, allPassed) {
-  await ConceptInteractionLog.create({
+  const adaptiveLog = await ConceptInteractionLog.create({
     student_id:   studentId,
     session_id:   sessionId || null,
     category_key: categoryKey,
@@ -426,6 +433,7 @@ async function completeAdaptive(studentId, sessionId, categoryKey, conceptKey, c
 
   if (wrongKeys.length > 0) {
     syncToGkb('/gkb/adaptive/confusion', {
+      observation_id: adaptiveLog?.id ?? null,
       correct_key:   conceptKey,
       category_key:  categoryKey,
       confused_with: wrongKeys,
@@ -468,7 +476,7 @@ async function completeTier2(studentId, categoryKey, conceptKey, passed, score, 
     await row.update(updateFields);
   }
 
-  await ConceptInteractionLog.create({
+  const t2Log = await ConceptInteractionLog.create({
     student_id:   studentId,
     category_key: categoryKey,
     concept_key:  conceptKey,
@@ -490,6 +498,7 @@ async function completeTier2(studentId, categoryKey, conceptKey, passed, score, 
       attempt_count: attemptCount,
       passed,
       confused_with: confusedWith || [],
+      observation_id: t2Log?.id ?? null,
     });
 
     return ConceptInteractionLog.findAll({
@@ -527,6 +536,33 @@ async function getDistractors(studentId, categoryKey, conceptKey, tier) {
     sequence[(idx + 2) % sequence.length],
   ].filter((k) => k && k !== conceptKey);
 
+  // Exploration: with probability EXPLORE_RATE, swap one distractor for a random
+  // in-category concept.
+  //
+  // Without this the system only ever collects evidence about pairs it already
+  // believes are confusable, so it can never discover a new one — and neither can
+  // any model trained on its logs. ml/PHASE1-FINDINGS.md measured the result: 97%
+  // of observed confusions were with a sequential neighbour, because those were
+  // the only options ever shown. That makes offline evaluation of distractor
+  // quality impossible, for the current heuristic and for any future model.
+  //
+  // Deliberately small, and it only ever substitutes a real concept from the same
+  // category the child is already working in — so a round stays answerable and on
+  // topic. Set EXPLORE_RATE=0 to disable.
+  const explore = (picked, source) => {
+    const rate = Number(process.env.EXPLORE_RATE ?? 0.15);
+    if (!(rate > 0) || Math.random() >= rate || picked.length === 0) {
+      return { distractors: picked, distractor_source: source };
+    }
+    const pool = sequence.filter((k) => k !== conceptKey && !picked.includes(k));
+    if (pool.length === 0) return { distractors: picked, distractor_source: source };
+    const swapIn  = pool[Math.floor(Math.random() * pool.length)];
+    const swapPos = Math.floor(Math.random() * picked.length);
+    const out = [...picked];
+    out[swapPos] = swapIn;
+    return { distractors: out, distractor_source: `${source}+explore` };
+  };
+
   // 1. Try GKB
   try {
     const resp = await axios.get(
@@ -534,7 +570,7 @@ async function getDistractors(studentId, categoryKey, conceptKey, tier) {
       { params: { category_key: categoryKey, concept_key: conceptKey, tier }, timeout: 400 },
     );
     const distractors = resp.data?.distractors || [];
-    if (distractors.length >= 2) return { distractors };
+    if (distractors.length >= 2) return explore(distractors, 'gkb');
   } catch { /* fall through */ }
 
   // 2. Derive from PostgreSQL logs (bidirectional: FROM this concept + TO this concept)
@@ -569,15 +605,18 @@ async function getDistractors(studentId, categoryKey, conceptKey, tier) {
     });
 
     const combined = [...new Set([...fromKeys, ...toKeys])].filter((k) => sequence.includes(k));
-    if (combined.length >= 2) return { distractors: combined.slice(0, 2) };
+    if (combined.length >= 2) return explore(combined.slice(0, 2), 'logs');
     if (combined.length === 1) {
       const rest = sequential.filter((k) => !combined.includes(k));
-      return { distractors: [...combined, ...rest].slice(0, 2) };
+      return explore([...combined, ...rest].slice(0, 2), 'logs+sequential');
     }
   } catch { /* fall through */ }
 
-  // 3. Sequential neighbours
-  return { distractors: sequential };
+  // 3. Sequential neighbours — reached for the 71 of 93 concepts with no
+  // confusion history, i.e. most rounds. Exploration matters most here: this tier
+  // is arbitrary (apple gets banana and cherry purely by list order), so a random
+  // in-category swap is no worse pedagogically and is far more informative.
+  return explore(sequential, 'sequential');
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────

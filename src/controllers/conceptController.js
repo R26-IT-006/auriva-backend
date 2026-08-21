@@ -41,6 +41,7 @@ async function logMatchAttempt(req, res) {
   const {
     student_id, session_id, category_key, concept_key,
     attempt_number, selected_key, correct_key, time_taken_ms, was_correct,
+    option_keys, distractor_source,
   } = req.body;
 
   const result = await conceptService.logInteraction(
@@ -50,7 +51,17 @@ async function logMatchAttempt(req, res) {
     concept_key,
     1,
     'match_attempt',
-    { attempt_number, selected_key, correct_key, time_taken_ms, was_correct },
+    // option_keys records what the child was actually shown. Without it the log
+    // only says what they picked, and a picked option is only ever one the
+    // policy offered — so any offline evaluation of distractor quality measures
+    // the policy, not the child. See ml/PHASE1-FINDINGS.md: 97% of observed
+    // confusions were with a sequential neighbour purely because the sequential
+    // fallback chose them. distractor_source records which fallback tier ran.
+    {
+      attempt_number, selected_key, correct_key, time_taken_ms, was_correct,
+      option_keys: option_keys || null,
+      distractor_source: distractor_source || null,
+    },
   );
   res.status(201).json(result);
 }
@@ -88,11 +99,13 @@ async function logAdaptiveAttempt(req, res) {
   const {
     student_id, session_id, category_key, concept_key,
     confused_concept_key, round_number, was_correct, time_taken_ms,
+    option_keys, distractor_source,
   } = req.body;
 
   const result = await conceptService.logAdaptiveAttempt(
     student_id, session_id, category_key, concept_key,
     confused_concept_key, round_number, was_correct, time_taken_ms,
+    { option_keys, distractor_source },
   );
   res.status(201).json(result);
 }
