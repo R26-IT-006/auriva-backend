@@ -125,6 +125,13 @@ app.use((err, req, res, next) => {
     });
   }
 
+  if (err.code === 'ACOUSTIC_SCORING_FAILED' || err.code === 'GOP_UNAVAILABLE') {
+    return res.status(503).json({
+      error: 'Scoring is temporarily unavailable. Please try recording again.',
+      code: err.code,
+    });
+  }
+
   if (err.name === 'SequelizeUniqueConstraintError') {
     return res.status(409).json({ error: 'A record with that value already exists' });
   }

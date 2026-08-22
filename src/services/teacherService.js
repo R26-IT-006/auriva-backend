@@ -176,6 +176,7 @@ function buildPronunciationResultRecord({ teacherId, studentId, data, rawAudioBu
     speech_verification: data.speech_verification || null,
     confidence_level: data.confidence_level || null,
     needs_teacher_review: Boolean(data.needs_teacher_review),
+    heard_reference_audio: Boolean(data.heard_reference_audio),
     next_word_id: data.next_word_id || null,
     attempt_number: data.attempt_number || 1,
     workflow_completed: data.workflow_completed ?? true,

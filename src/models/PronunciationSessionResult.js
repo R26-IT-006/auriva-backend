@@ -87,6 +87,11 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     allowNull: false,
     defaultValue: false,
   },
+  heard_reference_audio: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
   next_word_id: {
     type: DataTypes.STRING,
     allowNull: true,

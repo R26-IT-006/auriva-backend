@@ -81,6 +81,10 @@ const scorePronunciationAttemptValidation = [
     .optional()
     .isInt({ min: 1 })
     .withMessage('attempt_number must be a positive integer'),
+  body('heard_reference_audio')
+    .optional()
+    .isBoolean()
+    .withMessage('heard_reference_audio must be a boolean'),
   ...audioPayloadValidation,
 ];
 
@@ -124,8 +128,12 @@ const savePronunciationResultValidation = [
     .withMessage('listen_choose_data must be an object'),
   body('listen_choose_data.activity_type')
     .optional()
-    .equals('listen_choose')
-    .withMessage('listen_choose_data.activity_type must be listen_choose'),
+    .isIn(['listen_choose', 'sound_focus_listen_choose'])
+    .withMessage('listen_choose_data.activity_type must be listen_choose or sound_focus_listen_choose'),
+  body('listen_choose_data.target_phoneme')
+    .optional({ nullable: true, checkFalsy: true })
+    .isString()
+    .withMessage('listen_choose_data.target_phoneme must be a string'),
   body('listen_choose_data.target_word_id')
     .optional()
     .isString()
@@ -201,6 +209,10 @@ const savePronunciationResultValidation = [
     .optional()
     .isBoolean()
     .withMessage('needs_teacher_review must be a boolean'),
+  body('heard_reference_audio')
+    .optional()
+    .isBoolean()
+    .withMessage('heard_reference_audio must be a boolean'),
   body('next_word_id')
     .optional({ nullable: true, checkFalsy: true })
     .trim(),

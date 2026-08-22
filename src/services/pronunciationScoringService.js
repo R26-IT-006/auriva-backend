@@ -5,6 +5,7 @@ const {
   scoreWordPronunciationAttemptWithoutReference,
 } = require('./pronunciationAnalysisService');
 const { WORD_PROFILES, LETTER_SOUNDS } = require('./wordProfiles');
+const logger = require('../utils/logger');
 
 const PHONEME_CUES = {
   'æ': 'Open the mouth wide for the short /a/ sound.',
@@ -34,6 +35,46 @@ const PHONEME_CUES = {
   'ʃ': 'Round the lips slightly and push quiet air.',
   'tʃ': 'Start with a tongue tap, then release air.',
   'dʒ': 'Start with a tongue tap, then release with voice.',
+  n: 'Lift the tongue tip behind the teeth and hum through the nose.',
+  j: 'Lift the tongue toward the roof of the mouth for a soft /y/ glide.',
+  e: 'Smile gently for the short /e/ sound.',
+  i: 'Smile softly for the short /i/ sound.',
+  a: 'Open the mouth for the short /a/ sound.',
+  'ə': 'Relax the mouth for the soft, unstressed "uh" sound.',
+  'ŋ': 'Lift the back of the tongue and hum through the nose.',
+  'aɪ': 'Start with an open /a/ and glide up to /i/.',
+  'aʊ': 'Start with an open /a/ and round toward /oo/.',
+  'eə': 'Start with /e/ and relax into a soft "uh".',
+  'ɪə': 'Start with a small /i/ and relax into a soft "uh".',
+  'əʊ': 'Start relaxed, then round the lips toward /oh/.',
+  'ɑː': 'Open the mouth wide for the long, deep "ah" sound.',
+  'ʊ': 'Round the lips gently for the short /oo/ sound.',
+  // The remaining keys are multi-sound blends this word bank groups as one
+  // unit rather than true single IPA phonemes — the cue walks through the
+  // blend so the teacher still has something concrete to say.
+  'gwɪn': 'Round the lips for /g w/, then finish with a small smile and a nose hum for /n/.',
+  sk: 'Blend a hissing /s/ straight into a back-of-tongue /k/.',
+  'təʊ': 'Tap the tongue for /t/, then round the lips toward /oh/.',
+  'əd': 'Relax into a soft "uh", then tap the tongue for /d/.',
+  'ŋg': 'Hum through the nose for /ng/, then lift the tongue back for /g/.',
+  'ruː': 'Curl the tongue for /r/, then round the lips and hold /oo/.',
+  'ɪʃ': 'Small smile for /i/, then round the lips softly for /sh/.',
+  ks: 'Lift the tongue back for /k/, then send air forward for /s/.',
+  'əl': 'Relax into a soft "uh", then lift the tongue tip for /l/.',
+  'flaɪ': 'Blow air for /f/, lift the tongue for /l/, then glide from /a/ to /i/.',
+  'ləʊ': 'Lift the tongue tip for /l/, then round the lips toward /oh/.',
+  'ŋgəʊ': 'Hum through the nose, lift the tongue back for /g/, then round the lips toward /oh/.',
+  'ndʒ': 'Hum through the nose, then tap and release with voice for /j/.',
+  'ən': 'Relax into a soft "uh", then hum through the nose for /n/.',
+  'ənt': 'Relax into a soft "uh", hum for /n/, then tap the tongue for /t/.',
+  gr: 'Lift the tongue back for /g/, then curl the tongue for /r/.',
+  gw: 'Lift the tongue back for /g/, then round the lips for /w/.',
+  mp: 'Hum through closed lips for /m/, then release with a soft pop for /p/.',
+  dr: 'Tap the tongue for /d/, then curl the tongue for /r/.',
+  sl: 'Send air forward for /s/, then lift the tongue tip for /l/.',
+  kl: 'Lift the tongue back for /k/, then lift the tongue tip for /l/.',
+  'ŋk': 'Hum through the nose, then lift the tongue back for /k/.',
+  'gə': 'Lift the tongue back for /g/, then relax into a soft "uh".',
 };
 
 function clampScore(value) {
@@ -507,6 +548,7 @@ function scorePrototypePronunciationAttemptData(data, previousResults = []) {
     word_id: data.word_id,
     word_label: data.word_label || data.word_id,
     overall_score: overallScore,
+    heard_reference_audio: Boolean(data.heard_reference_audio),
     phoneme_scores: phonemeScores,
     response_duration: responseDuration || null,
     hesitation_time: hesitationTime,
@@ -637,6 +679,11 @@ async function scoreAcousticPronunciationAttemptData(
     confidence_level: adaptiveModel.confidence_level,
     uncertainty_reasons: adaptiveModel.uncertainty_reasons,
     needs_teacher_review: needsTeacherReview,
+    // Metadata only — must never influence overall_score, adaptive_score, or
+    // recommendation_type. Whether the child just imitated the reference
+    // audio or spoke independently changes how a low score should be read,
+    // not what the score is.
+    heard_reference_audio: Boolean(data.heard_reference_audio),
     phoneme_scores: phonemeScores,
     response_duration: Number(data.response_duration || 0) || null,
     hesitation_time: hesitationTime,
@@ -705,10 +752,21 @@ async function scorePronunciationAttemptData(data, previousResults = []) {
       }
     }
 
-    if (typeof error.code !== 'string' || !error.code) {
-      error.code = 'ACOUSTIC_SCORING_FAILED';
-    }
-    throw error;
+    // Any other failure (GOP worker crash/timeout, unexpected engine error,
+    // malformed model output, etc.) must still hand the child a usable
+    // score rather than a dead end — a transient acoustic-engine problem is
+    // not the same as a bad recording or a mismatched word (those two stay
+    // real errors above), so it falls back the same way a missing reference
+    // recording does instead of surfacing a raw 500 with no score.
+    logger.error('Acoustic scoring failed, falling back to prototype scorer', {
+      word_id: wordId,
+      error_code: error.code,
+      error_message: error.message,
+    });
+    return {
+      ...scorePrototypePronunciationAttemptData(data, previousResults),
+      scoring_fallback_reason: 'acoustic_scoring_failed',
+    };
   }
 }
 
