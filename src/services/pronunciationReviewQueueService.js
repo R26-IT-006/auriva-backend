@@ -9,6 +9,14 @@ const RECENT_WINDOW = 300;
 const LOW_CONFIDENCE_THRESHOLD = 55;
 const LOW_COVERAGE_THRESHOLD = 8; // mirrors MIN_SAMPLES_FOR_CALIBRATION
 
+// Reviewed rows only grow over time (never purged, they're the layer-3
+// calibration corpus), so this full-table GROUP BY gets slower on every
+// queue load as the corpus grows. Same 10-min-cache convention as
+// adaptiveCalibrationService, which fits on the same table for the same
+// reason.
+const CACHE_TTL_MS = 10 * 60 * 1000;
+let reviewedCountsCache = null; // { counts, computedAt }
+
 function getConfidenceScore(result) {
   const score = result?.recommendation_details?.adaptive_model?.confidence_score;
   return Number.isFinite(score) ? score : null;
@@ -26,6 +34,10 @@ function computeInformativeness({ confidenceScore, reviewedForPopulation }) {
 }
 
 async function getReviewedCountsByPopulation() {
+  if (reviewedCountsCache && Date.now() - reviewedCountsCache.computedAt < CACHE_TTL_MS) {
+    return reviewedCountsCache.counts;
+  }
+
   // Lazy require: avoids a require-cycle with models/index.js at module load,
   // same as adaptiveCalibrationService.
   const { PronunciationSessionResult, Student, sequelize } = require('../models');
@@ -51,6 +63,7 @@ async function getReviewedCountsByPopulation() {
   for (const row of rows) {
     counts.set(normalizePopulationTag(row.population), Number(row.reviewed_count));
   }
+  reviewedCountsCache = { counts, computedAt: Date.now() };
   return counts;
 }
 
@@ -72,9 +85,16 @@ async function getReviewQueue(teacherId, { limit = DEFAULT_LIMIT } = {}) {
   const { PronunciationSessionResult, Student } = require('../models');
   const safeLimit = Math.max(1, Math.min(MAX_LIMIT, Number(limit) || DEFAULT_LIMIT));
 
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
   const [candidates, reviewedCounts] = await Promise.all([
     PronunciationSessionResult.findAll({
-      where: { teacher_id: teacherId, teacher_reviewed_score: null },
+      where: {
+        teacher_id: teacherId,
+        teacher_reviewed_score: null,
+        created_at: { [Op.gte]: startOfToday },
+      },
       // Blob column excluded: 300 candidate rows each carrying up to 8MB of
       // stored audio would otherwise stream through the DB on every queue load.
       attributes: { exclude: ['raw_audio_data'] },
@@ -111,6 +131,10 @@ async function getReviewQueue(teacherId, { limit = DEFAULT_LIMIT } = {}) {
         confidence_score: confidenceScore,
         informativeness_score: informativenessScore,
         informativeness_reasons: reasons,
+        // raw_audio_data itself is excluded from the query (see above);
+        // raw_audio_size stands in for presence, same convention teacherService
+        // uses for the results-history endpoint.
+        has_raw_audio: Boolean(row.raw_audio_size),
       };
     })
     .sort((a, b) => b.informativeness_score - a.informativeness_score)

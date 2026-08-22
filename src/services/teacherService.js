@@ -306,9 +306,14 @@ async function submitPronunciationReview(teacherId, resultId, teacherReviewedSco
   return plain;
 }
 
-async function getPronunciationResults(teacherId, studentId) {
+const RESULTS_HISTORY_DEFAULT_LIMIT = 4;
+const RESULTS_HISTORY_MAX_LIMIT = 50;
+
+async function getPronunciationResults(teacherId, studentId, limit = RESULTS_HISTORY_DEFAULT_LIMIT) {
   const student = await findTeacherStudent(teacherId, studentId);
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+
+  const safeLimit = Math.max(1, Math.min(RESULTS_HISTORY_MAX_LIMIT, Number(limit) || RESULTS_HISTORY_DEFAULT_LIMIT));
 
   const results = await PronunciationSessionResult.findAll({
     where: { teacher_id: teacherId, student_id: student.sid },
@@ -316,7 +321,12 @@ async function getPronunciationResults(teacherId, studentId) {
     // report has_raw_audio pulled hundreds of MB through the DB per history
     // load. raw_audio_size stands in for presence.
     attributes: { exclude: ['raw_audio_data'] },
-    order: [['created_at', 'ASC'], ['id', 'ASC']],
+    order: [['created_at', 'DESC'], ['id', 'DESC']],
+    // Display-only cap: this only limits what the teacher's history screen
+    // shows. Rows themselves are never deleted here — teacher_reviewed_score
+    // on older rows is still the labeled corpus adaptiveCalibrationService
+    // fits Layer 3 on, so those stay in the DB regardless of this limit.
+    limit: safeLimit,
   });
 
   return results.map(serializePronunciationResult).reverse();

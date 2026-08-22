@@ -81,7 +81,7 @@ async function scorePronunciationAttempt(req, res) {
 }
 
 async function getPronunciationResults(req, res) {
-  const results = await teacherService.getPronunciationResults(req.user.id, req.params.id);
+  const results = await teacherService.getPronunciationResults(req.user.id, req.params.id, req.query.limit);
   res.json(results);
 }
 
