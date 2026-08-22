@@ -28,18 +28,28 @@ function computeInformativeness({ confidenceScore, reviewedForPopulation }) {
 async function getReviewedCountsByPopulation() {
   // Lazy require: avoids a require-cycle with models/index.js at module load,
   // same as adaptiveCalibrationService.
-  const { PronunciationSessionResult, Student } = require('../models');
+  const { PronunciationSessionResult, Student, sequelize } = require('../models');
+  // Counted in SQL rather than loading every reviewed row into Node; grouping
+  // on the same LOWER(TRIM(...)) normalization normalizePopulationTag applies
+  // so "ASD" and " asd " land in one bucket here and in the calibration fit.
+  const normalizedDisability = sequelize.fn(
+    'LOWER',
+    sequelize.fn('TRIM', sequelize.fn('COALESCE', sequelize.col('student.disability'), ''))
+  );
   const rows = await PronunciationSessionResult.findAll({
     where: { teacher_reviewed_score: { [Op.ne]: null } },
-    attributes: ['id'],
-    include: [{ model: Student, as: 'student', attributes: ['disability'] }],
+    attributes: [
+      [normalizedDisability, 'population'],
+      [sequelize.fn('COUNT', sequelize.col('PronunciationSessionResult.id')), 'reviewed_count'],
+    ],
+    include: [{ model: Student, as: 'student', attributes: [] }],
+    group: [normalizedDisability],
     raw: true,
   });
 
   const counts = new Map();
   for (const row of rows) {
-    const tag = normalizePopulationTag(row['student.disability']);
-    counts.set(tag, (counts.get(tag) || 0) + 1);
+    counts.set(normalizePopulationTag(row.population), Number(row.reviewed_count));
   }
   return counts;
 }
@@ -65,6 +75,9 @@ async function getReviewQueue(teacherId, { limit = DEFAULT_LIMIT } = {}) {
   const [candidates, reviewedCounts] = await Promise.all([
     PronunciationSessionResult.findAll({
       where: { teacher_id: teacherId, teacher_reviewed_score: null },
+      // Blob column excluded: 300 candidate rows each carrying up to 8MB of
+      // stored audio would otherwise stream through the DB on every queue load.
+      attributes: { exclude: ['raw_audio_data'] },
       include: [{ model: Student, as: 'student', attributes: ['full_name', 'disability'] }],
       order: [['created_at', 'DESC']],
       limit: RECENT_WINDOW,
@@ -92,7 +105,6 @@ async function getReviewQueue(teacherId, { limit = DEFAULT_LIMIT } = {}) {
         reasons.push('already flagged for review');
       }
 
-      delete row.raw_audio_data;
       return {
         ...row,
         population_tag: populationTag,

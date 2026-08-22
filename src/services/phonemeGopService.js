@@ -44,11 +44,25 @@ function stopWorker() {
   workerReady = null;
 }
 
+let rewarmTimer = null;
+
 function markUnavailable(reason) {
   logger.warn(`Phoneme GOP worker unavailable: ${reason}`);
   unavailableUntil = Date.now() + FAILURE_COOLDOWN_MS;
   rejectAllPending(reason);
   stopWorker();
+
+  // Re-warm in the background once the cooldown lapses. Without this, the
+  // first escalated attempt after a crash pays the full ~120s model load
+  // inside a live request — the boot-time warmup only covers server start.
+  if (rewarmTimer) clearTimeout(rewarmTimer);
+  rewarmTimer = setTimeout(() => {
+    rewarmTimer = null;
+    warmup().then((ready) => {
+      if (ready) logger.info('Phoneme GOP worker re-warmed after cooldown');
+    });
+  }, FAILURE_COOLDOWN_MS + 1000); // +1s so the cooldown gate is already open
+  if (rewarmTimer.unref) rewarmTimer.unref();
 }
 
 function startWorker() {

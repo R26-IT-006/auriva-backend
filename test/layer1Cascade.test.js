@@ -9,7 +9,6 @@ const {
   distanceToScore,
   getLayer1Decision,
   LAYER1_CONFIDENT_ACCEPT_SCORE,
-  LAYER1_CONFIDENT_REJECT_SCORE,
 } = require('../src/services/pronunciationAnalysisService');
 
 test('calculateDtw aligns identical sequences with zero distance', () => {
@@ -43,16 +42,15 @@ test('distanceToScore is monotonically decreasing and bounded to 0-100', () => {
   assert.ok(bad >= 0);
 });
 
-test('getLayer1Decision gates on the documented thresholds', () => {
+test('getLayer1Decision gate is accept-only: low scores always escalate to GOP', () => {
   assert.equal(getLayer1Decision(LAYER1_CONFIDENT_ACCEPT_SCORE), 'dtw_only_accept');
   assert.equal(getLayer1Decision(100), 'dtw_only_accept');
-  assert.equal(getLayer1Decision(LAYER1_CONFIDENT_REJECT_SCORE), 'dtw_only_reject');
-  assert.equal(getLayer1Decision(0), 'dtw_only_reject');
 
-  const ambiguous = (LAYER1_CONFIDENT_ACCEPT_SCORE + LAYER1_CONFIDENT_REJECT_SCORE) / 2;
-  assert.equal(getLayer1Decision(ambiguous), 'escalated_to_gop');
+  // A low DTW score alone must never fail a child — DTW punishes voice
+  // mismatch (child pitch, atypical prosody), not just wrong pronunciation.
   assert.equal(getLayer1Decision(LAYER1_CONFIDENT_ACCEPT_SCORE - 1), 'escalated_to_gop');
-  assert.equal(getLayer1Decision(LAYER1_CONFIDENT_REJECT_SCORE + 1), 'escalated_to_gop');
+  assert.equal(getLayer1Decision(50), 'escalated_to_gop');
+  assert.equal(getLayer1Decision(0), 'escalated_to_gop');
 });
 
 test('analyzeAudioQuality rejects silence and accepts a clear tone with a real noise floor', () => {

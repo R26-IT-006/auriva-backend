@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   buildAdaptiveModel,
   scorePronunciationAttemptData,
+  buildHistoryCounts,
 } = require('../src/services/pronunciationScoringService');
 
 const BASE_AUDIO_QUALITY = {
@@ -89,4 +90,18 @@ test('scorePronunciationAttemptData: unknown word_id still returns a usable fall
   const result = await scorePronunciationAttemptData({ word_id: 'not_a_real_word' }, []);
   assert.ok(Number.isFinite(result.overall_score));
   assert.equal(typeof result.recommendation_type, 'string');
+});
+
+test('buildHistoryCounts counts weak phonemes only from real acoustic attempts', () => {
+  const weakEntry = { text: 'r', score: 40 };
+  const results = [
+    { scoring_method: 'wav2vec2_gop+mfcc_dtw_v1', phoneme_scores: [weakEntry] },
+    { scoring_method: 'mfcc_dtw_v2', phoneme_scores: [weakEntry] },
+    // Prototype-fallback rows carry fabricated phoneme scores and must not
+    // feed weak-phoneme history.
+    { scoring_method: 'prototype_signal_rule_v1', phoneme_scores: [weakEntry, weakEntry] },
+  ];
+
+  const counts = buildHistoryCounts(results);
+  assert.equal(counts.r, 2);
 });

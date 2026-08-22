@@ -38,6 +38,20 @@ test('fitCalibrationFromPairs recovers a consistent systematic offset', () => {
   assert.ok(Math.abs(fit.intercept + 10) < 1, `intercept ${fit.intercept} should be near -10`);
 });
 
+test('fitCalibrationFromPairs rejects a pathological slope instead of applying it', () => {
+  // Anti-correlated noise: OLS would fit a negative slope, which would invert
+  // scores if ever applied. The fit must fall back to identity.
+  const pairs = Array.from({ length: 12 }, (_, i) => {
+    const adaptiveScore = 40 + i * 4;
+    return [adaptiveScore, 100 - adaptiveScore];
+  });
+  const fit = fitCalibrationFromPairs(pairs);
+  assert.equal(fit.fitted, false);
+  assert.equal(fit.slope, 1);
+  assert.equal(fit.intercept, 0);
+  assert.ok(fit.rejected_slope < 0, `expected negative rejected_slope, got ${fit.rejected_slope}`);
+});
+
 test('applyCalibration is a no-op when the calibration is not fitted', () => {
   const identity = { slope: 1, intercept: 0, fitted: false };
   assert.equal(applyCalibration(77, identity), 77);

@@ -28,10 +28,22 @@ const MIN_PEAK_AMPLITUDE = 0.015;
 const MIN_VOICED_RMS = 0.012;
 const MIN_SNR_DB = 8;
 const MAX_CLIPPING_RATIO = 0.04;
-const REFERENCE_AUDIO_DIR = path.resolve(
-  __dirname,
-  '../../../auriva-frontend/assets/pronounciation-audios'
-);
+// Reference recordings live with the backend (they are scoring inputs, not
+// UI assets); REFERENCE_AUDIO_DIR overrides for deployments. The frontend
+// assets path remains as a dev-environment fallback for checkouts that
+// predate the backend copy — note the historical folder-name typo there.
+const REFERENCE_AUDIO_DIR_CANDIDATES = [
+  process.env.REFERENCE_AUDIO_DIR,
+  path.resolve(__dirname, '../../assets/reference-audio'),
+  path.resolve(__dirname, '../../../auriva-frontend/assets/pronounciation-audios'),
+].filter(Boolean);
+const REFERENCE_AUDIO_DIR = REFERENCE_AUDIO_DIR_CANDIDATES.find((dir) => {
+  try {
+    return require('fs').statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}) || REFERENCE_AUDIO_DIR_CANDIDATES[REFERENCE_AUDIO_DIR_CANDIDATES.length - 1];
 
 const referenceAnalysisCache = new Map();
 
@@ -507,15 +519,18 @@ const DISTANCE_SCORE_MIDPOINT = 0.85;
 const DISTANCE_SCORE_SLOPE = 0.18;
 
 // Layer-1 (MFCC-DTW) cascade gate: when the acoustic score alone is decisive
-// enough, the wav2vec2 GOP model (layer 2) is skipped entirely. Only the
-// ambiguous middle band pays for the heavier model call. Provisional bounds,
-// same Phase 4 calibration debt as the constants above.
+// enough, the wav2vec2 GOP model (layer 2) is skipped entirely. The gate is
+// deliberately asymmetric — only confident ACCEPTS skip layer 2. A low DTW
+// score is never allowed to fail a child on its own: DTW against a single
+// adult reference penalizes voice mismatch (child pitch, atypical prosody —
+// this product's population) as much as wrong pronunciation, so every
+// non-accepted attempt escalates to GOP for phoneme-identity evidence.
+// Threshold is provisional, same Phase 4 calibration debt as the constants
+// above.
 const LAYER1_CONFIDENT_ACCEPT_SCORE = 85;
-const LAYER1_CONFIDENT_REJECT_SCORE = 30;
 
 function getLayer1Decision(segmentalAccuracy) {
   if (segmentalAccuracy >= LAYER1_CONFIDENT_ACCEPT_SCORE) return 'dtw_only_accept';
-  if (segmentalAccuracy <= LAYER1_CONFIDENT_REJECT_SCORE) return 'dtw_only_reject';
   return 'escalated_to_gop';
 }
 
@@ -936,7 +951,6 @@ module.exports = {
   distanceToScore,
   getLayer1Decision,
   LAYER1_CONFIDENT_ACCEPT_SCORE,
-  LAYER1_CONFIDENT_REJECT_SCORE,
   AudioQualityError,
   ReferenceAudioError,
 };

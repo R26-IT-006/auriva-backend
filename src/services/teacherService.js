@@ -190,7 +190,9 @@ function buildPronunciationResultRecord({ teacherId, studentId, data, rawAudioBu
 
 function serializePronunciationResult(result, index) {
   const plain = result.get({ plain: true });
-  const hasRawAudio = Boolean(plain.raw_audio_data);
+  const hasRawAudio = plain.raw_audio_data !== undefined
+    ? Boolean(plain.raw_audio_data)
+    : Boolean(plain.raw_audio_size);
   delete plain.raw_audio_data;
 
   return {
@@ -203,6 +205,28 @@ function serializePronunciationResult(result, index) {
 async function savePronunciationResult(teacherId, studentId, data) {
   const student = await findTeacherStudent(teacherId, studentId);
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+
+  // Scoring already persisted the attempt server-side (see
+  // scorePronunciationAttempt); the client only finishes the workflow by
+  // attaching the fields it alone knows. Scoring output (scores, phonemes,
+  // recommendation, review flags) is never accepted back from the client on
+  // this path — the stored row is the source of truth.
+  if (data.result_id) {
+    const result = await PronunciationSessionResult.findOne({
+      where: { id: data.result_id, teacher_id: teacherId, student_id: student.sid },
+    });
+    if (!result) throw new ApiError(404, 'Pronunciation result not found');
+
+    await result.update({
+      listen_choose_data: data.listen_choose_data ?? result.listen_choose_data,
+      recording_uri: data.recording_uri || result.recording_uri,
+      workflow_completed: data.workflow_completed ?? true,
+    });
+
+    const plain = result.get({ plain: true });
+    delete plain.raw_audio_data;
+    return plain;
+  }
 
   const rawAudioBuffer = data.raw_audio_base64
     ? Buffer.from(data.raw_audio_base64, 'base64')
@@ -224,6 +248,7 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
 
   const previousResults = await PronunciationSessionResult.findAll({
     where: { teacher_id: teacherId, student_id: student.sid },
+    attributes: { exclude: ['raw_audio_data'] },
     order: [['created_at', 'DESC'], ['id', 'DESC']],
     limit: 12,
   });
@@ -231,9 +256,33 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
     result.get({ plain: true })
   );
 
-  return scorePronunciationAttemptData(data, previousResultData, {
+  const scored = await scorePronunciationAttemptData(data, previousResultData, {
     populationTag: student.disability,
   });
+
+  // Persist the scoring output server-side immediately: the stored row is the
+  // research record, so the client can never alter scores between scoring and
+  // saving, and an interrupted session still keeps the attempt
+  // (workflow_completed stays false until the client finishes the flow via
+  // savePronunciationResult with result_id).
+  const rawAudioBuffer = data.raw_audio_base64
+    ? Buffer.from(data.raw_audio_base64, 'base64')
+    : null;
+  const saved = await PronunciationSessionResult.create(
+    buildPronunciationResultRecord({
+      teacherId,
+      studentId: student.sid,
+      data: {
+        ...scored,
+        raw_audio_mime_type: data.raw_audio_mime_type || null,
+        raw_audio_size: data.raw_audio_size || null,
+        workflow_completed: false,
+      },
+      rawAudioBuffer,
+    })
+  );
+
+  return { ...scored, result_id: saved.id };
 }
 
 async function getPronunciationReviewQueue(teacherId, limit) {
@@ -263,6 +312,10 @@ async function getPronunciationResults(teacherId, studentId) {
 
   const results = await PronunciationSessionResult.findAll({
     where: { teacher_id: teacherId, student_id: student.sid },
+    // Blob column excluded: fetching every attempt's stored audio just to
+    // report has_raw_audio pulled hundreds of MB through the DB per history
+    // load. raw_audio_size stands in for presence.
+    attributes: { exclude: ['raw_audio_data'] },
     order: [['created_at', 'ASC'], ['id', 'ASC']],
   });
 

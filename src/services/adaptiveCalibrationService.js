@@ -7,6 +7,13 @@ const logger = require('../utils/logger');
 // at identity rather than let a handful of teacher corrections skew scores.
 const MIN_SAMPLES_FOR_CALIBRATION = 8;
 
+// Sanity bounds on the fitted slope. With few, noisy points OLS can produce a
+// negative or wildly steep slope that would invert or explode scores; such a
+// fit is treated as not fitted rather than applied. A real teacher-vs-model
+// recalibration should always be a mild monotone adjustment.
+const MIN_CALIBRATION_SLOPE = 0.25;
+const MAX_CALIBRATION_SLOPE = 4;
+
 // Teacher reviews trickle in slowly compared to scoring requests; recomputing
 // per-request would hammer the DB for no benefit, so a fit is reused for a
 // while before it's refreshed from the latest reviewed rows.
@@ -51,6 +58,17 @@ function fitCalibrationFromPairs(pairs, { minSamples = MIN_SAMPLES_FOR_CALIBRATI
 
   const slope = covariance / varianceX;
   const intercept = meanY - slope * meanX;
+
+  if (slope < MIN_CALIBRATION_SLOPE || slope > MAX_CALIBRATION_SLOPE) {
+    return {
+      slope: 1,
+      intercept: 0,
+      sample_size: n,
+      fitted: false,
+      rejected_slope: Number(slope.toFixed(4)),
+    };
+  }
+
   return { slope, intercept, sample_size: n, fitted: true };
 }
 
@@ -86,15 +104,28 @@ async function getReviewedPairs({ PronunciationSessionResult }, where) {
  * timing/articulation in some populations (e.g. ASD) isn't a scoring error to
  * average away — see the timing-observation note in
  * pronunciationAnalysisService.buildPhonemeBoundaryAlignment.
+ *
+ * Known limitation (document in any writeup): reviewed attempts are not a
+ * random sample. The review queue deliberately surfaces low-confidence
+ * attempts (uncertainty sampling), so this OLS fit is estimated mostly from
+ * the region where the model is least sure and extrapolated elsewhere. This
+ * is one reason the calibration stays evidence-only until validated on more
+ * labeled data.
  */
 async function computeCalibrationUncached(populationTag) {
   const tag = normalizePopulationTag(populationTag);
   // Lazy require: avoids a require-cycle with models/index.js at module load.
-  const { PronunciationSessionResult, Student } = require('../models');
+  const { PronunciationSessionResult, Student, sequelize } = require('../models');
 
   if (populationTag) {
+    // Matched on the same LOWER(TRIM(...)) normalization as the tag itself:
+    // disability is free text, so "ASD", "asd" and " ASD " are one population
+    // here exactly as they are in the review queue's coverage counts.
     const studentRows = await Student.findAll({
-      where: { disability: populationTag },
+      where: sequelize.where(
+        sequelize.fn('LOWER', sequelize.fn('TRIM', sequelize.col('disability'))),
+        tag
+      ),
       attributes: ['sid'],
       raw: true,
     });

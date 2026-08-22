@@ -303,6 +303,11 @@ function pickWeakSound({ sounds, baseScore, difficulty, attemptNumber, historyCo
 
 function buildHistoryCounts(results = []) {
   return results.reduce((counts, result) => {
+    // Prototype-fallback rows carry fabricated phoneme scores (derived from
+    // heuristics like audio size, not from the audio itself) — letting them
+    // feed weak-phoneme history would poison word selection and the adaptive
+    // features with non-acoustic evidence.
+    if (result.scoring_method === 'prototype_signal_rule_v1') return counts;
     const phonemeScores = Array.isArray(result.phoneme_scores) ? result.phoneme_scores : [];
     phonemeScores
       .filter((entry) => entry?.text && Number(entry.score) < 65)
@@ -577,7 +582,20 @@ async function scoreAcousticPronunciationAttemptData(
   const difficulty = Number(data.difficulty || profile.difficulty || 2);
   const mfccDtwScore = await scoreEngine({ ...data, word_id: wordId });
   const gopAssessment = mfccDtwScore.gop_assessment || null;
-  const gopBySound = gopAssessment?.per_sound || [];
+  // Per-sound GOP entries are matched to `sounds` by position; both derive
+  // from the same phoneme resolver today, but a length mismatch (profile
+  // edit, client-supplied target_phonemes) would silently attribute scores
+  // to the wrong phonemes — in that case ignore the per-sound breakdown and
+  // keep only the overall GOP evidence.
+  const gopPerSound = gopAssessment?.per_sound || [];
+  const gopBySound = gopPerSound.length === sounds.length ? gopPerSound : [];
+  if (gopPerSound.length && !gopBySound.length) {
+    logger.warn('GOP per-sound count mismatch; ignoring per-sound GOP scores', {
+      word_id: wordId,
+      expected: sounds.length,
+      received: gopPerSound.length,
+    });
+  }
   const scoringMethod = gopAssessment
     ? (mfccDtwScore.dtw_distance != null ? 'wav2vec2_gop+mfcc_dtw_v1' : 'wav2vec2_gop_v1')
     : mfccDtwScore.scoring_method;
@@ -661,7 +679,14 @@ async function scoreAcousticPronunciationAttemptData(
   });
   // Low-confidence results suppress child-facing evaluative feedback and are
   // flagged for the teacher instead of risking an unreliable negative score.
-  const needsTeacherReview = adaptiveModel.confidence_level === 'low';
+  // Attempts where ASR could not confirm the target word (disordered speech
+  // the transcriber can't parse, or a confusable letter pair) are scored but
+  // likewise flagged — the score stands on acoustic/GOP evidence alone there.
+  const speechStatus = mfccDtwScore.speech_verification?.status || null;
+  const needsTeacherReview =
+    adaptiveModel.confidence_level === 'low' ||
+    speechStatus === 'unverified_speech' ||
+    speechStatus === 'inconclusive_confusable';
 
   // Layer 3: a small recalibration model fit on teacher-reviewed attempts,
   // grouped by student population (Student.disability) so it can adapt as
@@ -792,4 +817,5 @@ async function scorePronunciationAttemptData(data, previousResults = [], context
 module.exports = {
   scorePronunciationAttemptData,
   buildAdaptiveModel,
+  buildHistoryCounts,
 };

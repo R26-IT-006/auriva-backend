@@ -36,10 +36,8 @@ const { verifySpokenWord } = require('../src/services/speechRecognitionService')
 const phonemeGopService = require('../src/services/phonemeGopService');
 const { WORD_PROFILES } = require('../src/services/wordProfiles');
 
-const REFERENCE_AUDIO_DIR = path.resolve(
-  __dirname,
-  '../../auriva-frontend/assets/pronounciation-audios'
-);
+const REFERENCE_AUDIO_DIR = process.env.REFERENCE_AUDIO_DIR ||
+  path.resolve(__dirname, '../assets/reference-audio');
 
 let passCount = 0;
 let failCount = 0;

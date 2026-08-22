@@ -89,21 +89,33 @@ const scorePronunciationAttemptValidation = [
 ];
 
 const savePronunciationResultValidation = [
+  // Update path: the scoring endpoint already persisted the attempt row;
+  // result_id attaches the client-owned workflow fields to it. When present,
+  // the scoring fields below are not required (and are ignored by the
+  // service — scoring output is never accepted back from the client).
+  body('result_id')
+    .optional({ nullable: true })
+    .isInt({ min: 1 })
+    .withMessage('result_id must be a positive integer'),
   body('mode')
+    .if(body('result_id').not().exists())
     .isIn(['word', 'alphabet'])
     .withMessage('mode must be either word or alphabet'),
   body('category_id')
     .optional({ nullable: true, checkFalsy: true })
     .trim(),
   body('word_id')
+    .if(body('result_id').not().exists())
     .trim()
     .notEmpty()
     .withMessage('word_id is required'),
   body('word_label')
+    .if(body('result_id').not().exists())
     .trim()
     .notEmpty()
     .withMessage('word_label is required'),
   body('overall_score')
+    .if(body('result_id').not().exists())
     .isInt({ min: 0, max: 100 })
     .withMessage('overall_score must be an integer between 0 and 100'),
   body('phoneme_scores')

@@ -7,6 +7,7 @@ const path = require('path');
 const { promisify } = require('util');
 
 const logger = require('../utils/logger');
+const { WORD_PROFILES } = require('./wordProfiles');
 
 const execFileAsync = promisify(execFile);
 
@@ -223,11 +224,34 @@ async function verifySpokenWord({ rawAudioBase64, mimeType, targetWord, wordLabe
     }
   }
 
-  throw new WordMismatchError({
-    targetWord,
-    wordLabel,
-    recognizedText: transcript,
-  });
+  // Hard-reject only when the transcript confidently IS a different word the
+  // app knows (a different vocabulary word or a clearly spoken different
+  // letter). Anything else — garbled, partial, or disordered speech the ASR
+  // can't parse — is exactly what this product's population produces on a
+  // genuine attempt, so scoring proceeds on acoustic/GOP evidence with the
+  // attempt flagged for teacher review instead of blocking the child.
+  if (isConfidentDifferentWord(transcript, target)) {
+    throw new WordMismatchError({
+      targetWord,
+      wordLabel,
+      recognizedText: transcript,
+    });
+  }
+
+  return { status: 'unverified_speech', recognized_text: transcript };
+}
+
+function isConfidentDifferentWord(transcript, target) {
+  const tokens = transcript.split(' ').filter(Boolean);
+
+  if (target.length === 1) {
+    // Letter target: a clearly spoken different letter name counts.
+    const spokenLetter = transcriptAsLetter(transcript);
+    return Boolean(spokenLetter && spokenLetter !== target);
+  }
+
+  // Word target: an exact match on a different word in the vocabulary counts.
+  return tokens.some((token) => token !== target && Boolean(WORD_PROFILES[token]));
 }
 
 module.exports = {
@@ -235,5 +259,6 @@ module.exports = {
   transcribeBase64Audio,
   matchesTargetWord,
   normalizeTranscript,
+  isConfidentDifferentWord,
   WordMismatchError,
 };
