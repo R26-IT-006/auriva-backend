@@ -15,6 +15,13 @@ const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH ||
   path.resolve(__dirname, '../../models/ggml-base.en.bin');
 const SPEECH_VERIFICATION_ENABLED = process.env.SPEECH_VERIFICATION_ENABLED !== 'false';
 const WHISPER_TIMEOUT_MS = Number(process.env.WHISPER_TIMEOUT_MS || 30000);
+// whisper-cli defaults to 4 threads. pronunciationAnalysisService now runs
+// this concurrently with the GOP worker's torch inference (also capped, see
+// PHONEME_GOP_TORCH_THREADS) — measured on an 8-core machine, two
+// full-default-thread subprocesses at once caused CPU oversubscription that
+// sometimes made the concurrent run *slower* than sequential. Capping both
+// leaves headroom instead of fighting over the same cores.
+const WHISPER_THREADS = Number(process.env.WHISPER_THREADS || 2);
 
 // Spoken names of letters for alphabet mode: saying "b" is transcribed "bee".
 const LETTER_NAMES = {
@@ -167,6 +174,7 @@ async function transcribeBase64Audio(rawAudioBase64, mimeType) {
     const { stdout } = await execFileAsync(WHISPER_CLI_PATH, [
       '-m', WHISPER_MODEL_PATH,
       '-f', wavPath,
+      '-t', String(WHISPER_THREADS),
       '--no-timestamps',
       '--no-prints',
       '--language', 'en',

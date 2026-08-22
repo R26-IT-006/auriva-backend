@@ -230,7 +230,14 @@ const savePronunciationResultValidation = [
   ...audioPayloadValidation,
 ];
 
+const submitPronunciationReviewValidation = [
+  body('teacher_reviewed_score')
+    .isInt({ min: 0, max: 100 })
+    .withMessage('teacher_reviewed_score must be an integer between 0 and 100'),
+];
+
 module.exports = {
   savePronunciationResultValidation,
   scorePronunciationAttemptValidation,
+  submitPronunciationReviewValidation,
 };

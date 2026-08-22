@@ -9,6 +9,7 @@ const ctrl            = require('../controllers/teacherController');
 const {
   savePronunciationResultValidation,
   scorePronunciationAttemptValidation,
+  submitPronunciationReviewValidation,
 } = require('../validations/pronunciationValidation');
 
 // All routes require JWT + teacher role + first-login gate
@@ -254,6 +255,74 @@ router.post(
   '/students/:id/pronunciation-results',
   savePronunciationResultValidation,
   ctrl.savePronunciationResult
+);
+
+/**
+ * @swagger
+ * /api/teacher/pronunciation-review-queue:
+ *   get:
+ *     summary: List not-yet-reviewed pronunciation attempts ranked by how informative labeling them would be
+ *     description: >
+ *       Uncertainty sampling (low model confidence) blended with coverage
+ *       sampling (populations with few reviewed examples so far) — an
+ *       active-learning queue for the layer-3 calibration model, not just a
+ *       recency-ordered list of flagged attempts.
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Ranked review queue
+ */
+router.get('/pronunciation-review-queue', ctrl.getPronunciationReviewQueue);
+
+/**
+ * @swagger
+ * /api/teacher/pronunciation-results/{resultId}/review:
+ *   patch:
+ *     summary: Submit a teacher-confirmed score for a saved pronunciation result
+ *     description: >
+ *       Writes ground truth onto an existing result row. This labeled corpus
+ *       is what the layer-3 adaptive calibration model is fit against.
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: resultId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [teacher_reviewed_score]
+ *             properties:
+ *               teacher_reviewed_score:
+ *                 type: integer
+ *                 minimum: 0
+ *                 maximum: 100
+ *     responses:
+ *       200:
+ *         description: Review recorded
+ *       404:
+ *         description: Pronunciation result not found
+ *       422:
+ *         description: Validation error
+ */
+router.patch(
+  '/pronunciation-results/:resultId/review',
+  submitPronunciationReviewValidation,
+  ctrl.submitPronunciationReview
 );
 
 module.exports = router;

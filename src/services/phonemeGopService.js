@@ -174,6 +174,21 @@ async function assessPhonemeGop({ rawAudioBase64, mimeType, targetSounds }) {
   }
 }
 
+/**
+ * Starts the worker at server boot instead of on first request. With the
+ * layer-1 DTW cascade gating layer 2, the first GOP call can land on any live
+ * escalated attempt rather than predictably on request one — an unwarmed
+ * worker would then make a real child's attempt eat the ~120s model-load
+ * cold start. Fire-and-forget: never throws, never blocks server startup.
+ */
+function warmup() {
+  if (!PHONEME_GOP_ENABLED) return Promise.resolve(false);
+  if (Date.now() < unavailableUntil) return Promise.resolve(false);
+  if (!worker) startWorker();
+  return workerReady.then(() => true, () => false);
+}
+
 module.exports = {
   assessPhonemeGop,
+  warmup,
 };

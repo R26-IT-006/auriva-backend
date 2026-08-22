@@ -5,6 +5,7 @@ const {
   scoreWordPronunciationAttemptWithoutReference,
 } = require('./pronunciationAnalysisService');
 const { WORD_PROFILES, LETTER_SOUNDS } = require('./wordProfiles');
+const { computeCalibration, applyCalibration } = require('./adaptiveCalibrationService');
 const logger = require('../utils/logger');
 
 const PHONEME_CUES = {
@@ -566,7 +567,8 @@ async function scoreAcousticPronunciationAttemptData(
   data,
   previousResults,
   wordId,
-  scoreEngine = scoreWordPronunciationAttempt
+  scoreEngine = scoreWordPronunciationAttempt,
+  context = {}
 ) {
   const profile = WORD_PROFILES[wordId] || {};
   const sounds = normalizeSounds({ ...data, word_id: wordId });
@@ -661,6 +663,19 @@ async function scoreAcousticPronunciationAttemptData(
   // flagged for the teacher instead of risking an unreliable negative score.
   const needsTeacherReview = adaptiveModel.confidence_level === 'low';
 
+  // Layer 3: a small recalibration model fit on teacher-reviewed attempts,
+  // grouped by student population (Student.disability) so it can adapt as
+  // labeled examples arrive from new populations (e.g. autistic students)
+  // without needing separate models trained from scratch. Surfaced as
+  // evidence only for now — it does not adjust overall_score/adaptive_score
+  // until validated on more labeled data than the corpus currently holds.
+  const calibration = context.populationTag
+    ? await computeCalibration(context.populationTag)
+    : null;
+  const layer3Calibration = calibration
+    ? { ...calibration, calibrated_score: applyCalibration(adaptiveModel.adaptive_score, calibration) }
+    : null;
+
   return {
     mode: data.mode || 'word',
     category_id: data.category_id || null,
@@ -694,6 +709,7 @@ async function scoreAcousticPronunciationAttemptData(
     attempt_number: attemptNumber,
     scoring_method: scoringMethod,
     dtw_distance: mfccDtwScore.dtw_distance,
+    layer1_decision: mfccDtwScore.layer1_decision || null,
     reference_word_id: mfccDtwScore.reference_word_id,
     mfcc_config: mfccDtwScore.mfcc_config,
     ...recommendation,
@@ -708,6 +724,8 @@ async function scoreAcousticPronunciationAttemptData(
       },
       scoring_evidence: {
         method: scoringMethod,
+        layer1_decision: mfccDtwScore.layer1_decision || null,
+        layer3_calibration: layer3Calibration,
         gop_assessment: gopAssessment,
         dtw_distance: mfccDtwScore.dtw_distance,
         segment_scores: mfccDtwScore.segment_scores,
@@ -720,11 +738,11 @@ async function scoreAcousticPronunciationAttemptData(
   };
 }
 
-async function scorePronunciationAttemptData(data, previousResults = []) {
+async function scorePronunciationAttemptData(data, previousResults = [], context = {}) {
   const wordId = String(data.word_id || '').toLowerCase();
 
   try {
-    return await scoreAcousticPronunciationAttemptData(data, previousResults, wordId);
+    return await scoreAcousticPronunciationAttemptData(data, previousResults, wordId, undefined, context);
   } catch (error) {
     if (error.code === 'AUDIO_QUALITY_FAILED' || error.code === 'WORD_MISMATCH') {
       throw error;
@@ -739,7 +757,8 @@ async function scorePronunciationAttemptData(data, previousResults = []) {
           data,
           previousResults,
           wordId,
-          scoreWordPronunciationAttemptWithoutReference
+          scoreWordPronunciationAttemptWithoutReference,
+          context
         );
       } catch (gopError) {
         if (gopError.code === 'AUDIO_QUALITY_FAILED' || gopError.code === 'WORD_MISMATCH') {
@@ -772,4 +791,5 @@ async function scorePronunciationAttemptData(data, previousResults = []) {
 
 module.exports = {
   scorePronunciationAttemptData,
+  buildAdaptiveModel,
 };

@@ -12,6 +12,7 @@ const ApiError     = require('./src/utils/ApiError');
 const { sequelize } = require('./src/models');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./src/config/swagger');
+const phonemeGopService = require('./src/services/phonemeGopService');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -161,6 +162,14 @@ async function start() {
   app.listen(PORT, () => {
     logger.info(`Auriva backend running on port ${PORT} [${process.env.NODE_ENV}]`);
     logger.info(`Swagger UI → http://localhost:${PORT}/api-docs`);
+  });
+
+  // Fire-and-forget: warms the GOP model in the background so the first
+  // layer-1-escalated attempt doesn't pay the cold-start cost itself. On
+  // failure the worker logs its own reason and scoring falls back to
+  // layer-1-only, same as any later runtime GOP failure.
+  phonemeGopService.warmup().then((ready) => {
+    if (ready) logger.info('Phoneme GOP worker warmed up');
   });
 }
 

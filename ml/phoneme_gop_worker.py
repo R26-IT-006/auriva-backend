@@ -14,11 +14,21 @@ CTC-decoded phoneme sequence actually recognized in the audio.
 
 import json
 import math
+import os
 import sys
 
 import numpy as np
 import soundfile as sf
 import torch
+
+# Defaults to 4 threads otherwise. This worker's inference now runs
+# concurrently with whisper-cli's ASR call (see pronunciationAnalysisService
+# scoreWordPronunciationAttempt) — on an 8-core machine, two independently
+# multi-threaded subprocesses at once caused CPU oversubscription that
+# sometimes made the concurrent run slower than running them sequentially.
+# Capping both (see WHISPER_THREADS) leaves headroom instead of contending
+# for the same cores.
+torch.set_num_threads(int(os.environ.get("PHONEME_GOP_TORCH_THREADS", "2")))
 
 MODEL_ID = "facebook/wav2vec2-lv-60-espeak-cv-ft"
 SAMPLE_RATE = 16000
@@ -293,8 +303,35 @@ class GopEngine:
         }
 
 
+def warm_up_inference(engine):
+    """Runs one real forward pass before announcing ready.
+
+    from_pretrained() only loads weights onto the CPU backend — the first
+    real inference afterward still separately pays a one-time cost (thread
+    pool spin-up, kernel/algorithm selection), on the order of ~1-2s. Without
+    this, that tax landed on whichever live attempt was the first real
+    escalation after boot instead of at startup, where it's free.
+
+    This duration is a rough single-word-recording midpoint, not a precisely
+    tuned value — sweeping it on a shared dev machine produced too much
+    background-noise variance to trust a more specific number (see the
+    verifyLayer1Layer2Integration.js script and its notes for what was
+    actually measured, and its limits).
+    """
+    import tempfile
+
+    silence = np.zeros(int(SAMPLE_RATE * 0.9), dtype=np.float32)
+    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+        sf.write(tmp.name, silence, SAMPLE_RATE)
+        try:
+            engine.assess(tmp.name, ["k"])
+        except Exception as error:  # noqa: BLE001 — warmup must never block startup
+            log(f"warmup inference failed (non-fatal): {error}")
+
+
 def main():
     engine = GopEngine()
+    warm_up_inference(engine)
     print(json.dumps({"ready": True}), flush=True)
     for line in sys.stdin:
         line = line.strip()

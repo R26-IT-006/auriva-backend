@@ -506,6 +506,19 @@ function calculateDtw(referenceFrames, attemptFrames) {
 const DISTANCE_SCORE_MIDPOINT = 0.85;
 const DISTANCE_SCORE_SLOPE = 0.18;
 
+// Layer-1 (MFCC-DTW) cascade gate: when the acoustic score alone is decisive
+// enough, the wav2vec2 GOP model (layer 2) is skipped entirely. Only the
+// ambiguous middle band pays for the heavier model call. Provisional bounds,
+// same Phase 4 calibration debt as the constants above.
+const LAYER1_CONFIDENT_ACCEPT_SCORE = 85;
+const LAYER1_CONFIDENT_REJECT_SCORE = 30;
+
+function getLayer1Decision(segmentalAccuracy) {
+  if (segmentalAccuracy >= LAYER1_CONFIDENT_ACCEPT_SCORE) return 'dtw_only_accept';
+  if (segmentalAccuracy <= LAYER1_CONFIDENT_REJECT_SCORE) return 'dtw_only_reject';
+  return 'escalated_to_gop';
+}
+
 function distanceToScore(distance) {
   return clampScore(
     100 / (1 + Math.exp((distance - DISTANCE_SCORE_MIDPOINT) / DISTANCE_SCORE_SLOPE))
@@ -754,23 +767,9 @@ async function scoreWordPronunciationAttempt(data) {
     throw new AudioQualityError(getQualityFailureMessage(quality.failures), quality);
   }
 
-  // ASR gate: reject the attempt when a different word was clearly spoken,
-  // so acoustic similarity is never scored against the wrong word.
-  const speechVerification = await verifySpokenWord({
-    rawAudioBase64: data.raw_audio_base64,
-    mimeType: data.raw_audio_mime_type,
-    targetWord: wordId,
-    wordLabel: data.word_label,
-  });
-
-  // Phoneme-level GOP via wav2vec2; null when the engine is unavailable and
-  // scoring then falls back to acoustic (MFCC-DTW) evidence only.
-  const gopAssessment = await assessPhonemeGop({
-    rawAudioBase64: data.raw_audio_base64,
-    mimeType: data.raw_audio_mime_type,
-    targetSounds: phonemes,
-  });
-
+  // Layer 1: MFCC-DTW acoustic comparison runs first, unconditionally — it's
+  // cheap, in-process JS, and needs no model or subprocess. Its score then
+  // gates layer 2 (wav2vec2 GOP) below.
   const referenceFrames = referenceAnalysis.map((entry) => entry.mfcc);
   const attemptAnalysis = extractMfccAnalysis(attemptSamples);
   const attemptFrames = attemptAnalysis.map((entry) => entry.mfcc);
@@ -790,6 +789,34 @@ async function scoreWordPronunciationAttempt(data) {
   const referenceDuration = referenceFrames.length * (HOP_SIZE / SAMPLE_RATE);
   const attemptDuration = attemptFrames.length * (HOP_SIZE / SAMPLE_RATE);
   const segmentalAccuracy = distanceToScore(dtw.normalizedDistance);
+  const layer1Decision = getLayer1Decision(segmentalAccuracy);
+
+  // The ASR word-mismatch gate (whisper subprocess) and layer 2 GOP
+  // (wav2vec2 subprocess) are independent of each other — both derive from
+  // the same raw audio, neither needs the other's output — so they run
+  // concurrently instead of back-to-back. On an escalated attempt this
+  // roughly halves added latency versus awaiting them in sequence, which
+  // matters most here since escalated cases are exactly the harder ones
+  // where a child is left waiting on screen for a result. A genuine
+  // WORD_MISMATCH still aborts scoring below, same as before parallelizing;
+  // the only change is that a same-audio GOP call already in flight is
+  // discarded rather than never started (assessPhonemeGop never rejects, so
+  // this never turns into an unhandled promise rejection).
+  const [speechVerification, gopAssessment] = await Promise.all([
+    verifySpokenWord({
+      rawAudioBase64: data.raw_audio_base64,
+      mimeType: data.raw_audio_mime_type,
+      targetWord: wordId,
+      wordLabel: data.word_label,
+    }),
+    layer1Decision === 'escalated_to_gop'
+      ? assessPhonemeGop({
+        rawAudioBase64: data.raw_audio_base64,
+        mimeType: data.raw_audio_mime_type,
+        targetSounds: phonemes,
+      })
+      : Promise.resolve(null),
+  ]);
 
   return {
     overall_score: segmentalAccuracy,
@@ -810,6 +837,7 @@ async function scoreWordPronunciationAttempt(data) {
       })),
     },
     dtw_distance: Number(dtw.normalizedDistance.toFixed(4)),
+    layer1_decision: layer1Decision,
     segment_scores: segmentScores,
     phoneme_boundary_alignment: phonemeAlignment,
     audio_quality: quality,
@@ -905,6 +933,10 @@ module.exports = {
   extractMfccAnalysis,
   calculateDtw,
   analyzeAudioQuality,
+  distanceToScore,
+  getLayer1Decision,
+  LAYER1_CONFIDENT_ACCEPT_SCORE,
+  LAYER1_CONFIDENT_REJECT_SCORE,
   AudioQualityError,
   ReferenceAudioError,
 };

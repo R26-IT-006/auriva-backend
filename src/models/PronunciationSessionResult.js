@@ -87,6 +87,22 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     allowNull: false,
     defaultValue: false,
   },
+  // Teacher-confirmed ground truth for this attempt. Populated only after a
+  // teacher submits a review; this is the labeled corpus the layer-3
+  // calibration model (adaptiveCalibrationService) fits against.
+  teacher_reviewed_score: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    validate: { min: 0, max: 100 },
+  },
+  teacher_reviewed_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  teacher_reviewed_by: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
   heard_reference_audio: {
     type: DataTypes.BOOLEAN,
     allowNull: false,

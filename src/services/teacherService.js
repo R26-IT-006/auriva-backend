@@ -12,6 +12,7 @@ const ApiError = require('../utils/ApiError');
 const {
   scorePronunciationAttemptData,
 } = require('./pronunciationScoringService');
+const { getReviewQueue } = require('./pronunciationReviewQueueService');
 
 function normalizeStudentId(studentId) {
   const numericId = Number(studentId);
@@ -230,7 +231,30 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
     result.get({ plain: true })
   );
 
-  return scorePronunciationAttemptData(data, previousResultData);
+  return scorePronunciationAttemptData(data, previousResultData, {
+    populationTag: student.disability,
+  });
+}
+
+async function getPronunciationReviewQueue(teacherId, limit) {
+  return getReviewQueue(teacherId, { limit });
+}
+
+async function submitPronunciationReview(teacherId, resultId, teacherReviewedScore) {
+  const result = await PronunciationSessionResult.findOne({
+    where: { id: resultId, teacher_id: teacherId },
+  });
+  if (!result) throw new ApiError(404, 'Pronunciation result not found');
+
+  result.teacher_reviewed_score = teacherReviewedScore;
+  result.teacher_reviewed_at = new Date();
+  result.teacher_reviewed_by = teacherId;
+  result.needs_teacher_review = false;
+  await result.save();
+
+  const plain = result.get({ plain: true });
+  delete plain.raw_audio_data;
+  return plain;
 }
 
 async function getPronunciationResults(teacherId, studentId) {
@@ -279,4 +303,6 @@ module.exports = {
   savePronunciationResult,
   getPronunciationResults,
   getPronunciationResultAudio,
+  submitPronunciationReview,
+  getPronunciationReviewQueue,
 };

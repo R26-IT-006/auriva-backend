@@ -85,6 +85,23 @@ async function getPronunciationResults(req, res) {
   res.json(results);
 }
 
+async function getPronunciationReviewQueue(req, res) {
+  const queue = await teacherService.getPronunciationReviewQueue(req.user.id, req.query.limit);
+  res.json(queue);
+}
+
+async function submitPronunciationReview(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await teacherService.submitPronunciationReview(
+    req.user.id,
+    req.params.resultId,
+    req.body.teacher_reviewed_score
+  );
+  res.json(result);
+}
+
 async function getPronunciationResultAudio(req, res) {
   const audio = await teacherService.getPronunciationResultAudio(
     req.user.id,
@@ -113,4 +130,6 @@ module.exports = {
   savePronunciationResult,
   getPronunciationResults,
   getPronunciationResultAudio,
+  submitPronunciationReview,
+  getPronunciationReviewQueue,
 };
