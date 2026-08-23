@@ -141,6 +141,11 @@ async function getActivityStatus(studentId, categoryKey) {
 
   return {
     eligible,
+    // Every concept in the category mastered (tier 1 and tier 2). Distinct from
+    // `eligible`, which is about having uncovered concepts left to build an
+    // activity from — a category can be eligible long before it is finished.
+    // The client gates the end-of-category conclusion activity on this.
+    fully_mastered: fullyMastered,
     threshold,
     next_activity_number: activities.length + 1,
     mastered_uncovered: uncovered,
@@ -516,6 +521,9 @@ function syncActivityScore(studentId, activity, perConcept, score, passed) {
       difficulty_level: activity.difficulty_level,
       activity_number:  activity.activity_number,
       passed,
+      // Same activity row id used for the confusion sync above — makes the
+      // append-only Attempt history record idempotent against retries.
+      observation_id:   activity.id,
     });
   });
 }
