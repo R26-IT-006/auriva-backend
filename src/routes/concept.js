@@ -3,6 +3,7 @@
 const router = require('express').Router();
 const { body } = require('express-validator');
 const ctrl   = require('../controllers/conceptController');
+const { singleUpload } = require('../middleware/upload');
 
 router.get('/:category/items', ctrl.getConceptItems);
 router.get('/distractors', ctrl.getDistractors);
@@ -89,6 +90,19 @@ router.post('/tier3/complete', [
   body('category_key').isString().notEmpty(),
   body('concept_key').isString().notEmpty(),
 ], ctrl.completeTier3);
+
+// ─── Tier 3 colouring artwork ────────────────────────────────────────────────
+// Multipart: the PNG arrives as `image`, everything else as form fields, so the
+// validators run on strings rather than the JSON types used elsewhere.
+router.post('/tier3/coloring', singleUpload('image'), [
+  body('student_id').isInt({ min: 1 }),
+  body('category_key').isString().notEmpty(),
+  body('concept_key').isString().notEmpty(),
+  body('stroke_count').optional().isInt({ min: 0 }),
+  body('time_spent_ms').optional().isInt({ min: 0 }),
+], ctrl.saveColoring);
+
+router.get('/coloring/:studentId', ctrl.listColoring);
 
 // ─── Cross-concept activities ────────────────────────────────────────────────
 // 3-segment path, so no conflict with /:category/items or /:conceptKey/confusions

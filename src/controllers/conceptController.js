@@ -3,6 +3,7 @@
 const { validationResult } = require('express-validator');
 const conceptService       = require('../services/conceptService');
 const activityService      = require('../services/activityService');
+const coloringService      = require('../services/coloringService');
 const ApiError             = require('../utils/ApiError');
 
 async function getConceptItems(req, res) {
@@ -198,4 +199,30 @@ async function completeActivity(req, res) {
   res.json(result);
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getActivityStatus, startActivity, logActivityAttempt, completeActivity };
+// ─── Tier 3 colouring artwork ────────────────────────────────────────────────
+
+async function saveColoring(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const { student_id, category_key, concept_key, stroke_count, time_spent_ms } = req.body;
+  const result = await coloringService.saveArtwork(
+    parseInt(student_id, 10), category_key, concept_key, req.file,
+    {
+      // Multipart fields arrive as strings.
+      strokeCount: stroke_count  != null ? parseInt(stroke_count, 10)  : null,
+      timeSpentMs: time_spent_ms != null ? parseInt(time_spent_ms, 10) : null,
+    },
+  );
+  res.status(201).json(result);
+}
+
+async function listColoring(req, res) {
+  const studentId = parseInt(req.params.studentId, 10);
+  if (!studentId) throw new ApiError(422, 'studentId is required');
+
+  const items = await coloringService.listArtworks(studentId, req.query.category_key);
+  res.json(items);
+}
+
+module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getActivityStatus, startActivity, logActivityAttempt, completeActivity, saveColoring, listColoring };

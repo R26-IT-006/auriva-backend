@@ -231,14 +231,14 @@ async function getConceptItems(categoryKey, studentId) {
   }
 
   // Build items using the (possibly reordered) sequence.
-  // Unlock rule: passed concepts are always unlocked; others unlock when
-  // the preceding concept in the adaptive order has been passed.
+  //
+  // Every concept is open. The sequence still carries the recommended order —
+  // adaptive reordering and is_priority both still apply — but nothing is gated
+  // behind passing the concept before it, so a teacher can start anywhere.
   return orderedSequence.map((conceptKey, index) => {
     const row            = progressMap[conceptKey];
-    const prevKey        = index > 0 ? orderedSequence[index - 1] : null;
-    const prevRow        = prevKey ? progressMap[prevKey] : null;
     const isPassed       = row?.tier1_status === 'passed';
-    const isUnlocked     = isPassed || index === 0 || !!(prevRow && prevRow.tier1_status === 'passed');
+    const isUnlocked     = true;
     const originalIndex  = sequence.indexOf(conceptKey);
     // Priority: moved earlier in the sequence AND unlocked AND not yet passed
     const isPriority     = isUnlocked && !isPassed && originalIndex !== index;
