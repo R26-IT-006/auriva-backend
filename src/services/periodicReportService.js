@@ -97,6 +97,12 @@ async function buildLearningProgressSection({ studentId, startAt, endAt }) {
     cumulative_lowercase_mastered_by_end_date: cumulativeLowercase,
     cumulative_uppercase_mastered_by_end_date: cumulativeUppercase,
     current_progression_stage: stage,
+    // Additive: the denominators the counts above are measured against, so the
+    // report UI can render "16 / 26" without hardcoding a second copy of the
+    // alphabet size. These are the SAME constants the stage label already
+    // uses — exposing them changes no decision.
+    lowercase_total: LOWERCASE_MASTERY_TARGET,
+    uppercase_total: UPPERCASE_MASTERY_TARGET,
   };
 }
 
@@ -112,7 +118,12 @@ async function buildMotorPerformanceSection({ studentId, startAt, endAt }) {
       student_id: studentId, collection_mode: false, source_type: null,
       created_at: { [Op.between]: [startAt, endAt] },
     },
-    attributes: ['motor_score', 'normalized_features'],
+    // `created_at` is ADDITIVE to this existing SELECT — it is already the
+    // column this query filters on, so nothing new is read from the database
+    // and no row is included or excluded that was not included before. It is
+    // selected purely so the same already-fetched rows can also be grouped by
+    // day for the report's trend/activity charts (see buildDailySeries).
+    attributes: ['motor_score', 'normalized_features', 'created_at'],
     raw: true,
   });
 
@@ -130,7 +141,46 @@ async function buildMotorPerformanceSection({ studentId, startAt, endAt }) {
     mean_trajectory_dtw_distance: round(mean(dtwDistance), 3),
     mean_speed_cv:       round(mean(speedCv), 3),
     mean_duration_ms:    mean(durationMs) != null ? Math.round(mean(durationMs)) : null,
+    // Additive: one entry per day that actually has attempts, in chronological
+    // order. Purely a REGROUPING of the rows already aggregated above — it
+    // introduces no new scoring, no interpolation, and no gap-filling, so a
+    // day with no practice is simply absent rather than reported as zero.
+    daily_series: buildDailySeries(rows),
   };
+}
+
+/**
+ * Groups already-fetched attempt rows into per-day points.
+ *
+ * Pure and descriptive: `mean_motor_score` is the plain mean of the same
+ * `motor_score` values the period aggregate above uses — computeMotorScore()
+ * is never re-run and no score is recalculated. Days are keyed by UTC date to
+ * match the report's own UTC period boundaries (see utils/reportDateRange.js).
+ *
+ * @param {Array<{motor_score: number|null, created_at: Date|string}>} rows
+ * @returns {Array<{date: string, attempts: number, mean_motor_score: number|null}>}
+ */
+function buildDailySeries(rows) {
+  const byDay = new Map();
+
+  for (const row of rows) {
+    const timestamp = new Date(row.created_at);
+    if (Number.isNaN(timestamp.getTime())) continue;
+    const day = timestamp.toISOString().slice(0, 10);
+
+    if (!byDay.has(day)) byDay.set(day, { date: day, attempts: 0, scores: [] });
+    const bucket = byDay.get(day);
+    bucket.attempts += 1;
+    bucket.scores.push(row.motor_score);
+  }
+
+  return [...byDay.values()]
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    .map(({ date, attempts, scores }) => ({
+      date,
+      attempts,
+      mean_motor_score: round(mean(scores)),
+    }));
 }
 
 // ── D. Motor difficulty / adaptive-support summary ──────────────────────
@@ -168,11 +218,15 @@ async function buildSupportSection({ studentId, startAt, endAt }) {
   };
 }
 
-// ── E. Feature 11A — Initial Shape Motor Profile (BASELINE CONTEXT ONLY) ─
-// Deliberately reads the persisted, immutable StudentMotorBaseline row —
-// never re-runs a cluster prediction (no ML service call from this
-// module). Explicitly flagged as baseline context that may predate the
-// selected period (spec §6E) — never presented as computed "during" it.
+// ── E. Initial Motor Baseline Summary (BASELINE CONTEXT ONLY) ────────────
+// Data source UNCHANGED by the baseline-summary refactor: this section
+// already read the persisted, immutable StudentMotorBaseline row directly
+// and never ran a cluster prediction (no ML service call from this module).
+// Only the teacher-visible heading changed; the response key
+// `initial_shape_motor_profile` is deliberately kept so the periodic-report
+// JSON contract is not broken. Explicitly flagged as baseline context that
+// may predate the selected period (spec §6E) — never presented as computed
+// "during" it.
 async function buildInitialMotorProfileSection({ studentId }) {
   const { getStudentMotorBaseline } = require('./motorBaselineService');
   const result = await getStudentMotorBaseline({ studentId });

@@ -36,6 +36,16 @@ router.get('/letter-progress-report/:studentId', ctrl.getLetterProgressReport);
 router.get('/motor-baseline/:studentId',    ctrl.getMotorBaseline);
 
 // ── Feature 11 pilot model (motor_cluster_v1, read-only) ──────────────────────
+// Legacy experimental L2 shape-motor clustering. Retained for
+// research/reference compatibility only. It is not used by the current
+// teacher-facing baseline summary and does not influence adaptive
+// progression.
+//
+// The active teacher-facing card reads motor-baseline above (which now
+// carries the deterministic Initial Motor Baseline Summary). This route
+// stays mounted so the legacy/experimental prediction remains callable for
+// research inspection; no normal teacher-report flow invokes it.
+//
 // Same path convention as motor-baseline above. Node computes this from the
 // SAME baseline motor-baseline exposes and calls auriva-ml-service — see
 // motorClusterService.js/mlServiceClient.js. Nothing persisted; no
@@ -49,6 +59,14 @@ router.get('/motor-cluster/:studentId',     ctrl.getMotorCluster);
 // shape, and never merged into GET /teacher/students/:id itself (keeps the
 // student-profile endpoint free of Feature 2 concerns). No PATCH/PUT/DELETE.
 router.get('/family-thresholds/:studentId', ctrl.getFamilyThresholds);
+
+// ── Progression-decision EXPLANATION trace (read-only) ────────────────────────
+// Explains the CURRENT Feature 2 decision per family — the rule, the evidence
+// window, whether each recent attempt met the target, teacher-override
+// protection, and a rule-derived counterfactual. Explanation only: it changes
+// no decision, persists nothing, and never writes. Same student-scoped shape
+// and ownership check as family-thresholds above. No PATCH/PUT/DELETE.
+router.get('/threshold-trace/:studentId', ctrl.getThresholdDecisionTrace);
 
 // ── Adaptive Support Recommendation (Feature 3 Step 6, read-only) ─────────────
 // Narrowly scoped to one (letter, caseType) rather than the whole student —

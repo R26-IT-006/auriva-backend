@@ -370,6 +370,74 @@ describe('checkAndTriggerMilestones', () => {
     expect(mockLshCreate).not.toHaveBeenCalled();
   });
 
+  // ── Reference-range (out-of-distribution) guard ───────────────────────────
+  // The ML service declines to assign a pattern when the aggregated vector
+  // falls outside the range the reference data represents. Nothing may be
+  // persisted: cluster_id/state_code/display_name are NOT NULL by design, so
+  // an "outside range" observation has no valid row shape, and fabricating
+  // one would be worse than leaving the milestone unrecorded.
+  it('Scenario — an outside-reference-range prediction never fabricates a state; nothing persisted', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce({
+      status: 'outside_reference_range',
+      pattern: null,
+      cluster_id: null,
+      state_code: null,
+      display_name: null,
+      model_version: 'letter_motor_cluster_v1',
+      ood: {
+        is_outside_reference_range: true,
+        method: 'standardized_feature_bound_and_centroid_distance_bound_v1',
+        observed_distance: 12.8,
+        threshold: 3.044942,
+        reason: 'dtw_distance_outside_reference_range',
+        triggered_by: ['feature:dtw_distance', 'distance'],
+      },
+    });
+
+    const results = await checkAndTriggerMilestones(params);
+    const first = results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14);
+
+    expect(first.status).toBe('outside_reference_range');
+    expect(first.ood.reason).toBe('dtw_distance_outside_reference_range');
+    expect(mockLshCreate).not.toHaveBeenCalled();
+  });
+
+  it('Scenario — an outside-reference-range milestone leaves earlier recorded history untouched', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValue({
+      status: 'outside_reference_range', pattern: null, cluster_id: null,
+      state_code: null, display_name: null, model_version: 'letter_motor_cluster_v1',
+      ood: { is_outside_reference_range: true, reason: 'speed_cv_outside_reference_range' },
+    });
+
+    await checkAndTriggerMilestones(params);
+
+    // No write of any kind — no create, and never an update/destroy of an
+    // existing immutable snapshot.
+    expect(mockLshCreate).not.toHaveBeenCalled();
+  });
+
+  it('Scenario — an in-range prediction still persists exactly as before (guard changes nothing)', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce({
+      ...PREDICTION_FIXTURE,
+      status: 'assigned',
+      ood: { is_outside_reference_range: false, reason: null, triggered_by: [] },
+    });
+
+    const results = await checkAndTriggerMilestones(params);
+    const first = results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14);
+    expect(first.status).toBe('recorded');
+    expect(mockLshCreate).toHaveBeenCalled();
+    const written = mockLshCreate.mock.calls[0][0];
+    expect(written.state_code).toBe(PREDICTION_FIXTURE.state_code);
+    expect(written.display_name).toBe(PREDICTION_FIXTURE.display_name);
+  });
+
   it('Scenario — a unique-constraint race on state-history create resolves to already_recorded via re-fetch', async () => {
     mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
     mockLshFindOne.mockResolvedValueOnce(null); // first idempotency check

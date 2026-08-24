@@ -21,6 +21,11 @@ const axios = require('axios');
 const ML_SERVICE_BASE = process.env.ML_SERVICE_URL || 'http://localhost:8000';
 
 /**
+ * Legacy experimental L2 shape-motor clustering. Retained for
+ * research/reference compatibility only. It is not used by the current
+ * teacher-facing baseline summary and does not influence adaptive
+ * progression.
+ *
  * Calls POST /motor-cluster/predict on auriva-ml-service.
  *
  * @param {{straightScore: number, curvedScore: number, complexScore: number}} scores

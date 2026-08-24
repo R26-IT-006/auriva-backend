@@ -274,6 +274,24 @@ async function checkAndTriggerMilestones({ studentId }) {
         continue;
       }
 
+      // Reference-range guard (ML-service side). When the aggregated vector
+      // falls outside the range the reference data represents, the model
+      // returns no pattern — so there is nothing to persist. Deliberately
+      // NOT written as a history row: cluster_id/state_code/display_name are
+      // NOT NULL by design (see the model/migration), and relaxing that
+      // would need a migration this change does not make. Nothing is
+      // fabricated and no existing row is touched; the milestone simply
+      // stays unrecorded and is re-evaluated on the next mastery event
+      // (evidence rows are immutable, so the outcome is deterministic).
+      if (prediction.status === 'outside_reference_range') {
+        logger.info('Milestone check: observation outside reference range — no pattern recorded', {
+          studentId, milestone: milestone.code, modelVersion: prediction.model_version,
+          reason: prediction.ood?.reason ?? null, status: 'outside_reference_range',
+        });
+        results.push({ milestone: milestone.code, status: 'outside_reference_range', ood: prediction.ood ?? null });
+        continue;
+      }
+
       let created;
       try {
         created = await LetterMotorStateHistory.create({

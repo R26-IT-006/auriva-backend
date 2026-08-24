@@ -50,9 +50,32 @@ app.use(morgan('combined', {
 // below is sized for auth and CRUD, not telemetry.
 const CONCEPT_PREFIX = '/api/teacher/concepts';
 
+// Live-session snapshot polling is telemetry for the same reason concepts are:
+// the teacher UI GETs every ~5s while the Student Detail screen is focused and
+// the child-side PUTs a heartbeat on the same cadence. At 5s that is 180
+// requests per client per 15-minute window (360 for a teacher/child pair) —
+// which alone exceeds the 100/15min bar below, exhausting it in ~8 minutes and
+// then 429-ing every other /api call as collateral. The budget is derived from
+// the documented poll interval in src/config/liveSessionPolicy.js so it cannot
+// drift from it.
+//
+// This does NOT widen unauthenticated surface: every route under
+// /api/handwriting sits behind `router.use(verifyToken, isTeacher)`
+// (src/routes/handwriting.js), and auth/CRUD keep the strict 100/15min budget.
+const LIVE_SESSION_PREFIX = '/api/handwriting/live-session';
+const liveSessionPolicy = require('./src/config/liveSessionPolicy');
+
 app.use(CONCEPT_PREFIX, rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+}));
+
+app.use(LIVE_SESSION_PREFIX, rateLimit({
+  windowMs: liveSessionPolicy.RATE_LIMIT_WINDOW_MS,
+  limit: liveSessionPolicy.RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
@@ -63,7 +86,8 @@ app.use('/api', rateLimit({
   limit: 100,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.originalUrl.startsWith(CONCEPT_PREFIX),
+  skip: (req) => req.originalUrl.startsWith(CONCEPT_PREFIX)
+    || req.originalUrl.startsWith(LIVE_SESSION_PREFIX),
   message: { error: 'Too many requests, please try again later.' },
 }));
 

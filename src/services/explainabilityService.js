@@ -129,6 +129,10 @@ function analyzeMotorDifficulty(assessmentData, letterMetrics, motorScore) {
       description:          'Complete the shape assessment to see difficulty analysis.',
       motorScore:           motorScore ?? null,
       featureContributions: [],
+      // Additive, shape-consistent: there is no primary rule to trace here.
+      ruleActivationScore:  null,
+      conditionTraces:      [],
+      rulesVersion:         DIFFICULTY_RULES.RULES_VERSION ?? null,
       explanation:          ['No shape assessment data available.'],
       recommendations:      [],
       noDataAvailable:      true,
@@ -156,6 +160,12 @@ function analyzeMotorDifficulty(assessmentData, letterMetrics, motorScore) {
       description:          'No significant motor difficulty detected. Motor movements showed good control across all shapes.',
       motorScore:           motorScore ?? null,
       featureContributions: [],
+      // Additive. No difficulty was detected, so no rule is reported as
+      // primary and no condition trace is emitted — the detection floor
+      // itself is unchanged.
+      ruleActivationScore:  null,
+      conditionTraces:      [],
+      rulesVersion:         DIFFICULTY_RULES.RULES_VERSION ?? null,
       explanation:          [
         'All motor control indicators are within the expected range.',
         'Continue regular handwriting practice to maintain and build on these skills.',
@@ -191,16 +201,28 @@ function analyzeMotorDifficulty(assessmentData, letterMetrics, motorScore) {
   const secondary = allScores[1]?.confidence >= 20 ? {
     label:      allScores[1].rule.label,
     confidence: allScores[1].confidence,
+    // Additive alias — same number, accurate name (see buildConditionTraces).
+    ruleActivationScore: allScores[1].confidence,
   } : null;
 
   return {
     difficulty:           primary.rule.label,
     difficultyKey:        primary.key,
     confidence:           primary.confidence,
+    // ADDITIVE ALIAS — byte-identical to `confidence` above, kept alongside it
+    // for compatibility. `confidence` is a misnomer: the number is a weighted
+    // sum of normalized threshold exceedances (see scoreRule), not a
+    // probability or a likelihood. Nothing is renamed in this pass.
+    ruleActivationScore:  primary.confidence,
     description:          primary.rule.description,
     icon:                 primary.rule.icon,
     motorScore:           motorScore ?? null,
     featureContributions,
+    // ADDITIVE — every condition of the PRIMARY rule, satisfied and
+    // unsatisfied alike. featureContributions above still carries only the
+    // triggered ones and is unchanged.
+    conditionTraces:      buildConditionTraces(primary, totalActivated),
+    rulesVersion:         DIFFICULTY_RULES.RULES_VERSION ?? null,
     explanation,
     recommendations:      primary.rule.exercises,
     letterFocus:          primary.rule.letterFocus ?? [],
@@ -212,4 +234,48 @@ function analyzeMotorDifficulty(assessmentData, letterMetrics, motorScore) {
   };
 }
 
-module.exports = { analyzeMotorDifficulty, buildFeatureVector };
+/**
+ * Exposes the per-condition values scoreRule() already computed, instead of
+ * discarding them. PURE and ADDITIVE — it reads `scoredRule.contributions`
+ * and the rule's own declared thresholds/weights, and computes no new score.
+ *
+ * Includes UNSATISFIED conditions, which the existing featureContributions
+ * array deliberately filters out: for a rule engine, the condition that did
+ * NOT fire (and the value it would have needed) is as explanatory as the one
+ * that did.
+ *
+ * `contribution_pct` reuses the exact denominator featureContributions uses
+ * (the total ACTIVATED weight across triggered conditions), so a triggered
+ * condition's percentage here always equals the one shown there. Unsatisfied
+ * conditions are 0 by construction.
+ *
+ * The comparison is `>` because that is literally what scoreRule() does
+ * (`value > cond.threshold`); `relation` reports it rather than redefining it.
+ *
+ * @param {{key: string, rule: Object, contributions: Object}} scoredRule
+ * @param {number} totalActivated — sum of activated weight over triggered conditions
+ * @returns {Array<Object>} one entry per declared condition, in rule order
+ */
+function buildConditionTraces(scoredRule, totalActivated) {
+  return scoredRule.rule.conditions.map((cond) => {
+    const c = scoredRule.contributions[cond.featureKey] ?? {};
+    const activatedWeight = c.activatedWeight ?? 0;
+    return {
+      condition_id:      cond.conditionId ?? `${scoredRule.key}.${cond.featureKey}`,
+      rule_id:           scoredRule.rule.ruleId ?? scoredRule.key,
+      feature:           cond.featureKey,
+      feature_label:     cond.featureName,
+      observed_value:    c.rawValue ?? null,
+      threshold:         cond.threshold,
+      relation:          '>',
+      satisfied:         c.triggered === true,
+      activation:        c.activation ?? 0,
+      configured_weight: cond.weight,
+      activated_weight:  activatedWeight,
+      contribution_pct:  totalActivated > 0 ? Math.round((activatedWeight / totalActivated) * 100) : 0,
+      hint:              cond.hint,
+    };
+  });
+}
+
+module.exports = { analyzeMotorDifficulty, buildFeatureVector, buildConditionTraces };

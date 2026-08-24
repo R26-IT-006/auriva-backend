@@ -730,6 +730,18 @@ async function getRecentFamilyPerformance({ studentId, windowSize = RECENT_FAMIL
 // INITIAL_THRESHOLD_MARGIN.
 const THRESHOLD_INCREASE_STEP = 5;
 
+// The "4 of 5" progression rule's success count, named rather than inlined —
+// same "explicit, centralized, never a scattered magic number" discipline as
+// RECENT_FAMILY_WINDOW_SIZE and THRESHOLD_INCREASE_STEP above. Introduced so
+// the explanation layer can state the rule exactly instead of restating a
+// literal that could drift from this file.
+//
+// This is a NAMING change only: the single comparison below reads
+// `metTargetCount >= REQUIRED_MET_COUNT` with REQUIRED_MET_COUNT === 4,
+// which is identical to the previous `metTargetCount >= 4`. The 2-or-3 hold
+// boundary is a DIFFERENT rule and is deliberately left as its own literal.
+const REQUIRED_MET_COUNT = 4;
+
 // Current accepted target-setting sources for a Feature 2 FAMILY-scoped
 // decision. 'legacy' exists in ThresholdHistory's own SOURCE_VALUES enum
 // but is deliberately excluded here: nothing in this codebase currently
@@ -954,7 +966,7 @@ function evaluateFamilyDecision(family, targetResult, windowResult, increaseStep
   // Complete window (count === windowSize, per getRecentFamilyPerformance).
   const metTargetCount = attemptEvaluations.filter(e => e.metTarget).length;
 
-  if (metTargetCount >= 4) {
+  if (metTargetCount >= REQUIRED_MET_COUNT) {
     const rawRecommendedThreshold = currentThreshold + increaseStep;
     if (rawRecommendedThreshold > SCORE_MAX) {
       // Deliberately NOT clamped to 100 — same discipline as
@@ -1747,6 +1759,7 @@ module.exports = {
   RECENT_FAMILY_WINDOW_SIZE,
   getRecentFamilyPerformance,
   THRESHOLD_INCREASE_STEP,
+  REQUIRED_MET_COUNT,
   getCurrentFamilyThreshold,
   getCurrentFamilyThresholdsForStudent,
   evaluateDynamicThresholds,

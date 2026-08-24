@@ -343,13 +343,55 @@ describe('Controller 14 — threshold source metadata is additive only', () => {
 // never calls the lower-level Step 5/6B functions directly/redundantly —
 // there is exactly one trigger path, not several.
 
+// SCOPE NOTE: this assertion originally scanned the whole controller file as
+// a proxy for "recordLetterCompletion has exactly one trigger path", which was
+// exact while no other function in the file legitimately used those helpers.
+// The read-only explanation endpoint getThresholdDecisionTrace() now calls
+// evaluateDynamicThresholds/classifyAutomaticThresholdPersistence to EXPLAIN a
+// decision without making or persisting one. The assertion is therefore scoped
+// to recordLetterCompletion's own body — the function the guarantee is about —
+// and reinforced below so the guarantee is stronger than before, not weaker:
+// the write path still has exactly one trigger, and the new read path is
+// proven to contain no persistence call at all.
 describe('Controller 15 — recordLetterCompletion never calls Step 5/6B functions directly (only via the single Step 8 orchestration entry point)', () => {
-  it('the controller source never references the lower-level functions by name — only processDynamicThresholdAfterLetterSession', () => {
-    const fs = require('fs');
-    const path = require('path');
-    const source = fs.readFileSync(path.resolve(__dirname, '../src/controllers/handwritingController.js'), 'utf8');
-    expect(source).not.toMatch(/persistAutomaticThresholdDecisions|evaluateDynamicThresholds|classifyAutomaticThresholdPersistence|setTeacherFamilyThreshold/);
-    expect(source).toMatch(/processDynamicThresholdAfterLetterSession/);
+  const fs = require('fs');
+  const path = require('path');
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/controllers/handwritingController.js'), 'utf8');
+
+  function sliceFunction(startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf(endMarker, start);
+    expect(end).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  it('the letter-completion write path never references the lower-level functions by name — only processDynamicThresholdAfterLetterSession', () => {
+    // The write path is runDynamicThresholdOrchestration() (which owns the
+    // single trigger call) plus recordLetterCompletion() itself, which is
+    // defined immediately after it and calls only that helper.
+    const writePath = sliceFunction(
+      'async function runDynamicThresholdOrchestration(',
+      'async function explainAssessment(',
+    );
+    expect(writePath).toMatch(/async function recordLetterCompletion\(/); // the slice really does cover it
+    expect(writePath).not.toMatch(/persistAutomaticThresholdDecisions|evaluateDynamicThresholds|classifyAutomaticThresholdPersistence|setTeacherFamilyThreshold/);
+    expect(writePath).toMatch(/processDynamicThresholdAfterLetterSession/);
+  });
+
+  it('the write-path persistence helpers are still referenced nowhere in the controller', () => {
+    // persistAutomaticThresholdDecisions and setTeacherFamilyThreshold are
+    // WRITES. Unlike the two read-only evaluators, they must remain absent
+    // from this controller entirely.
+    expect(source).not.toMatch(/persistAutomaticThresholdDecisions|setTeacherFamilyThreshold/);
+  });
+
+  it('the read-only trace endpoint is the ONLY other user of the evaluators, and it persists nothing', () => {
+    const trace = sliceFunction('async function getThresholdDecisionTrace(req, res) {', '\n/**');
+    expect(trace).toMatch(/evaluateDynamicThresholds/);
+    expect(trace).toMatch(/classifyAutomaticThresholdPersistence/);
+    // No write of any kind inside the trace endpoint.
+    expect(trace).not.toMatch(/\.create\(|\.update\(|\.destroy\(|\.upsert\(|\.save\(|persistAutomatic/);
   });
 });
 

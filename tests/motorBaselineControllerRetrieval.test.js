@@ -122,7 +122,11 @@ describe('Test 5 — serialization', () => {
     const res = await callRoute('10');
     const body = res.json.mock.calls[0][0];
 
-    expect(body.baseline).toEqual({
+    // `summary` is the additive Initial Motor Baseline Summary — asserted
+    // separately below so this exact-shape check stays focused on the
+    // pre-existing contract fields, all of which are unchanged.
+    const { summary, ...contractFields } = body.baseline;
+    expect(contractFields).toEqual({
       id: 99,
       studentId: 10,
       sourceAssessmentId: 200,
@@ -134,6 +138,27 @@ describe('Test 5 — serialization', () => {
       backfilledAt: row.backfilled_at,
       createdAt: row.created_at,
     });
+  });
+
+  it('carries a deterministic Initial Motor Baseline Summary derived from the same four scores', async () => {
+    const row = makeBaselineRow({
+      straight_score: 11, curved_score: 22, complex_score: 33, overall_motor_score: 44,
+    });
+    mockGetStudentMotorBaseline.mockResolvedValueOnce({ status: 'found', baseline: row, reason: null });
+
+    const res = await callRoute('10');
+    const { summary } = res.json.mock.calls[0][0].baseline;
+
+    expect(summary.available).toBe(true);
+    expect(summary.overall_score).toBe(44);
+    expect(summary.families).toEqual({ straight: 11, curved: 22, complex: 33 });
+    expect(summary.relative_summary.highest).toBe('complex');
+    expect(summary.relative_summary.lowest).toBe('straight');
+    expect(summary.relative_summary.spread).toBe(22);
+    expect(summary.disclosure).toContain('not diagnostic or ASD-severity measures');
+
+    // No clustering terminology may ever reach the teacher through this payload.
+    expect(JSON.stringify(summary)).not.toMatch(/Profile A|Profile B|Distinct Motor Profile|cluster|centroid|confidence|probability/i);
   });
 });
 
@@ -157,7 +182,7 @@ describe('Test 6 — no database internals leaked', () => {
 
     expect(Object.keys(body.baseline).sort()).toEqual([
       'backfilledAt', 'baselineVersion', 'createdAt', 'id', 'isBackfilled',
-      'scores', 'sourceAssessmentId', 'sourceType', 'studentId', 'taxonomyVersion',
+      'scores', 'sourceAssessmentId', 'sourceType', 'studentId', 'summary', 'taxonomyVersion',
     ].sort());
     expect(body.baseline.dataValues).toBeUndefined();
     expect(body.baseline._previousDataValues).toBeUndefined();

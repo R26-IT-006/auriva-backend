@@ -1,5 +1,18 @@
 'use strict';
 
+// Legacy experimental L2 shape-motor clustering. Retained for
+// research/reference compatibility only. It is not used by the current
+// teacher-facing baseline summary and does not influence adaptive
+// progression.
+//
+// The teacher-facing "Initial Shape Motor Profile" card this service used to
+// feed has been replaced by the deterministic Initial Motor Baseline Summary
+// (src/utils/initialMotorBaselineSummary.js), which reads the same four
+// authoritative StudentMotorBaseline scores directly and makes no ML call.
+// This module and its prediction logic are unchanged and remain reachable
+// through GET /handwriting/motor-cluster/:studentId for legacy/research
+// inspection only.
+//
 // Feature 11 pilot model integration — Node-side orchestration for the
 // INITIAL motor-cluster prediction (integration task sections 16/17).
 //

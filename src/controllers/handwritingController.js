@@ -20,7 +20,14 @@ const { getStudentThreshold } = require('../utils/thresholdUtils');
 const { resolveProgressionThreshold } = require('../services/progressionThresholdResolver');
 const {
   processDynamicThresholdAfterLetterSession, createInitialFamilyThresholds, getCurrentFamilyThresholdsForStudent,
+  // Explanation-only additions (GET /handwriting/threshold-trace/:studentId).
+  // All read-only; none of them changes a decision.
+  evaluateDynamicThresholds, getRecentFamilyPerformance, getFamilyThresholdProtection,
+  classifyAutomaticThresholdPersistence, REQUIRED_MET_COUNT,
 } = require('../services/dynamicThresholdService');
+// Pure formatter for the rule engines' own output — no DB, no rule logic.
+const { buildThresholdDecisionTrace } = require('../services/explanationTrace');
+const THRESHOLD_TRACE_FAMILIES = ['straight', 'curved', 'complex'];
 const { analyzeMotorDifficulty } = require('../services/explainabilityService');
 const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../services/motorBaselineService');
 // Motor Score Unification — computes/attaches the AUTHORITATIVE
@@ -29,6 +36,14 @@ const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../serv
 const { attachAuthoritativeFamilyProfile } = require('../services/authoritativeMotorBaselineService');
 const { computeAuthoritativeBestScore } = require('../utils/authoritativeAttemptScoring');
 const { PROGRESSION_SCORE_VERSION } = require('../config/motorScoreRegime');
+// Pure, deterministic teacher-facing summary of the four authoritative
+// Feature 1 baseline scores — the active replacement for the former
+// L2-clustering "Initial Shape Motor Profile" card.
+const { buildInitialMotorBaselineSummary } = require('../utils/initialMotorBaselineSummary');
+// Legacy experimental L2 shape-motor clustering. Retained for
+// research/reference compatibility only. It is not used by the current
+// teacher-facing baseline summary and does not influence adaptive
+// progression.
 const { predictInitialMotorCluster } = require('../services/motorClusterService');
 // Feature 11B Phase 5 — mastery-evidence accumulation + milestone K=2
 // prediction (replaces Phase 4's rejected explicit-reassessment design).
@@ -895,6 +910,9 @@ async function explainAssessment(req, res) {
       difficulty:           result.difficulty,
       difficultyKey:        result.difficultyKey,
       confidence:           result.confidence,
+      // Additive alias — identical value, accurate name. The existing
+      // "confidence" key is kept for compatibility; nothing is renamed here.
+      ruleActivationScore:  result.ruleActivationScore ?? result.confidence,
       motorScore:           result.motorScore,
       description:          result.description,
       featureContributions: result.featureContributionsMap,
@@ -902,6 +920,10 @@ async function explainAssessment(req, res) {
       recommendations:      result.recommendations.map(r => r.text),
       letterFocus:          result.letterFocus,
       secondaryDifficulty:  result.secondaryDifficulty ?? null,
+      // Additive rule trace: every condition of the primary rule, satisfied
+      // and unsatisfied alike. featureContributions above is unchanged.
+      conditionTraces:      result.conditionTraces ?? [],
+      rulesVersion:         result.rulesVersion ?? null,
     });
   } catch (dbErr) {
     // DB storage failed — still return analysis so teacher can see it
@@ -910,6 +932,9 @@ async function explainAssessment(req, res) {
       difficulty:           result.difficulty,
       difficultyKey:        result.difficultyKey,
       confidence:           result.confidence,
+      // Additive alias — identical value, accurate name. The existing
+      // "confidence" key is kept for compatibility; nothing is renamed here.
+      ruleActivationScore:  result.ruleActivationScore ?? result.confidence,
       motorScore:           result.motorScore,
       description:          result.description,
       featureContributions: result.featureContributionsMap,
@@ -917,6 +942,10 @@ async function explainAssessment(req, res) {
       recommendations:      result.recommendations.map(r => r.text),
       letterFocus:          result.letterFocus,
       secondaryDifficulty:  result.secondaryDifficulty ?? null,
+      // Additive rule trace: every condition of the primary rule, satisfied
+      // and unsatisfied alike. featureContributions above is unchanged.
+      conditionTraces:      result.conditionTraces ?? [],
+      rulesVersion:         result.rulesVersion ?? null,
       _warning:             'Result could not be saved to database.',
     });
   }
@@ -948,6 +977,8 @@ async function getLatestExplanation(req, res) {
     difficulty:           record.difficulty_label,
     difficultyKey:        record.difficulty_type,
     confidence:           record.confidence_score,
+    // Additive alias over the stored column — no migration, no rename.
+    ruleActivationScore:  record.confidence_score,
     motorScore:           record.motor_score,
     featureContributions: record.feature_contributions,
     explanation:          record.explanation_lines,
@@ -1473,6 +1504,18 @@ function serializeMotorBaseline(baseline) {
     isBackfilled:    baseline.is_backfilled,
     backfilledAt:    baseline.backfilled_at,
     createdAt:       baseline.created_at,
+
+    // Initial Motor Baseline Summary — a pure, deterministic restatement of
+    // the four authoritative scores above plus a within-learner relative
+    // comparison. No ML, no clustering, no recalculation (see
+    // utils/initialMotorBaselineSummary.js). Additive: every pre-existing
+    // field of this contract is unchanged.
+    summary: buildInitialMotorBaselineSummary({
+      straightScore:     baseline.straight_score,
+      curvedScore:       baseline.curved_score,
+      complexScore:      baseline.complex_score,
+      overallMotorScore: baseline.overall_motor_score,
+    }),
   };
 }
 
@@ -1524,6 +1567,16 @@ async function getMotorBaseline(req, res) {
 
 /**
  * GET /handwriting/motor-cluster/:studentId
+ *
+ * Legacy experimental L2 shape-motor clustering. Retained for
+ * research/reference compatibility only. It is not used by the current
+ * teacher-facing baseline summary and does not influence adaptive
+ * progression.
+ *
+ * The active teacher-facing card is now the Initial Motor Baseline Summary,
+ * served by getMotorBaseline() above from the same four authoritative
+ * StudentMotorBaseline scores — no ML call. This route stays callable for
+ * research/legacy inspection; no normal teacher-report flow invokes it.
  *
  * Feature 11 pilot model integration — read-only. Returns the INITIAL
  * motor-cluster prediction for a student, computed by
@@ -1602,6 +1655,67 @@ async function getFamilyThresholds(req, res) {
   }
 
   res.json({ status: 'resolved', families: result.families });
+}
+
+/**
+ * GET /handwriting/threshold-trace/:studentId
+ *
+ * Read-only EXPLANATION of the current Feature 2 progression decision for all
+ * three movement families. Explanation only: it never writes, never persists a
+ * hold/support_review/insufficient_data/no_target decision, and never changes
+ * any decision — it reuses evaluateDynamicThresholds() and the existing
+ * protection/persistence classifiers exactly as they are, then formats their
+ * own output through the pure builder in explanationTrace.js.
+ *
+ * Same auth/ownership convention as getFamilyThresholds above.
+ *
+ * Internal identifiers (attempt ids, evidence fingerprints, history row ids)
+ * are deliberately excluded from the trace — see explanationTrace.js's header.
+ */
+async function getThresholdDecisionTrace(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const [evaluation, performance, persistence] = await Promise.all([
+    evaluateDynamicThresholds({ studentId }),
+    getRecentFamilyPerformance({ studentId }),
+    classifyAutomaticThresholdPersistence({ studentId }),
+  ]);
+
+  if (evaluation.status !== 'evaluated') {
+    // Not an error: a student with no initialized targets simply has no
+    // decision to explain yet.
+    return res.json({ status: evaluation.status, families: null });
+  }
+
+  const protections = {};
+  await Promise.all(THRESHOLD_TRACE_FAMILIES.map(async (family) => {
+    protections[family] = await getFamilyThresholdProtection({ studentId, family });
+  }));
+
+  const constants = {
+    windowSize:       evaluation.windowSize,
+    increaseStep:     evaluation.increaseStep,
+    requiredMetCount: REQUIRED_MET_COUNT,
+    mappingVersion:   evaluation.mappingVersion,
+  };
+
+  const families = {};
+  for (const family of THRESHOLD_TRACE_FAMILIES) {
+    families[family] = buildThresholdDecisionTrace({
+      familyDecision: evaluation.families[family],
+      protection:     protections[family],
+      persistence:    persistence.status === 'classified' ? persistence.families?.[family] : null,
+      exclusions:     performance.status === 'found' ? performance.exclusions : null,
+      constants,
+    });
+  }
+
+  return res.json({ status: 'traced', families });
 }
 
 /**
@@ -2308,7 +2422,8 @@ async function getCategoryCompletionStatus(req, res) {
 module.exports = {
   submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion,
   explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport,
-  getLetterProgressReport, getMotorBaseline, getMotorCluster, getFamilyThresholds, getSupportRecommendation,
+  getLetterProgressReport, getMotorBaseline, getMotorCluster, getFamilyThresholds, getThresholdDecisionTrace,
+  getSupportRecommendation,
   getPreWritingRecommendation, getRepetitionRecommendation, getDemoSpeedRecommendation,
   getPersistentDifficulty, getWorksheetRecommendations,
   getWorksheetRecommendationValidations, getWorksheetRecommendationValidationState,
