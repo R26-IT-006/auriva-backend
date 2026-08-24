@@ -259,11 +259,28 @@ async function buildQuestionPlan({ studentId, categoryKey, level, targets, space
 
     const options = shuffle([conceptKey, ...pool.slice(0, spec.options - 1)]);
 
+    // Which policy contributed, recorded per round so the logs can tell an
+    // activity round apart from a tier round the child was given by the same
+    // policy. The pool is a mixture — targets, then getDistractors, then sequence
+    // padding — so this names the policy that fed it, tagged `+mixed` when
+    // anything that actually reached the screen came from elsewhere.
+    const policySource = distractorSets[i].distractor_source || null;
+    const policyKeys   = new Set(distractorSets[i].distractors || []);
+    const shown        = options.filter((k) => k !== conceptKey);
+    const fromPolicy   = shown.filter((k) => policyKeys.has(k)).length;
+
+    // If none of the policy's picks survived the padding, the child saw a
+    // sequential set and calling it anything else would misreport the exposure.
+    const source = (!policySource || fromPolicy === 0)
+      ? 'sequential'
+      : fromPolicy === shown.length ? policySource : `${policySource}+mixed`;
+
     return {
       round_number: i + 1,
       question_type: QUESTION_TYPE[type],
       concept_key: conceptKey,
       option_keys: options,
+      distractor_source: source,
     };
   });
 }
@@ -372,7 +389,7 @@ async function startActivity(studentId, categoryKey, sessionId) {
 
 async function logActivityAttempt(studentId, sessionId, payload) {
   const { activity_id, category_key, concept_key, round_number, question_type,
-          selected_key, was_correct, time_taken_ms, option_keys } = payload;
+          selected_key, was_correct, time_taken_ms, option_keys, distractor_source } = payload;
 
   await logInteraction(
     studentId, sessionId, category_key, concept_key, ACTIVITY_TIER, 'activity_attempt',
@@ -385,6 +402,8 @@ async function logActivityAttempt(studentId, sessionId, payload) {
       was_correct,
       time_taken_ms: time_taken_ms || 0,
       option_keys: option_keys || [],
+      // Null for activities generated before the plan carried a source.
+      distractor_source: distractor_source || null,
     },
   );
 

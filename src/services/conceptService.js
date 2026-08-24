@@ -8,6 +8,26 @@ const axios                   = require('axios');
 
 const GNN_BASE = process.env.GNN_SERVICE_URL || 'http://localhost:8000';
 
+// Content similarity between concepts, precomputed offline by gnn-backend/ml/features.py
+// from the artwork the child is actually shown and from the English/Sinhala labels.
+//
+// Deliberately a static require rather than a GKB lookup: this feeds the distractor
+// FALLBACK, so it has to work in exactly the situation the fallback exists for —
+// the graph being unreachable or empty. Loaded once at startup; ~66 KB.
+//
+// Not every category supports every kind. features.py drops a kind for a category
+// when it does not actually separate that category's concepts — the number and
+// shape icons are near-identical badges distinguished only by a small glyph, so
+// ranking them visually would be noise dressed up as a recommendation.
+let CONCEPT_SIMILARITY = { concepts: {} };
+try {
+  CONCEPT_SIMILARITY = require('../data/concept_similarity.json');
+} catch {
+  // Absent in a checkout that has not run features.py — getDistractors just falls
+  // through to sequential neighbours, exactly as it did before.
+  logger.warn('concept_similarity.json not found; content-based distractors disabled');
+}
+
 // ─── Shared scoring rules ────────────────────────────────────────────────────
 // Both live here because this is the lowest-level concept module — activityService,
 // conceptAnalyticsService and teacherService all depend on it, so a single home
@@ -612,10 +632,30 @@ async function getDistractors(studentId, categoryKey, conceptKey, tier) {
     }
   } catch { /* fall through */ }
 
-  // 3. Sequential neighbours — reached for the 71 of 93 concepts with no
-  // confusion history, i.e. most rounds. Exploration matters most here: this tier
-  // is arbitrary (apple gets banana and cherry purely by list order), so a random
-  // in-category swap is no worse pedagogically and is far more informative.
+  // 3. Content similarity — what the concepts look like (tier 1, the child is
+  // matching pictures) or what their names sound like (tier 2, matching names).
+  //
+  // This tier exists because the sequential fallback below is arbitrary: apple got
+  // banana and cherry purely by list order. Children confuse apple and tomato
+  // because they look alike, and cat and cap because they sound alike, and until
+  // now nothing in the system knew either.
+  //
+  // It also matters for the data. PHASE1-FINDINGS.md measured 97% of observed
+  // confusions landing on a concept 1-2 positions ahead in the sequence — not a
+  // fact about children, but an artefact of what the fallback showed them. Serving
+  // something meaningful here breaks that confound at the source.
+  const kind = tier === 2 ? 'phonetic' : 'visual';
+  const similar = CONCEPT_SIMILARITY.concepts?.[`${categoryKey}/${conceptKey}`]?.[kind];
+  if (similar?.length) {
+    const picked = similar
+      .map((s) => s.key)
+      .filter((k) => k !== conceptKey && sequence.includes(k))
+      .slice(0, 2);
+    if (picked.length >= 2) return explore(picked, kind);
+  }
+
+  // 4. Sequential neighbours — the last resort, now reached only where content
+  // similarity is unavailable or unusable for the category.
   return explore(sequential, 'sequential');
 }
 
