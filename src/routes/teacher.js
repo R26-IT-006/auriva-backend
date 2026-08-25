@@ -104,6 +104,16 @@ router.post('/students/:id/avatar', [
 router.get('/students/:id/concepts/summary', analyticsCtrl.getConceptSummary);
 router.get('/students/:id/concepts/report',  analyticsCtrl.getConceptReport);
 
+// Notes/reminders a teacher keeps about one of their own students.
+router.get('/students/:id/notes', ctrl.getStudentNotes);
+router.post('/students/:id/notes', [
+  body('body')
+    .trim()
+    .isLength({ min: 1, max: 2000 })
+    .withMessage('body must be between 1 and 2000 characters'),
+], ctrl.addStudentNote);
+router.delete('/students/:id/notes/:noteId', ctrl.deleteStudentNote);
+
 router.use('/concepts', require('./concept'));
 
 module.exports = router;

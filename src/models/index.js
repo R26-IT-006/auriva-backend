@@ -11,6 +11,7 @@ const StudentConceptProgress   = require('./StudentConceptProgress');
 const ConceptInteractionLog    = require('./ConceptInteractionLog');
 const StudentActivity          = require('./StudentActivity');
 const ColoringArtwork          = require('./ColoringArtwork');
+const StudentNote              = require('./StudentNote');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -47,6 +48,12 @@ StudentActivity.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 Student.hasMany(ColoringArtwork, { foreignKey: 'student_id', as: 'coloringArtworks' });
 ColoringArtwork.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → teacher notes/reminders
+Student.hasMany(StudentNote, { foreignKey: 'student_id', as: 'notes' });
+StudentNote.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Teacher.hasMany(StudentNote, { foreignKey: 'teacher_id', as: 'studentNotes' });
+StudentNote.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
+
 module.exports = {
   sequelize,
   Principal,
@@ -59,4 +66,5 @@ module.exports = {
   ConceptInteractionLog,
   StudentActivity,
   ColoringArtwork,
+  StudentNote,
 };

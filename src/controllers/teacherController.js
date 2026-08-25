@@ -27,4 +27,30 @@ async function setAvatar(req, res) {
   res.status(201).json(record);
 }
 
-module.exports = { getDashboard, getStudents, getStudentById, setAvatar };
+async function getStudentNotes(req, res) {
+  const notes = await teacherService.getStudentNotes(req.user.id, req.params.id);
+  res.json(notes);
+}
+
+async function addStudentNote(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const note = await teacherService.addStudentNote(req.user.id, req.params.id, req.body.body);
+  res.status(201).json(note);
+}
+
+async function deleteStudentNote(req, res) {
+  await teacherService.deleteStudentNote(req.user.id, req.params.id, req.params.noteId);
+  res.status(204).send();
+}
+
+module.exports = {
+  getDashboard,
+  getStudents,
+  getStudentById,
+  setAvatar,
+  getStudentNotes,
+  addStudentNote,
+  deleteStudentNote,
+};

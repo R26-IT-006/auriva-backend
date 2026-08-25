@@ -2,21 +2,11 @@
 
 const axios  = require('axios');
 const { Op } = require('sequelize');
-const { Teacher, Student, Session, StudentActivity, StudentConceptProgress, StudentAvatar } = require('../models');
+const { Teacher, Student, Session, StudentActivity, StudentConceptProgress, StudentAvatar, StudentNote } = require('../models');
 const { isMastered } = require('./conceptService');
 const ApiError = require('../utils/ApiError');
 
 const GNN_BASE = process.env.GNN_SERVICE_URL || 'http://localhost:8000';
-
-// The dashboard's calendar marks days the class was active. Sixty days covers the
-// month on screen plus a month either side of it, so paging back one month never
-// shows an empty grid that only means "we didn't fetch that far".
-const CALENDAR_WINDOW_DAYS = 60;
-
-// Enough to cover a busy day for the "today" strip while still leaving the recent
-// activity list its own five. Was 5, which could hide a morning session behind
-// four afternoon ones.
-const RECENT_SESSION_LIMIT = 20;
 
 /** Midnight on the most recent Sunday, in server-local time. */
 function startOfWeek() {
@@ -46,8 +36,8 @@ async function getDashboardStats(teacherId) {
   const weekStart = startOfWeek();
 
   const [
-    conceptsMastered, avgEngagement, recentSessions, recentAchievements,
-    allProgress, allSessions, weekActivities, weekMilestones,
+    conceptsMastered, avgEngagement, allSessions, recentAchievements,
+    allProgress, weekActivities, weekMilestones,
   ] = await Promise.all([
     // "Mastered" means tier 1 AND tier 2, matching activityService and the concept
     // analytics report. This counts fewer concepts than the old tier-1-only rule.
@@ -65,12 +55,15 @@ async function getDashboardStats(teacherId) {
           .then((r) => r.data.avg_engagement)
           .catch(() => null)
       : null,
+    // Unlimited (rather than the old top-20 "recent" slice) so both the calendar
+    // dots and the per-day detail list stay accurate for a teacher who pages back
+    // to an older month, and so a student's most-recent session is never missed
+    // by proficiency's lastSessionAt lookup below.
     totalStudents > 0
       ? Session.findAll({
           where: { student_id: studentIds },
           include: [{ model: Student, as: 'student', attributes: ['full_name'] }],
           order: [['started_at', 'DESC']],
-          limit: RECENT_SESSION_LIMIT,
         })
       : [],
     totalStudents > 0
@@ -87,13 +80,6 @@ async function getDashboardStats(teacherId) {
           // tier2_status is required by isMastered — without it the predicate reads
           // undefined and silently counts nothing.
           attributes: ['student_id', 'tier1_status', 'tier2_status', 'tier1_score'],
-        })
-      : [],
-    totalStudents > 0
-      ? Session.findAll({
-          where: { student_id: studentIds },
-          attributes: ['student_id', 'started_at'],
-          order: [['started_at', 'DESC']],
         })
       : [],
     // Powers the three activity tiles in Class Overview. Rows are fetched rather
@@ -127,10 +113,11 @@ async function getDashboardStats(teacherId) {
 
   // Raw timestamps rather than pre-bucketed date strings: the client bucketing them
   // in its own timezone is what stops a late-evening session showing on the wrong
-  // calendar day for a teacher offset from the server.
-  const calendarCutoff = new Date(Date.now() - CALENDAR_WINDOW_DAYS * 86400000);
+  // calendar day for a teacher offset from the server. All-time rather than a
+  // rolling window, so a dot still shows up when the teacher pages the calendar
+  // back to a month before the window would have covered.
   const sessionDates = allSessions
-    .filter((s) => s.started_at && new Date(s.started_at) >= calendarCutoff)
+    .filter((s) => s.started_at)
     .map((s) => s.started_at);
 
   const proficiency = students.map((s) => {
@@ -170,7 +157,9 @@ async function getDashboardStats(teacherId) {
     },
     sessionDates,
     proficiency,
-    recentSessions: recentSessions.map((s) => ({
+    // Full session list (not just "recent") so the calendar's per-day detail view
+    // can show every session on a date the teacher taps, however far back it is.
+    sessions: allSessions.map((s) => ({
       studentName: s.student?.full_name ?? 'Student',
       startedAt: s.started_at,
       endedAt: s.ended_at,
@@ -223,9 +212,42 @@ function flattenAvatar(student) {
   return plain;
 }
 
+async function assertOwnStudent(teacherId, studentId) {
+  const student = await Student.findOne({ where: { sid: studentId, teacher_id: teacherId } });
+  if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+  return student;
+}
+
+async function getStudentNotes(teacherId, studentId) {
+  await assertOwnStudent(teacherId, studentId);
+  return StudentNote.findAll({
+    where: { student_id: studentId },
+    order: [['created_at', 'DESC']],
+  });
+}
+
+async function addStudentNote(teacherId, studentId, bodyText) {
+  await assertOwnStudent(teacherId, studentId);
+  return StudentNote.create({
+    student_id: studentId,
+    teacher_id: teacherId,
+    body: bodyText,
+  });
+}
+
+async function deleteStudentNote(teacherId, studentId, noteId) {
+  await assertOwnStudent(teacherId, studentId);
+  const note = await StudentNote.findOne({ where: { id: noteId, student_id: studentId, teacher_id: teacherId } });
+  if (!note) throw new ApiError(404, 'Note not found');
+  await note.destroy();
+}
+
 module.exports = {
   getDashboardStats,
   getOwnStudents,
   getOwnStudentById,
   setAvatar,
+  getStudentNotes,
+  addStudentNote,
+  deleteStudentNote,
 };
