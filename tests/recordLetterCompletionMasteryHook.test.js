@@ -5,7 +5,7 @@
 // Mocks letterMotorMasteryService directly (its own logic is exhaustively
 // covered by tests/letterMotorMasteryService.test.js) so these tests focus
 // purely on the CONTROLLER's integration: trigger placement/gating
-// (created === true only), non-fatal error handling, collection-mode
+// (any saved passing session), non-fatal error handling, collection-mode
 // exclusion, and response-shape isolation (spec §19/§20/§21) — mirrors
 // tests/recordLetterCompletionOrchestration.test.js's exact convention.
 
@@ -147,17 +147,35 @@ describe('First mastery (created === true) triggers the evidence-freeze hook', (
   });
 });
 
-describe('Repeat mastery (created === false) never re-triggers the hook', () => {
-  it('a letter that already has a LetterProgress row does not call onLetterMastered again', async () => {
+// The hook used to be gated on `created === true`, which looked like "first
+// mastery" but was not: the blocked branch ALSO calls
+// LetterProgress.findOrCreate() for its blocked_attempts counter, so any
+// child who failed a letter even once already had a row by the time they
+// passed — and the freeze silently never ran for that letter. Immutability
+// is enforced inside onLetterMastered() (which returns
+// 'evidence_already_exists' without writing) and by the evidence table's
+// unique key, NOT by this call site.
+describe('A passing session triggers the hook even when the LetterProgress row already existed', () => {
+  it('calls onLetterMastered when created === false — the post-blocked-attempt mastery path', async () => {
     mockLetterProgressFindOrCreate.mockResolvedValueOnce([makeProgressRecord(), false]); // created === false
     const res = makeRes();
     await recordLetterCompletion(makeReq(), res);
-    expect(mockOnLetterMastered).not.toHaveBeenCalled();
+    expect(mockOnLetterMastered).toHaveBeenCalledTimes(1);
+    expect(mockOnLetterMastered).toHaveBeenCalledWith(
+      expect.objectContaining({ studentId: 13, letter: 'l', caseType: 'lowercase' })
+    );
+  });
+
+  it('still returns 200 (not 201) for an already-existing row — response shape is unchanged', async () => {
+    mockLetterProgressFindOrCreate.mockResolvedValueOnce([makeProgressRecord(), false]);
+    const res = makeRes();
+    await recordLetterCompletion(makeReq(), res);
+    expect(res.status).toHaveBeenCalledWith(200);
   });
 });
 
 describe('Failed session (blocked branch) never triggers the hook', () => {
-  it('a below-threshold session does not call onLetterMastered (LetterProgress is never created there)', async () => {
+  it('a below-threshold session does not call onLetterMastered (the branch returns before the hook)', async () => {
     // Motor Score Unification — attempt_scores is no longer authoritative;
     // the below-threshold outcome must come from the backend-computed
     // motor score instead (20 < the 55 threshold).

@@ -13,6 +13,7 @@ const mockLetterMotorStateHistoryFindAll = jest.fn();
 const mockLetterMotorStateHistoryFindOne = jest.fn();
 const mockWordWritingAttemptFindAll = jest.fn();
 const mockTeacherRecommendationValidationFindAll = jest.fn();
+const mockLetterMotorMasteryEvidenceCount = jest.fn();
 
 jest.mock('../src/models', () => ({
   Student:  { findByPk: (...a) => mockStudentFindByPk(...a) },
@@ -25,6 +26,7 @@ jest.mock('../src/models', () => ({
   },
   WordWritingAttempt: { findAll: (...a) => mockWordWritingAttemptFindAll(...a) },
   TeacherRecommendationValidation: { findAll: (...a) => mockTeacherRecommendationValidationFindAll(...a) },
+  LetterMotorMasteryEvidence: { count: (...a) => mockLetterMotorMasteryEvidenceCount(...a) },
 }));
 
 const mockEvaluatePersistentDifficulty = jest.fn();
@@ -65,6 +67,7 @@ function defaultMocks() {
   mockLetterMotorStateHistoryFindOne.mockResolvedValue(null);
   mockWordWritingAttemptFindAll.mockResolvedValue([]);
   mockTeacherRecommendationValidationFindAll.mockResolvedValue([]);
+  mockLetterMotorMasteryEvidenceCount.mockResolvedValue(0);
   mockEvaluatePersistentDifficulty.mockResolvedValue({ status: 'evaluated', summary: { persistentCount: 0 } });
   mockEvaluateWorksheetRecommendations.mockResolvedValue({ status: 'evaluated', recommendations: [] });
   mockGetStudentMotorBaseline.mockResolvedValue({ status: 'baseline_not_found', baseline: null });
@@ -147,6 +150,37 @@ describe('Feature 11B — as-of end date, never a later current milestone', () =
     const report = await buildPeriodicReport(RANGE);
     expect(report.letter_motor_development.milestones_during_period).toHaveLength(1);
     expect(report.letter_motor_development.milestones_during_period[0].milestone).toBe('14/20');
+  });
+
+  // A student below the first milestone has no pattern at all. Reporting only
+  // "no pattern" leaves the teacher-facing card looking broken, so the report
+  // also carries how far along the reference set the student is.
+  it('reports progress toward the first milestone so an absent pattern is explainable', async () => {
+    mockLetterMotorMasteryEvidenceCount.mockResolvedValue(9);
+    const report = await buildPeriodicReport(RANGE);
+    expect(report.letter_motor_development.reference_progress).toEqual({
+      evidence_letters: 9,
+      first_milestone_required: 14,
+      reference_letter_total: 20,
+    });
+  });
+
+  it('counts frozen evidence, not letters mastered — an ineligible mastery contributes nothing', async () => {
+    mockLetterProgressFindAll.mockResolvedValue([
+      { letter: 'a', case_type: 'lowercase', completed_at: '2026-03-01T00:00:00.000Z' },
+      { letter: 'c', case_type: 'lowercase', completed_at: '2026-03-02T00:00:00.000Z' },
+    ]);
+    mockLetterMotorMasteryEvidenceCount.mockResolvedValue(0);
+    const report = await buildPeriodicReport(RANGE);
+    expect(report.letter_motor_development.reference_progress.evidence_letters).toBe(0);
+  });
+
+  it('the evidence count is cumulative, never restricted to the reporting period', async () => {
+    await buildPeriodicReport(RANGE);
+    const where = mockLetterMotorMasteryEvidenceCount.mock.calls[0][0].where;
+    expect(where).toEqual({ student_id: RANGE.studentId });
+    expect(Object.keys(where)).not.toContain('created_at');
+    expect(Object.keys(where)).not.toContain('mastered_at');
   });
 
   it('never uses ordinal improvement/decline language for Letter Motor State', () => {

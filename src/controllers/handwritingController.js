@@ -824,14 +824,35 @@ async function recordLetterCompletion(req, res) {
     dynamicThresholdNextThreshold = orchestrationResult.newThreshold;
   }
 
-  // Feature 11B Phase 5 — evidence freeze + milestone check, ONLY on the
-  // very first mastery of this letter (created === true). A letter that
-  // already had a LetterProgress row (created === false — e.g. mastered
-  // previously, now being re-practiced) never re-triggers this: evidence
-  // is immutable, frozen once (spec §11). Runs only after attemptsSaved,
-  // same ordering guarantee as the Feature 2 orchestration above (the
-  // attempt_number=3 row this reads back must already be persisted).
-  if (attemptsSaved && created) {
+  // Feature 11B Phase 5 — evidence freeze + milestone check. Runs only
+  // after attemptsSaved, same ordering guarantee as the Feature 2
+  // orchestration above (the attempt_number=3 row this reads back must
+  // already be persisted).
+  //
+  // Gated on `attemptsSaved` alone, NOT on `created`. `created` looks like
+  // the right "first mastery" signal but is not one: the blocked branch
+  // above also calls LetterProgress.findOrCreate(), purely to keep its
+  // blocked_attempts counter. So a child who fails a letter even once
+  // already has a LetterProgress row by the time they finally pass, making
+  // `created` false at the very session that actually achieved mastery —
+  // and the evidence freeze silently never ran for that letter. Since a
+  // first failure is the common case, this suppressed Feature 11B evidence
+  // for nearly every letter, leaving letter_motor_mastery_evidence empty,
+  // no milestone ever reachable, and the teacher-facing Writing Pattern
+  // Summary permanently blank.
+  //
+  // Dropping the `created` condition is safe precisely because
+  // onLetterMastered() is idempotent by construction: it returns
+  // 'evidence_already_exists' without writing whenever a row for this
+  // (student, letter, case) is already present, so spec §11 immutability
+  // is enforced by the evidence table's own unique key rather than by this
+  // call-site guard. The first PASSING session with an eligible
+  // attempt_number=3 row wins; every later re-practice is a no-op read.
+  //
+  // Mastery, threshold and pass/fail are all finalized before this line and
+  // are not read or changed here — this only decides whether the evidence
+  // hook is given the chance to run at all.
+  if (attemptsSaved) {
     await runLetterMotorMasteryEvidence({
       studentId: student_id, letter, caseType: case_type, sessionKey,
     });

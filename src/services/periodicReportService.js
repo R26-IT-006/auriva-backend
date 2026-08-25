@@ -35,7 +35,10 @@ const { Op } = require('sequelize');
 const {
   Student, Teacher, LetterProgress, LetterAttempt, LetterMotorStateHistory,
   WordWritingAttempt, TeacherRecommendationValidation, StudentMotorBaseline,
+  LetterMotorMasteryEvidence,
 } = require('../models');
+const { MILESTONES } = require('../config/letterMotorMilestones');
+const { getReferenceLetterCount } = require('../config/letterMotorReferenceLetters');
 const { evaluatePersistentDifficulty } = require('./persistentDifficultyService');
 const { evaluateWorksheetRecommendations } = require('./worksheetRecommendationService');
 
@@ -269,6 +272,21 @@ async function buildLetterMotorDevelopmentSection({ studentId, startAt, endAt })
     }),
   ]);
 
+  // Additive, descriptive-only: how far this student is toward the FIRST
+  // milestone that can produce a pattern at all. Without it the card can
+  // only say "Not yet observed", which reads as a broken or empty section
+  // rather than as a stage the child has not reached yet. Counted from the
+  // evidence table because that — not letters mastered — is what
+  // checkAndTriggerMilestones() actually requires: a mastered reference
+  // letter whose attempt-3 row was ineligible contributes nothing.
+  //
+  // Deliberately NOT period-scoped (like the baseline section): evidence is
+  // frozen once, at mastery, and progress toward a milestone is cumulative.
+  // Reported as a count only — never a percentage, score, ranking or
+  // trajectory (spec §10 neutral language).
+  const evidenceCount = await LetterMotorMasteryEvidence.count({ where: { student_id: studentId } });
+  const firstMilestone = MILESTONES[0];
+
   return {
     milestones_during_period: duringPeriod.map((m) => ({
       milestone: m.milestone, state_code: m.state_code, display_name: m.display_name,
@@ -278,6 +296,11 @@ async function buildLetterMotorDevelopmentSection({ studentId, startAt, endAt })
       milestone: asOfEndRow.milestone, state_code: asOfEndRow.state_code, display_name: asOfEndRow.display_name,
       coverage: asOfEndRow.coverage_n, observed_at: asOfEndRow.observed_at,
     } : null,
+    reference_progress: {
+      evidence_letters: evidenceCount,
+      first_milestone_required: firstMilestone ? firstMilestone.coverageN : null,
+      reference_letter_total: getReferenceLetterCount(),
+    },
   };
 }
 
