@@ -91,6 +91,27 @@ router.post('/tier3/complete', [
   body('concept_key').isString().notEmpty(),
 ], ctrl.completeTier3);
 
+// ─── Card games (pair match, memory) ─────────────────────────────────────────
+// Concepts are chosen server-side from the child's tier 1 + tier 2 mastery, the
+// same way the mixed activity picks its own, so the client never decides what is
+// under test.
+router.post('/game/start', [
+  body('student_id').isInt({ min: 1 }),
+  body('category_key').isString().notEmpty(),
+  body('activity_type').isIn(['pair_match', 'memory']),
+  body('concept_count').optional().isInt({ min: 2, max: 8 }),
+], ctrl.startGameActivity);
+
+router.post('/game/complete', [
+  body('student_id').isInt({ min: 1 }),
+  body('activity_id').isInt({ min: 1 }),
+  body('pair_results').isArray({ min: 1, max: 12 }),
+  body('pair_results.*.concept_key').isString().notEmpty(),
+  body('pair_results.*.was_correct_first_try').isBoolean(),
+  body('pair_results.*.confused_with').optional().isArray({ max: 12 }),
+  body('pair_results.*.confused_with.*').isString(),
+], ctrl.completeGameActivity);
+
 // ─── Tier 3 colouring artwork ────────────────────────────────────────────────
 // Multipart: the PNG arrives as `image`, everything else as form fields, so the
 // validators run on strings rather than the JSON types used elsewhere.

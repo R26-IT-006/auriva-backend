@@ -19,6 +19,11 @@ const ACTIVITY_TIER = 4;
 const THRESHOLD    = 3;      // concepts that must be mastered to trigger an activity
 const MAX_REROLLS  = 5;      // signature-collision retries before we accept a repeat
 
+// Card-game activity types. They share this service's concept selection and
+// history rows but not its difficulty ladder or question plan.
+const GAME_TYPES         = ['pair_match', 'memory'];
+const MIN_GAME_CONCEPTS  = 2;   // below two pairs there is no game to play
+
 // Requiring both tier 1 and tier 2 guarantees every round type an activity can
 // produce tests a skill the child has actually been taught. Defined in
 // conceptService so the dashboard and the analytics report agree with this.
@@ -105,15 +110,19 @@ function buildSignature(conceptKeys, roundTypes) {
  * category that no completed activity has covered yet". That makes it
  * order-independent, timestamp-free, idempotent, and self-healing if rows are
  * edited by hand — none of which a counter column would be.
+ *
+ * Scoped to one `activityType`, because coverage is per activity: a memory game
+ * covering three concepts must not remove them from the pool the mixed practice
+ * activity is waiting on, or playing one game would starve the other.
  */
-async function getActivityStatus(studentId, categoryKey) {
+async function getActivityStatus(studentId, categoryKey, activityType = 'practice') {
   const sequence = getSequence(categoryKey);
   if (!sequence.length) throw new ApiError(404, 'Unknown category');
 
   const [progressRows, activities] = await Promise.all([
     StudentConceptProgress.findAll({ where: { student_id: studentId, category_key: categoryKey } }),
     StudentActivity.findAll({
-      where: { student_id: studentId, category_key: categoryKey },
+      where: { student_id: studentId, category_key: categoryKey, activity_type: activityType },
       order: [['activity_number', 'DESC']],
     }),
   ]);
@@ -171,7 +180,7 @@ async function getActivityStatus(studentId, categoryKey) {
  * set is the only part of the signature that can actually vary, since the round-type
  * sequence is fixed per level.
  */
-function selectConcepts(progressRows, uncovered, covered, sequence, level, offset = 0) {
+function selectConcepts(progressRows, uncovered, covered, sequence, level, offset = 0, count = THRESHOLD) {
   const byKey = Object.fromEntries(progressRows.map((r) => [r.concept_key, r]));
   const sortKey = (k) => {
     const row = byKey[k];
@@ -190,14 +199,16 @@ function selectConcepts(progressRows, uncovered, covered, sequence, level, offse
     ? pool.map((_, i) => pool[(i + offset) % pool.length])
     : [];
 
-  const targets = rotated.slice(0, THRESHOLD);
+  // `count` is THRESHOLD for the practice activity and the pair count for the
+  // card games, which need four rather than three.
+  const targets = rotated.slice(0, count);
 
   // Review mode top-up: fill from already-covered concepts, weakest score first.
-  if (targets.length < THRESHOLD) {
+  if (targets.length < count) {
     const weakestFirst = [...covered]
       .filter((k) => !targets.includes(k) && sequence.includes(k))
       .sort((a, b) => (byKey[a]?.tier1_score ?? 1) - (byKey[b]?.tier1_score ?? 1));
-    targets.push(...weakestFirst.slice(0, THRESHOLD - targets.length));
+    targets.push(...weakestFirst.slice(0, count - targets.length));
   }
 
   // At L5 one round deliberately revisits an older, already-covered concept.
@@ -361,6 +372,7 @@ async function startActivity(studentId, categoryKey, sessionId) {
   const activity = await StudentActivity.create({
     student_id:       studentId,
     category_key:     categoryKey,
+    activity_type:    'practice',
     activity_number:  activityNumber,
     difficulty_level: level,
     difficulty_meta:  meta,
@@ -473,6 +485,172 @@ async function completeActivity(studentId, activityId, roundResults, sessionId) 
   };
 }
 
+// ─── Card games (pair match, memory) ─────────────────────────────────────────
+
+/**
+ * Picks the concepts for one card game and opens a history row for it.
+ *
+ * Reuses selectConcepts unchanged — the whole point is that these games test the
+ * same "mastered longest ago, weakest first when the pool runs dry" set the
+ * practice activity does, rather than a client-side shuffle. What they do not
+ * reuse is the difficulty ladder or the question plan: there are no rounds to
+ * plan and no levels to climb, so those columns stay null.
+ *
+ * Unlike startActivity this never throws on a short pool. A card game with two
+ * pairs is still a game, and refusing to open one would take an activity the
+ * child can see in the picker and make it dead.
+ */
+async function startGameActivity(studentId, categoryKey, activityType, conceptCount) {
+  if (!GAME_TYPES.includes(activityType)) {
+    throw new ApiError(422, `Unknown activity type: ${activityType}`);
+  }
+
+  const sequence = getSequence(categoryKey);
+  const status   = await getActivityStatus(studentId, categoryKey, activityType);
+
+  const [progressRows, activities] = await Promise.all([
+    StudentConceptProgress.findAll({ where: { student_id: studentId, category_key: categoryKey } }),
+    StudentActivity.findAll({
+      where: { student_id: studentId, category_key: categoryKey, activity_type: activityType },
+      order: [['activity_number', 'DESC']],
+    }),
+  ]);
+
+  const completed = activities.filter((a) => a.status === 'passed' || a.status === 'failed');
+  const covered   = new Set(completed.flatMap((a) => a.concept_keys || []));
+
+  // level is irrelevant here — passing 1 keeps selectConcepts out of its
+  // level-5 spaced-repetition branch, which belongs to the round-based activity.
+  const { targets } = selectConcepts(
+    progressRows, status.mastered_uncovered, covered, sequence, 1, 0, conceptCount,
+  );
+
+  if (targets.length < MIN_GAME_CONCEPTS) {
+    throw new ApiError(409, 'Not enough mastered concepts for this game yet');
+  }
+
+  const now = new Date();
+  const activity = await StudentActivity.create({
+    student_id:      studentId,
+    category_key:    categoryKey,
+    activity_type:   activityType,
+    activity_number: activities.length + 1,
+    status:          'in_progress',
+    concept_keys:    [...targets].sort(),
+    started_at:      now,
+    created_at:      now,
+  });
+
+  return {
+    activity_id:  activity.id,
+    concept_keys: targets,
+  };
+}
+
+/**
+ * Closes a card game out.
+ *
+ * `pairResults` is [{ concept_key, was_correct_first_try, confused_with }] —
+ * one entry per pair in the game, with confused_with naming the concepts this
+ * one was wrongly paired against.
+ */
+async function completeGameActivity(studentId, activityId, pairResults, sessionId) {
+  const activity = await StudentActivity.findOne({
+    where: { id: activityId, student_id: studentId },
+  });
+  if (!activity) throw new ApiError(404, 'Activity not found');
+  if (!GAME_TYPES.includes(activity.activity_type)) {
+    throw new ApiError(422, 'Not a card-game activity');
+  }
+  if (activity.status === 'passed' || activity.status === 'failed') {
+    throw new ApiError(409, 'Activity already completed');
+  }
+
+  // Recomputed server-side — never trust a client-supplied score. These games
+  // are no-fail, so the score measures first-try accuracy rather than pass/fail:
+  // every pair is found eventually, and how many were found without a miss is
+  // the only thing that carries information.
+  const total        = pairResults.length;
+  const correctCount = pairResults.filter((r) => r.was_correct_first_try).length;
+  const score        = total > 0 ? correctCount / total : 0;
+  const passed       = score >= PASS_SCORE;
+
+  const now = new Date();
+  await activity.update({
+    status:        passed ? 'passed' : 'failed',
+    correct_count: correctCount,
+    score,
+    total_rounds:  total,
+    completed_at:  now,
+  });
+
+  // One summary row per concept, matching what completeActivity writes so the
+  // logs stay queryable by concept_key the same way.
+  const perConcept = {};
+  pairResults.forEach((r) => {
+    if (!r.concept_key) return;
+    perConcept[r.concept_key] = { correct: r.was_correct_first_try ? 1 : 0, total: 1 };
+  });
+
+  await Promise.all((activity.concept_keys || []).map((conceptKey) =>
+    logInteraction(
+      studentId, sessionId, activity.category_key, conceptKey, ACTIVITY_TIER,
+      passed ? 'game_pass' : 'game_fail',
+      {
+        activity_id:     activity.id,
+        activity_type:   activity.activity_type,
+        activity_number: activity.activity_number,
+        score,
+        per_concept:     perConcept[conceptKey] || { correct: 0, total: 0 },
+        concept_keys:    activity.concept_keys,
+      },
+    )
+  ));
+
+  syncGameConfusions(studentId, activity, pairResults);
+  syncActivityScore(studentId, activity, perConcept, score, passed);
+
+  return {
+    completed: true,
+    passed,
+    score,
+    correct_count: correctCount,
+    total_pairs: total,
+  };
+}
+
+/**
+ * Card-game mistakes as their own kind of confusion edge.
+ *
+ * A wrong pair here means "could not connect this photo to that drawing", which
+ * is a different error from "these two pictures look alike" — the same concept
+ * in two formats, rather than two concepts that resemble each other. Recording
+ * both as ACTIVITY_CONFUSION would let a format-mapping failure raise a concept
+ * up the look-alike distractor ranking, where it does not belong.
+ */
+function syncGameConfusions(studentId, activity, pairResults) {
+  pairResults.forEach(({ concept_key: correctKey, confused_with: confusedWith }) => {
+    if (!correctKey || !confusedWith?.length) return;
+
+    // De-duplicated, and self-pairs dropped: turning over the same concept's two
+    // cards can never be a confusion.
+    const confused = [...new Set(confusedWith)].filter((k) => k && k !== correctKey);
+    if (!confused.length) return;
+
+    syncToGkb('/gkb/activity/confusion', {
+      student_id:    studentId,
+      correct_key:   correctKey,
+      category_key:  activity.category_key,
+      confused_with: confused,
+      kind:          'format',
+      // The activity row id is the observation: one completed game yields at most
+      // one increment per (correct, confused) pair, so a retried delivery cannot
+      // inflate the weight.
+      observation_id: activity.id,
+    });
+  });
+}
+
 /**
  * Feeds wrong answers back into the knowledge graph as per-student confusion edges.
  *
@@ -563,8 +741,12 @@ module.exports = {
   startActivity,
   logActivityAttempt,
   completeActivity,
+  startGameActivity,
+  completeGameActivity,
   // exported for testing / tuning
   ACTIVITY_LEVELS,
+  GAME_TYPES,
   ladderLevel,
   difficultyFor,
+  selectConcepts,
 };

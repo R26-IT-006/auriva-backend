@@ -199,6 +199,30 @@ async function completeActivity(req, res) {
   res.json(result);
 }
 
+// ─── Card games (pair match, memory) ─────────────────────────────────────────
+
+async function startGameActivity(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const { student_id, category_key, activity_type, concept_count } = req.body;
+  const result = await activityService.startGameActivity(
+    student_id, category_key, activity_type, concept_count || 4,
+  );
+  res.status(201).json(result);
+}
+
+async function completeGameActivity(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const { student_id, activity_id, pair_results, session_id } = req.body;
+  const result = await activityService.completeGameActivity(
+    student_id, activity_id, pair_results || [], session_id,
+  );
+  res.json(result);
+}
+
 // ─── Tier 3 colouring artwork ────────────────────────────────────────────────
 
 async function saveColoring(req, res) {
@@ -225,4 +249,4 @@ async function listColoring(req, res) {
   res.json(items);
 }
 
-module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getActivityStatus, startActivity, logActivityAttempt, completeActivity, saveColoring, listColoring };
+module.exports = { getConceptItems, startTier1, logInteraction, logMatchAttempt, completeTier1, getDistractors, logAdaptiveAttempt, completeAdaptive, startTier2, completeTier2, startTier3, completeTier3, getActivityStatus, startActivity, logActivityAttempt, completeActivity, startGameActivity, completeGameActivity, saveColoring, listColoring };

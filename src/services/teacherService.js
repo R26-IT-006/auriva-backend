@@ -1,18 +1,39 @@
 'use strict';
 
 const axios  = require('axios');
-const { Teacher, Student, Session, StudentConceptProgress, StudentAvatar } = require('../models');
+const { Op } = require('sequelize');
+const { Teacher, Student, Session, StudentActivity, StudentConceptProgress, StudentAvatar } = require('../models');
 const { isMastered } = require('./conceptService');
 const ApiError = require('../utils/ApiError');
 
 const GNN_BASE = process.env.GNN_SERVICE_URL || 'http://localhost:8000';
+
+// The dashboard's calendar marks days the class was active. Sixty days covers the
+// month on screen plus a month either side of it, so paging back one month never
+// shows an empty grid that only means "we didn't fetch that far".
+const CALENDAR_WINDOW_DAYS = 60;
+
+// Enough to cover a busy day for the "today" strip while still leaving the recent
+// activity list its own five. Was 5, which could hide a morning session behind
+// four afternoon ones.
+const RECENT_SESSION_LIMIT = 20;
+
+/** Midnight on the most recent Sunday, in server-local time. */
+function startOfWeek() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
 
 async function getDashboardStats(teacherId) {
   const [profile, students] = await Promise.all([
     Teacher.findByPk(teacherId, { attributes: { exclude: ['password_hash'] } }),
     Student.findAll({
       where: { teacher_id: teacherId },
-      attributes: ['sid', 'full_name', 'profile_photo_url'],
+      // date_of_birth is carried so the dashboard's student cards can show an age
+      // without a second round trip per child.
+      attributes: ['sid', 'full_name', 'profile_photo_url', 'date_of_birth'],
       order: [['student_code', 'ASC']],
     }),
   ]);
@@ -22,7 +43,12 @@ async function getDashboardStats(teacherId) {
   const studentIds = students.map((s) => s.sid);
   const totalStudents = studentIds.length;
 
-  const [conceptsMastered, avgEngagement, recentSessions, recentAchievements, allProgress, allSessions] = await Promise.all([
+  const weekStart = startOfWeek();
+
+  const [
+    conceptsMastered, avgEngagement, recentSessions, recentAchievements,
+    allProgress, allSessions, weekActivities, weekMilestones,
+  ] = await Promise.all([
     // "Mastered" means tier 1 AND tier 2, matching activityService and the concept
     // analytics report. This counts fewer concepts than the old tier-1-only rule.
     totalStudents > 0
@@ -44,7 +70,7 @@ async function getDashboardStats(teacherId) {
           where: { student_id: studentIds },
           include: [{ model: Student, as: 'student', attributes: ['full_name'] }],
           order: [['started_at', 'DESC']],
-          limit: 5,
+          limit: RECENT_SESSION_LIMIT,
         })
       : [],
     totalStudents > 0
@@ -70,7 +96,42 @@ async function getDashboardStats(teacherId) {
           order: [['started_at', 'DESC']],
         })
       : [],
+    // Powers the three activity tiles in Class Overview. Rows are fetched rather
+    // than counted because the same set answers assigned, completed, and the
+    // average score, and three aggregate queries would cost more than one read of
+    // a week's worth of rows.
+    totalStudents > 0
+      ? StudentActivity.findAll({
+          where: { student_id: studentIds, created_at: { [Op.gte]: weekStart } },
+          attributes: ['status', 'score', 'completed_at'],
+        })
+      : [],
+    // The fourth tile. There is no tier2_passed_at column, so a milestone is dated
+    // by the tier 1 pass — the same event recentAchievements already reports.
+    totalStudents > 0
+      ? StudentConceptProgress.count({
+          where: {
+            student_id: studentIds,
+            tier1_status: 'passed',
+            tier1_passed_at: { [Op.gte]: weekStart },
+          },
+        })
+      : 0,
   ]);
+
+  const weekCompleted   = weekActivities.filter((a) => a.status === 'passed' || a.status === 'failed');
+  const weekScores      = weekCompleted.map((a) => a.score).filter((s) => typeof s === 'number');
+  const weekAvgProgress = weekScores.length
+    ? weekScores.reduce((a, b) => a + b, 0) / weekScores.length
+    : null;
+
+  // Raw timestamps rather than pre-bucketed date strings: the client bucketing them
+  // in its own timezone is what stops a late-evening session showing on the wrong
+  // calendar day for a teacher offset from the server.
+  const calendarCutoff = new Date(Date.now() - CALENDAR_WINDOW_DAYS * 86400000);
+  const sessionDates = allSessions
+    .filter((s) => s.started_at && new Date(s.started_at) >= calendarCutoff)
+    .map((s) => s.started_at);
 
   const proficiency = students.map((s) => {
     const progress = allProgress.filter((p) => p.student_id === s.sid);
@@ -83,6 +144,7 @@ async function getDashboardStats(teacherId) {
       studentId: s.sid,
       fullName: s.full_name,
       profilePhotoUrl: s.profile_photo_url,
+      dateOfBirth: s.date_of_birth,
       conceptsAssigned: progress.length,
       conceptsMastered: mastered,
       avgScore,
@@ -97,6 +159,16 @@ async function getDashboardStats(teacherId) {
       conceptsMastered,
       avgEngagement,
     },
+    // Class Overview. Everything here is scoped to the current week, which is why
+    // it is kept apart from `stats` — those are all-time figures and mixing the two
+    // under one heading is how a dashboard starts lying.
+    weekStats: {
+      activitiesAssigned:  weekActivities.length,
+      activitiesCompleted: weekCompleted.length,
+      avgProgress:         weekAvgProgress,
+      milestones:          weekMilestones,
+    },
+    sessionDates,
     proficiency,
     recentSessions: recentSessions.map((s) => ({
       studentName: s.student?.full_name ?? 'Student',
