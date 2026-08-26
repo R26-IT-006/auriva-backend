@@ -547,6 +547,10 @@ async function startFriendPetSession(teacherId, studentId, topic, q, parentSessi
       audio_base64:  sentenceAudios[i],
     })),
     gender: q.child_gender,
+    // Frontend needs this to pick the right character asset (Anjalie_Waving
+    // vs Saman_Waving) for describe_friend's "friend's name"/"friend is a
+    // boy/girl" sentences — only meaningful when topic === 'describe_friend'.
+    friend_gender: q.friend_gender,
   };
 }
 
