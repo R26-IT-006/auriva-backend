@@ -12,6 +12,7 @@ const ConceptInteractionLog    = require('./ConceptInteractionLog');
 const StudentActivity          = require('./StudentActivity');
 const ColoringArtwork          = require('./ColoringArtwork');
 const StudentNote              = require('./StudentNote');
+const AiSummary                = require('./AiSummary');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -54,6 +55,9 @@ StudentNote.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 Teacher.hasMany(StudentNote, { foreignKey: 'teacher_id', as: 'studentNotes' });
 StudentNote.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
 
+// AiSummary has no association on purpose — subject_id addresses either a student
+// or a teacher depending on scope, so there is no single relation to declare.
+
 module.exports = {
   sequelize,
   Principal,
@@ -67,4 +71,5 @@ module.exports = {
   StudentActivity,
   ColoringArtwork,
   StudentNote,
+  AiSummary,
 };

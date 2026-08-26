@@ -243,8 +243,10 @@ async function buildQuestionPlan({ studentId, categoryKey, level, targets, space
     return weakestTarget;
   });
 
-  // One getDistractors call per round. Run them together — a 400ms GKB timeout
-  // times six sequential rounds would be 2.4s of dead time if the GKB is down.
+  // One getDistractors call per round. Run them together — the 800ms GKB timeout
+  // times six sequential rounds would be 4.8s of dead time if the GKB is down.
+  // Parallel, the worst case stays one timeout regardless of round count, which is
+  // what makes raising that timeout affordable here.
   const distractorSets = await Promise.all(
     spec.sequence.map((type, i) => {
       if (!spec.smartDistractors) return Promise.resolve({ distractors: [] });

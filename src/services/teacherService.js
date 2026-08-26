@@ -243,6 +243,7 @@ async function deleteStudentNote(teacherId, studentId, noteId) {
 }
 
 module.exports = {
+  startOfWeek,
   getDashboardStats,
   getOwnStudents,
   getOwnStudentById,

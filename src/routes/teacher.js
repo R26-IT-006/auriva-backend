@@ -1,14 +1,29 @@
 'use strict';
 
 const router          = require('express').Router();
+const rateLimit       = require('express-rate-limit');
 const { verifyToken } = require('../middleware/auth');
 const { isTeacher }   = require('../middleware/roleGuard');
 const { body }        = require('express-validator');
 const ctrl            = require('../controllers/teacherController');
 const analyticsCtrl   = require('../controllers/conceptAnalyticsController');
+const aiCtrl          = require('../controllers/aiController');
 
 // All routes require JWT + teacher role + first-login gate
 router.use(verifyToken, isTeacher);
+
+// The only routes in the app that cost money per call. Cached responses are free,
+// but ?refresh=true is not, and a teacher leaning on the refresh button should
+// not be able to run up a bill. Keyed per teacher rather than per IP — a whole
+// school behind one NAT would otherwise share a budget.
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.user.id),
+  message: { message: 'Too many summary requests. Please wait a moment.' },
+});
 
 /**
  * @swagger
@@ -40,6 +55,34 @@ router.use(verifyToken, isTeacher);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/dashboard', ctrl.getDashboard);
+
+/**
+ * @swagger
+ * /api/teacher/dashboard/digest:
+ *   get:
+ *     summary: LLM-generated weekly digest of the teacher's class
+ *     description: >
+ *       Narrates the same figures /dashboard returns. Always 200 — when the
+ *       feature is disabled, the model call fails, or the teacher has no
+ *       students, the response is `{ available: false }` and the client renders
+ *       nothing. Student names are never sent to the model; they are substituted
+ *       server-side and restored in the response.
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: refresh
+ *         schema:
+ *           type: boolean
+ *         description: Bypass the cache and regenerate
+ *     responses:
+ *       200:
+ *         description: "Digest, or `{ available: false }`"
+ *       429:
+ *         description: Rate limited
+ */
+router.get('/dashboard/digest', aiLimiter, aiCtrl.getClassDigest);
 
 /**
  * @swagger
@@ -103,6 +146,42 @@ router.post('/students/:id/avatar', [
 // aggregates the per-tap interaction log and is lazy-loaded by the drill-down.
 router.get('/students/:id/concepts/summary', analyticsCtrl.getConceptSummary);
 router.get('/students/:id/concepts/report',  analyticsCtrl.getConceptReport);
+
+/**
+ * @swagger
+ * /api/teacher/students/{id}/concepts/narrative:
+ *   get:
+ *     summary: LLM-generated summary of a student's concept report
+ *     description: >
+ *       Narrates the payload from /concepts/report — mastery, confusion pairs,
+ *       response times and engagement — for the teacher. Advisory only: it never
+ *       influences what the child sees. Always 200; `{ available: false }` when
+ *       the feature is off, the model call fails, or the child has no logged
+ *       activity. The student's name and id are never sent to the model.
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Student ID (sid)
+ *       - in: query
+ *         name: refresh
+ *         schema:
+ *           type: boolean
+ *         description: Bypass the cache and regenerate
+ *     responses:
+ *       200:
+ *         description: "Summary, or `{ available: false }`"
+ *       404:
+ *         description: Student not found or not assigned to this teacher
+ *       429:
+ *         description: Rate limited
+ */
+router.get('/students/:id/concepts/narrative', aiLimiter, aiCtrl.getConceptNarrative);
 
 // Notes/reminders a teacher keeps about one of their own students.
 router.get('/students/:id/notes', ctrl.getStudentNotes);

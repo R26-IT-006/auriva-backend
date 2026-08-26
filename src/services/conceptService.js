@@ -584,10 +584,25 @@ async function getDistractors(studentId, categoryKey, conceptKey, tier) {
   };
 
   // 1. Try GKB
+  //
+  // 800ms, not 400. At 400 this call had never once succeeded: the endpoint makes
+  // four sequential round trips to Neo4j AuraDB and measures ~590ms steady-state
+  // (10 consecutive calls: 0.59-0.64s), so the deadline expired before the answer
+  // arrived every single time. The graph was returning correct, personalised
+  // distractors the whole while — nothing downstream ever saw them, and no logged
+  // attempt in the entire collection window carries distractor_source='gkb'.
+  //
+  // This is the quick fix and it buys the child's wait: ~600ms per question rather
+  // than a 400ms write-off. The real fix is collapsing those four round trips into
+  // one in gkb_service.get_student_confusions, which would bring this back under
+  // 400ms — until then this timeout is the thing keeping the graph switched on.
+  //
+  // A cold first call was measured at 1.14s and will still miss. That degrades to
+  // the fallback chain below, which is the intended behaviour.
   try {
     const resp = await axios.get(
       `${GNN_BASE}/gkb/student/${studentId}/distractors`,
-      { params: { category_key: categoryKey, concept_key: conceptKey, tier }, timeout: 400 },
+      { params: { category_key: categoryKey, concept_key: conceptKey, tier }, timeout: 800 },
     );
     const distractors = resp.data?.distractors || [];
     if (distractors.length >= 2) return explore(distractors, 'gkb');
