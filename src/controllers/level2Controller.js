@@ -1,8 +1,9 @@
 'use strict';
 
-const { validationResult } = require('express-validator');
-const level2Service        = require('../services/level2Service');
-const ApiError             = require('../utils/ApiError');
+const { validationResult }   = require('express-validator');
+const level2Service          = require('../services/level2Service');
+const level2AnalyticsService = require('../services/level2AnalyticsService');
+const ApiError               = require('../utils/ApiError');
 
 function validate(req) {
   const errors = validationResult(req);
@@ -81,6 +82,14 @@ async function getProgress(req, res) {
   validate(req);
   const topic = req.query.topic ?? 'self_introduction';
   const data = await level2Service.getProgress(req.user.id, req.params.studentId, topic);
+  res.json({ data });
+}
+
+// TASK-46 — one Level 2 report per student, all three topics in a single call.
+// Read-only: it reports the data the session flow already records and changes
+// none of it.
+async function getReport(req, res) {
+  const data = await level2AnalyticsService.getLevel2Report(req.params.studentId);
   res.json({ data });
 }
 
@@ -196,6 +205,7 @@ module.exports = {
   startSession,
   completeSession,
   getProgress,
+  getReport,
   recordStep3,
   assessStep4,
   recordNonVerbalTeaching,

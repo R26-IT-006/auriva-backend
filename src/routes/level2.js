@@ -47,6 +47,10 @@ router.get('/student/:studentId/level2/progress', [
     .withMessage('topic must be one of: self_introduction, describe_friend, describe_pet'),
 ], ctrl.getProgress);
 
+// TASK-46 — teacher-facing Level 2 report, all three topics in one call.
+// Auth is the router-level verifyToken + isTeacher applied at the top.
+router.get('/student/:studentId/level2/report', ctrl.getReport);
+
 router.post('/student/:studentId/level2/session/start', [
   body('session_id').optional().isInt({ min: 1 }).withMessage('session_id must be a positive integer'),
   body('topic').optional().isIn(['self_introduction', 'describe_friend', 'describe_pet'])
