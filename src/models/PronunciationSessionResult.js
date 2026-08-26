@@ -70,6 +70,23 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     type: DataTypes.STRING,
     allowNull: true,
   },
+  // Layer-1 (MFCC-DTW) instrumentation, promoted from recommendation_details
+  // to top-level columns so the cascade can be measured with plain SQL:
+  // gate hit rate (layer1_decision), score distribution (segmental_accuracy),
+  // and raw DTW distance vs teacher_reviewed_score. Null on rows scored by a
+  // path that never runs layer 1 (reference-free GOP, prototype fallback).
+  segmental_accuracy: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  dtw_distance: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+  },
+  layer1_decision: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   recognized_text: {
     type: DataTypes.STRING,
     allowNull: true,

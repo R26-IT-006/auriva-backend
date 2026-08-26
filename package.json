@@ -8,7 +8,8 @@
     "start": "node index.js",
     "dev": "node index.js",
     "dev:watch": "node --watch index.js",
-    "purge-old-audio": "node scripts/purgeOldAudio.js"
+    "purge-old-audio": "node scripts/purgeOldAudio.js",
+    "layer1-report": "node scripts/layer1Report.js"
   },
   "keywords": [],
   "author": "",
