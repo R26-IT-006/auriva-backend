@@ -113,6 +113,14 @@ function evaluateStream({ attempts, caseType, family }) {
     usableCycleCount: split.usableCount,
     windowSize: WINDOW_SIZE,
     requiredSeparationMs: MIN_WINDOW_SEPARATION_MS,
+    // Additive window-selection provenance (see splitLongitudinalWindows'
+    // own header). `cyclesNewerThanWindow > 0` means the newest usable
+    // cycles were skipped because their earlier/recent boundary fell inside
+    // one practice sitting, and an older but genuinely time-separated
+    // candidate was used instead — never hidden, so a reader can always see
+    // which evidence the decision rests on.
+    cyclesNewerThanWindow: split.cyclesNewerThanWindow ?? 0,
+    separationSatisfied: split.separationSatisfied ?? false,
   };
 
   if (split.status !== 'ok') {

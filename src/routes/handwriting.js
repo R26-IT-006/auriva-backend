@@ -7,6 +7,7 @@ const ctrl            = require('../controllers/handwritingController');
 const collectionCtrl  = require('../controllers/collectionController');
 const liveSessionCtrl = require('../controllers/liveSessionController');
 const reportCtrl      = require('../controllers/reportController');
+const { singleUpload } = require('../middleware/upload');
 
 router.use(verifyToken, isTeacher);
 
@@ -130,6 +131,28 @@ router.get('/worksheet-recommendation-validation-state/:studentId',  ctrl.getWor
 router.get('/letter-motor-state/latest/:studentId',        ctrl.getLatestLetterMotorState);
 router.get('/letter-motor-state/history/:studentId',       ctrl.getLetterMotorStateHistory);
 router.get('/letter-motor-evidence-trend/:studentId',      ctrl.getLetterMotorEvidenceTrend);
+// Feature 11B S2 — milestone evaluation log, including reference-range
+// rejections (which persist no state-history row). Read-only; never calls
+// the ML service.
+router.get('/letter-motor-evaluations/:studentId',         ctrl.getLetterMotorEvaluations);
+
+// Writing Check (Letter Motor Pattern Check) - the dedicated teacher-initiated
+// route for letter_motor_cluster_v1. Reproduces the model's collection-protocol
+// training regime; descriptive only, never a child-facing decision.
+router.post('/writing-check/start',                       ctrl.startWritingCheck);
+router.get('/writing-check/history/:studentId',           ctrl.getWritingCheckHistory);
+router.get('/writing-check/:checkId/progress',            ctrl.getWritingCheckProgress);
+router.post('/writing-check/:checkId/complete',           ctrl.completeWritingCheck);
+
+// Homework practice worksheets — teacher-facing. A worksheet is support
+// material: no route here affects mastery, Motor Score, thresholds or
+// sequencing. A submitted scan is stored and shown, never auto-scored.
+router.get('/worksheets/candidates/:studentId',           ctrl.getWorksheetCandidates);
+router.post('/worksheets/generate',                       ctrl.generateWorksheet);
+router.patch('/worksheets/:worksheetId/assign',           ctrl.assignWorksheet);
+router.post('/worksheets/:worksheetId/submit',            singleUpload('worksheet'), ctrl.submitWorksheet);
+router.patch('/worksheet-submissions/:submissionId/review', ctrl.reviewWorksheetSubmission);
+router.get('/worksheets/:studentId',                      ctrl.getWorksheetHistory);
 
 // ── Mastered-letter lookup + category completion (normal-progression fix,
 // Feature 11B Phase 5 §3/§4/§5/§6 — NOT a Feature 11B adaptation change;

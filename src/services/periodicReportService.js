@@ -36,11 +36,15 @@ const {
   Student, Teacher, LetterProgress, LetterAttempt, LetterMotorStateHistory,
   WordWritingAttempt, TeacherRecommendationValidation, StudentMotorBaseline,
   LetterMotorMasteryEvidence,
+  LetterMotorStateEvaluation, LetterMotorPatternCheck,
+  HandwritingWorksheet, HandwritingWorksheetSubmission,
 } = require('../models');
 const { MILESTONES } = require('../config/letterMotorMilestones');
 const { getReferenceLetterCount } = require('../config/letterMotorReferenceLetters');
+const { buildInitialMotorBaselineSummary } = require('../utils/initialMotorBaselineSummary');
 const { evaluatePersistentDifficulty } = require('./persistentDifficultyService');
 const { evaluateWorksheetRecommendations } = require('./worksheetRecommendationService');
+const logger = require('../utils/logger');
 
 // Mirrors the frontend's existing word-unlock gate constants
 // (auriva-frontend/src/utils/wordUnlockGate.js) — NOT a new rule, purely
@@ -77,13 +81,21 @@ function round(value, decimals = 1) {
 // non-fabricated reconstructions from the SAME single query — never two
 // separate table scans.
 async function buildLearningProgressSection({ studentId, startAt, endAt }) {
+  // Mastery-semantics correction: counts MASTERED letters, filtered and dated
+  // by mastered_at. Previously this counted every letter_progress row by
+  // completed_at — but the failure branch of recordLetterCompletion() creates
+  // rows too, so a letter the child failed and never passed was reported to
+  // the teacher as mastered. completed_at was also the wrong clock for the
+  // "during period" split: on a row born from a failure it records the
+  // failure, which live data showed preceding the real passing session by up
+  // to 95 days, placing a mastery event in the wrong reporting period.
   const rows = await LetterProgress.findAll({
-    where: { student_id: studentId, completed_at: { [Op.lte]: endAt } },
-    attributes: ['letter', 'case_type', 'completed_at'],
+    where: { student_id: studentId, mastered_at: { [Op.ne]: null, [Op.lte]: endAt } },
+    attributes: ['letter', 'case_type', 'mastered_at'],
     raw: true,
   });
 
-  const duringPeriod = rows.filter((r) => new Date(r.completed_at).getTime() >= startAt.getTime());
+  const duringPeriod = rows.filter((r) => new Date(r.mastered_at).getTime() >= startAt.getTime());
   const countBy = (list, caseType) => list.filter((r) => r.case_type === caseType).length;
 
   const cumulativeLowercase = countBy(rows, 'lowercase');
@@ -244,6 +256,22 @@ async function buildInitialMotorProfileSection({ studentId }) {
     scores: {
       straight: b.straight_score, curved: b.curved_score, complex: b.complex_score, overall: b.overall_motor_score,
     },
+    // Report parity: the same deterministic restatement the live
+    // /handwriting/motor-baseline endpoint already returns, produced by the
+    // SAME builder (utils/initialMotorBaselineSummary.js) from the SAME
+    // four authoritative StudentMotorBaseline scores. There is deliberately
+    // no second interpretation algorithm — before this, the section heading
+    // read "Initial Handwriting Skills Summary" on both the periodic report
+    // and its PDF while carrying only four bare numbers.
+    //
+    // No ML, no clustering, no recalculation. Additive: every pre-existing
+    // field of this section is unchanged.
+    summary: buildInitialMotorBaselineSummary({
+      straightScore: b.straight_score,
+      curvedScore: b.curved_score,
+      complexScore: b.complex_score,
+      overallMotorScore: b.overall_motor_score,
+    }),
   };
 }
 
@@ -259,13 +287,16 @@ async function buildInitialMotorProfileSection({ studentId }) {
 async function buildLetterMotorDevelopmentSection({ studentId, startAt, endAt }) {
   const [duringPeriod, asOfEndRow] = await Promise.all([
     LetterMotorStateHistory.findAll({
-      where: { student_id: studentId, observed_at: { [Op.between]: [startAt, endAt] } },
+      // pattern_check_id: null — LEGACY 14/17/20 milestone rows only. Writing
+      // Check results live in their own fields below and are never silently
+      // merged into milestone history.
+      where: { student_id: studentId, pattern_check_id: null, observed_at: { [Op.between]: [startAt, endAt] } },
       attributes: ['milestone', 'state_code', 'display_name', 'coverage_n', 'observed_at'],
       order: [['observed_at', 'ASC']],
       raw: true,
     }),
     LetterMotorStateHistory.findOne({
-      where: { student_id: studentId, observed_at: { [Op.lte]: endAt } },
+      where: { student_id: studentId, pattern_check_id: null, observed_at: { [Op.lte]: endAt } },
       attributes: ['milestone', 'state_code', 'display_name', 'coverage_n', 'observed_at'],
       order: [['observed_at', 'DESC']],
       raw: true,
@@ -280,14 +311,161 @@ async function buildLetterMotorDevelopmentSection({ studentId, startAt, endAt })
   // checkAndTriggerMilestones() actually requires: a mastered reference
   // letter whose attempt-3 row was ineligible contributes nothing.
   //
+  // The milestone-facing figure counts ONLY evidence for the first
+  // milestone's own exact requiredPairs. Counting all 20 reference letters
+  // here (the previous behaviour) overstated progress toward a milestone
+  // that can never be satisfied by substitution: evidence for an
+  // uppercase-curved or uppercase-mixed reference letter (C/O/S/A/B/K) is
+  // real evidence, but it moves the student no closer to
+  // UPPERCASE_STRAIGHT_14, so it must not be counted in a sentence that
+  // says "of the 14 needed". The all-20 total is kept alongside it as its
+  // own clearly-named field, never conflated with the milestone figure.
+  //
   // Deliberately NOT period-scoped (like the baseline section): evidence is
   // frozen once, at mastery, and progress toward a milestone is cumulative.
   // Reported as a count only — never a percentage, score, ranking or
   // trajectory (spec §10 neutral language).
-  const evidenceCount = await LetterMotorMasteryEvidence.count({ where: { student_id: studentId } });
   const firstMilestone = MILESTONES[0];
+  const evidenceRows = await LetterMotorMasteryEvidence.findAll({
+    where: { student_id: studentId },
+    attributes: ['letter', 'case_type'],
+    raw: true,
+  });
+  // ── S2 — machine-readable evaluation status ────────────────────────────
+  // Every surface previously had to INFER meaning from a missing pattern,
+  // and could not tell "the reference-range guard declined to report a
+  // pattern" apart from "no milestone reached yet" — because a rejection
+  // persisted nothing at all. It now persists an evaluation event, so the
+  // report can state which of the two actually happened.
+  //
+  // 'assigned' is decided from the pattern row alone, so a failure of the
+  // new evaluations read can never downgrade a student who genuinely has a
+  // pattern; the evaluations read only distinguishes the two pattern-less
+  // cases, and its own failure is reported honestly as 'unavailable'
+  // rather than being silently reported as 'not_reached'.
+  // Writing Checks (the dedicated teacher-initiated route for
+  // letter_motor_cluster_v1) EVALUATED during this period, plus the latest one
+  // as of the period end. Kept in their own clearly-named fields so a Writing
+  // Check is never confused with a legacy 14/17/20 normal-practice milestone.
+  // Non-fatal: a failure degrades these two fields only, never the report.
+  let writingChecksDuringPeriod = [];
+  let latestWritingCheck = null;
+  try {
+    const checkEvals = await LetterMotorStateEvaluation.findAll({
+      where: { student_id: studentId, pattern_check_id: { [Op.ne]: null }, observed_at: { [Op.lte]: endAt } },
+      attributes: ['pattern_check_id', 'evaluation_status', 'observed_at', 'ood_reason', 'model_version'],
+      order: [['observed_at', 'ASC'], ['id', 'ASC']], raw: true,
+    });
+    const checkHist = await LetterMotorStateHistory.findAll({
+      where: { student_id: studentId, pattern_check_id: { [Op.ne]: null } },
+      attributes: ['pattern_check_id', 'state_code'], raw: true,
+    });
+    const codeByCheck = new Map(checkHist.map((h) => [h.pattern_check_id, h.state_code]));
+    const serialize = (e) => ({
+      pattern_check_id: e.pattern_check_id,
+      evaluation_status: e.evaluation_status,
+      state_code: codeByCheck.get(e.pattern_check_id) ?? null,
+      observed_at: e.observed_at,
+      ood_reason: e.ood_reason,
+    });
+    writingChecksDuringPeriod = checkEvals
+      .filter((e) => new Date(e.observed_at).getTime() >= startAt.getTime()).map(serialize);
+    latestWritingCheck = checkEvals.length ? serialize(checkEvals[checkEvals.length - 1]) : null;
+  } catch (err) {
+    logger.error('Writing Check read failed for periodic report', { studentId, errorMessage: err.message });
+  }
+
+  // ── Precedence (documented rule) ───────────────────────────────────────
+  //   1. the latest dedicated Writing Check as of the report end date
+  //   2. otherwise a legacy 14/17/20 milestone pattern, for backward
+  //      compatibility
+  //   3. otherwise not_reached / unavailable
+  //
+  // Rule 1 applies EVEN WHEN the Writing Check was rejected by the
+  // reference-range guard. A later OOD check must never fall back visually to
+  // an older Pattern A/B as though that were still the current result — an
+  // August Pattern A followed by an October rejection reads as "Not reported"
+  // in October, with the August result preserved in history.
+  let evaluationStatus;
+  let referenceRangeEvaluation = null;
+  if (latestWritingCheck) {
+    evaluationStatus = latestWritingCheck.evaluation_status === 'outside_reference_range'
+      ? 'outside_reference_range'
+      : 'assigned';
+    if (evaluationStatus === 'outside_reference_range') {
+      referenceRangeEvaluation = {
+        milestone: null,
+        coverage: getReferenceLetterCount(),
+        observed_at: latestWritingCheck.observed_at,
+        reason: latestWritingCheck.ood_reason,
+        outside_features: null,
+        model_version: null,
+        source: 'writing_check',
+      };
+    }
+  } else if (asOfEndRow) {
+    evaluationStatus = 'assigned';
+  } else {
+    try {
+      const rejected = await LetterMotorStateEvaluation.findOne({
+        where: {
+          student_id: studentId,
+          pattern_check_id: null,
+          evaluation_status: 'outside_reference_range',
+          observed_at: { [Op.lte]: endAt },
+        },
+        attributes: ['milestone', 'coverage_n', 'observed_at', 'ood_reason', 'ood_outside_features', 'model_version'],
+        order: [['observed_at', 'DESC'], ['id', 'DESC']],
+        raw: true,
+      });
+      if (rejected) {
+        evaluationStatus = 'outside_reference_range';
+        referenceRangeEvaluation = {
+          milestone: rejected.milestone,
+          coverage: rejected.coverage_n,
+          observed_at: rejected.observed_at,
+          // The guard's own reason string and the feature name(s) that
+          // triggered it — copied verbatim, never interpreted or scored.
+          reason: rejected.ood_reason,
+          outside_features: rejected.ood_outside_features,
+          model_version: rejected.model_version,
+        };
+      } else {
+        evaluationStatus = 'not_reached';
+      }
+    } catch (err) {
+      logger.error('Letter motor evaluation read failed for periodic report', {
+        studentId, errorMessage: err.message,
+      });
+      evaluationStatus = 'unavailable';
+    }
+  }
+
+  const evidenceKeys = new Set(evidenceRows.map((r) => `${r.letter}|${r.case_type}`));
+  const firstMilestoneEvidenceCount = firstMilestone
+    ? firstMilestone.requiredPairs.filter((p) => evidenceKeys.has(`${p.letter}|${p.caseType}`)).length
+    : 0;
+  const totalReferenceEvidenceCount = evidenceRows.length;
 
   return {
+    // S2 — 'not_reached' | 'assigned' | 'outside_reference_range' |
+    // 'unavailable'. Surfaces MUST branch on this rather than inferring
+    // meaning from an absent state_code. Every pre-existing field below is
+    // unchanged, so an older client keeps working exactly as before.
+    evaluation_status: evaluationStatus,
+    reference_range_evaluation: referenceRangeEvaluation,
+    // Which route produced the CURRENT result — 'writing_check' (the primary,
+    // dedicated route) or 'legacy_milestone' (backward compatibility). Internal
+    // provenance: teacher surfaces show the result, not this label.
+    evaluation_source: latestWritingCheck ? 'writing_check' : (asOfEndRow ? 'legacy_milestone' : null),
+    // The state_code of the current result, whichever route produced it, so a
+    // surface never has to guess which of the two objects to read.
+    current_state_code: latestWritingCheck
+      ? (latestWritingCheck.state_code ?? null)
+      : (asOfEndRow ? asOfEndRow.state_code : null),
+    // Dedicated Writing Check route — never merged with milestone history.
+    writing_checks_during_period: writingChecksDuringPeriod,
+    latest_writing_check: latestWritingCheck,
     milestones_during_period: duringPeriod.map((m) => ({
       milestone: m.milestone, state_code: m.state_code, display_name: m.display_name,
       coverage: m.coverage_n, observed_at: m.observed_at,
@@ -297,8 +475,14 @@ async function buildLetterMotorDevelopmentSection({ studentId, startAt, endAt })
       coverage: asOfEndRow.coverage_n, observed_at: asOfEndRow.observed_at,
     } : null,
     reference_progress: {
-      evidence_letters: evidenceCount,
+      // Evidence held for the FIRST milestone's own required pairs only —
+      // this is the numerator the "N of the 14 needed" sentence means.
+      evidence_letters: firstMilestoneEvidenceCount,
       first_milestone_required: firstMilestone ? firstMilestone.coverageN : null,
+      // Every reference letter with frozen evidence, across all 20. Kept
+      // separate and separately named so no surface can mistake it for
+      // progress toward the first milestone.
+      total_reference_evidence_letters: totalReferenceEvidenceCount,
       reference_letter_total: getReferenceLetterCount(),
     },
   };
@@ -332,6 +516,115 @@ async function buildWordWritingSection({ studentId, startAt, endAt }) {
   };
 }
 
+
+// ── H. Home practice (homework worksheets) ───────────────────────────────
+// Teacher-directed SUPPORT MATERIAL. Nothing counted here affects mastery,
+// Motor Score, thresholds, sequencing, word unlock or the Letter Motor
+// Pattern — these are figures about paper practice.
+//
+// Two clearly separated kinds of value, never mixed:
+//   *_during_period          real event-timestamp filters (BETWEEN start/end)
+//   active_worksheet_as_of_end_date
+//                            the live worksheet as it stood ON the end date —
+//                            a worksheet generated AFTER the end date is never
+//                            shown, so a past report cannot leak a future
+//                            assignment into it.
+async function buildHomePracticeSection({ studentId, startAt, endAt }) {
+  const EMPTY = {
+    worksheets_assigned: 0,
+    worksheets_submitted: 0,
+    worksheets_reviewed: 0,
+    worksheets_during_period: [],
+    teacher_reviews_during_period: [],
+    active_worksheet_as_of_end_date: null,
+  };
+
+  try {
+    // Every worksheet that EXISTED by the end date. Generation date bounds the
+    // set; the per-event counts below use each event's own timestamp.
+    const worksheets = await HandwritingWorksheet.findAll({
+      where: { student_id: studentId, generated_at: { [Op.lte]: endAt } },
+      attributes: [
+        'id', 'worksheet_code', 'target_letter', 'case_type', 'worksheet_intensity',
+        'status', 'generated_at', 'assigned_at', 'completed_at',
+      ],
+      order: [['generated_at', 'ASC'], ['id', 'ASC']],
+      raw: true,
+    });
+    if (worksheets.length === 0) return { ...EMPTY };
+
+    const ids = worksheets.map((w) => w.id);
+    const submissions = await HandwritingWorksheetSubmission.findAll({
+      where: { worksheet_id: { [Op.in]: ids }, submitted_at: { [Op.lte]: endAt } },
+      attributes: ['id', 'worksheet_id', 'submitted_at', 'review_status', 'reviewed_at'],
+      order: [['submitted_at', 'ASC'], ['id', 'ASC']],
+      raw: true,
+    });
+
+    const inPeriod = (value) => {
+      if (!value) return false;
+      const t = new Date(value).getTime();
+      return Number.isFinite(t) && t >= startAt.getTime() && t <= endAt.getTime();
+    };
+
+    // A worksheet counts as "assigned during the period" on its assigned_at
+    // when it has one, otherwise on its generation date — the moment it
+    // actually became homework.
+    const assignedDuring = worksheets.filter((w) => inPeriod(w.assigned_at ?? w.generated_at));
+    const submittedDuring = submissions.filter((s) => inPeriod(s.submitted_at));
+    const reviewedDuring = submissions.filter(
+      (s) => s.review_status !== 'pending_review' && inPeriod(s.reviewed_at)
+    );
+
+    const byWorksheet = new Map(worksheets.map((w) => [w.id, w]));
+
+    // The live worksheet as of the end date. Reconstructed from timestamps
+    // rather than the row's CURRENT status, so a report for August does not
+    // inherit a September review.
+    const liveAsOfEnd = worksheets
+      .filter((w) => {
+        const assignedAt = w.assigned_at ?? w.generated_at;
+        if (!assignedAt || new Date(assignedAt).getTime() > endAt.getTime()) return false;
+        // Reviewed on or before the end date -> no longer live then.
+        const review = submissions.find(
+          (s) => s.worksheet_id === w.id && s.review_status !== 'pending_review'
+            && s.reviewed_at && new Date(s.reviewed_at).getTime() <= endAt.getTime()
+        );
+        return !review;
+      })
+      .pop() ?? null;
+
+    const serializeWorksheet = (w) => ({
+      worksheet_code: w.worksheet_code,
+      target_letter: w.target_letter,
+      case_type: w.case_type,
+      worksheet_intensity: w.worksheet_intensity,
+      status: w.status,
+      assigned_at: w.assigned_at ?? w.generated_at,
+    });
+
+    return {
+      worksheets_assigned: assignedDuring.length,
+      worksheets_submitted: submittedDuring.length,
+      worksheets_reviewed: reviewedDuring.length,
+      worksheets_during_period: assignedDuring.map(serializeWorksheet),
+      // Short outcome only — a full teacher comment is not carried into the
+      // periodic report, and a scanned image never is.
+      teacher_reviews_during_period: reviewedDuring.map((s) => ({
+        target_letter: byWorksheet.get(s.worksheet_id)?.target_letter ?? null,
+        review_status: s.review_status,
+        reviewed_at: s.reviewed_at,
+      })),
+      active_worksheet_as_of_end_date: liveAsOfEnd ? serializeWorksheet(liveAsOfEnd) : null,
+    };
+  } catch (err) {
+    logger.error('Home practice read failed for periodic report', {
+      studentId, errorMessage: err.message,
+    });
+    return { ...EMPTY };
+  }
+}
+
 // ── I. Short teacher-friendly summary (neutral language, spec §10) ──────
 function buildSummaryText({ hasAnyActivity, learning, wordWriting, letterMotor }) {
   if (!hasAnyActivity) {
@@ -359,7 +652,7 @@ function buildSummaryText({ hasAnyActivity, learning, wordWriting, letterMotor }
  * @returns {Promise<Object>} the full structured periodic report.
  */
 async function buildPeriodicReport({ studentId, teacherId, startAt, endAt, startDate, endDate }) {
-  const [student, teacher, learning, motorPerformance, support, initialProfile, letterMotor, wordWriting] = await Promise.all([
+  const [student, teacher, learning, motorPerformance, support, initialProfile, letterMotor, wordWriting, homePractice] = await Promise.all([
     Student.findByPk(studentId, { attributes: ['sid', 'full_name', 'student_code'] }),
     Teacher.findByPk(teacherId, { attributes: ['full_name'] }),
     buildLearningProgressSection({ studentId, startAt, endAt }),
@@ -368,6 +661,7 @@ async function buildPeriodicReport({ studentId, teacherId, startAt, endAt, start
     buildInitialMotorProfileSection({ studentId }),
     buildLetterMotorDevelopmentSection({ studentId, startAt, endAt }),
     buildWordWritingSection({ studentId, startAt, endAt }),
+    buildHomePracticeSection({ studentId, startAt, endAt }),
   ]);
 
   const hasAnyActivity = motorPerformance.attempts_in_period > 0
@@ -389,6 +683,7 @@ async function buildPeriodicReport({ studentId, teacherId, startAt, endAt, start
     initial_shape_motor_profile: initialProfile,
     letter_motor_development: letterMotor,
     word_writing: wordWriting,
+    home_practice: homePractice,
     has_activity_in_period: hasAnyActivity,
     summary_text: buildSummaryText({ hasAnyActivity, learning, wordWriting, letterMotor }),
   };

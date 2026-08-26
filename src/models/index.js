@@ -27,6 +27,10 @@ const WordWritingAttempt              = require('./WordWritingAttempt');
 const WordActivityProgress            = require('./WordActivityProgress');
 const LetterMotorMasteryEvidence       = require('./LetterMotorMasteryEvidence');
 const LetterMotorStateHistory          = require('./LetterMotorStateHistory');
+const LetterMotorStateEvaluation       = require('./LetterMotorStateEvaluation');
+const LetterMotorPatternCheck          = require('./LetterMotorPatternCheck');
+const HandwritingWorksheet             = require('./HandwritingWorksheet');
+const HandwritingWorksheetSubmission   = require('./HandwritingWorksheetSubmission');
 // Proposal FR-16, Phase 7B — current live-session snapshot (see
 // src/services/liveSessionService.js). One row per student.
 const StudentLiveHandwritingSession    = require('./StudentLiveHandwritingSession');
@@ -163,6 +167,22 @@ LetterMotorMasteryEvidence.belongsTo(Student, { foreignKey: 'student_id', as: 's
 Student.hasMany(LetterMotorStateHistory, { foreignKey: 'student_id', as: 'letterMotorStateHistory' });
 LetterMotorStateHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Feature 11B S2 — Student -> LetterMotorStateEvaluation (append-only,
+// immutable milestone-evaluation events, including reference-range
+// rejections — see src/models/LetterMotorStateEvaluation.js).
+Student.hasMany(LetterMotorStateEvaluation, { foreignKey: 'student_id', as: 'letterMotorStateEvaluations' });
+LetterMotorStateEvaluation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Writing Check sessions (descriptive assessment only - never mastery).
+Student.hasMany(LetterMotorPatternCheck, { foreignKey: 'student_id', as: 'letterMotorPatternChecks' });
+LetterMotorPatternCheck.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Homework worksheets - teacher-directed support material, never mastery.
+Student.hasMany(HandwritingWorksheet, { foreignKey: 'student_id', as: 'handwritingWorksheets' });
+HandwritingWorksheet.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+HandwritingWorksheet.hasMany(HandwritingWorksheetSubmission, { foreignKey: 'worksheet_id', as: 'submissions' });
+HandwritingWorksheetSubmission.belongsTo(HandwritingWorksheet, { foreignKey: 'worksheet_id', as: 'worksheet' });
+
 // Proposal FR-16, Phase 7B — Student ↔ StudentLiveHandwritingSession
 // (one-to-one: student_id is the live-session table's own primary key).
 Student.hasOne(StudentLiveHandwritingSession, { foreignKey: 'student_id', as: 'liveHandwritingSession' });
@@ -176,6 +196,8 @@ module.exports = {
   TeacherRecommendationValidation,
   StudentConceptProgress, ConceptInteractionLog, StudentActivity,
   WordWritingAttempt, WordActivityProgress,
-  LetterMotorMasteryEvidence, LetterMotorStateHistory,
+  LetterMotorMasteryEvidence, LetterMotorStateHistory, LetterMotorStateEvaluation,
+  LetterMotorPatternCheck,
+  HandwritingWorksheet, HandwritingWorksheetSubmission,
   StudentLiveHandwritingSession,
 };

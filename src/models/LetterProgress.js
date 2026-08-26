@@ -21,9 +21,28 @@ const LetterProgress = sequelize.define('LetterProgress', {
     type: DataTypes.ENUM('lowercase', 'uppercase'),
     allowNull: false,
   },
+  // LEGACY. Stamped at row CREATION, which the failure branch of
+  // recordLetterCompletion() also performs — so on a row born from a failure
+  // this is the failure instant, not a mastery instant. Live audit found 19
+  // rows where it precedes the real passing session by 17-95 days. Kept
+  // untouched for historical continuity; never read as a mastery signal.
+  // Use mastered_at below for that.
   completed_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
+  },
+  // Mastery-semantics correction — see
+  // migrations/20260826000002-add-mastered-at-to-letter-progress.js.
+  //
+  //   NOT NULL -> this letter is MASTERED, at that instant
+  //   NULL     -> practice/blocked history only, NOT mastered
+  //
+  // Row existence means nothing about mastery: the failure branch creates
+  // rows purely to hold blocked_attempts. Every mastery reader must test
+  // this column, never the row's presence.
+  mastered_at: {
+    type:      DataTypes.DATE,
+    allowNull: true,
   },
   blocked_attempts: {
     type:         DataTypes.INTEGER,

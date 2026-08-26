@@ -23,6 +23,7 @@
  * AsyncStorage state.
  */
 
+const { Op } = require('sequelize');
 const { LetterProgress } = require('../models');
 const { ALL_CATEGORY_KEYS, getCategoryLetters } = require('../config/letterLearningCategories');
 const logger = require('../utils/logger');
@@ -50,8 +51,16 @@ async function isCategoryComplete({ studentId, caseType, category }) {
   }
 
   try {
+    // Mastery-semantics correction: a letter_progress row means the child
+    // has PRACTISED this letter, not that they mastered it - the failure
+    // branch of recordLetterCompletion() creates rows purely to hold
+    // blocked_attempts. Category completion must count only real mastery,
+    // so this filters on mastered_at rather than row existence.
     const rows = await LetterProgress.findAll({
-      where: { student_id: studentId, case_type: caseType, letter: letters },
+      where: {
+        student_id: studentId, case_type: caseType, letter: letters,
+        mastered_at: { [Op.ne]: null },
+      },
       attributes: ['letter'],
       raw: true,
     });
@@ -114,8 +123,12 @@ async function getMasteredLetterPairs({ studentId }) {
     return { status: 'invalid_input', pairs: [] };
   }
   try {
+    // Mastery-semantics correction: MASTERED pairs only. This feeds the
+    // frontend resume/skip filter, so including a merely-attempted row here
+    // removed a FAILED letter from the child's practice sequence and they
+    // never saw it again (5 such rows existed in live data).
     const rows = await LetterProgress.findAll({
-      where: { student_id: studentId },
+      where: { student_id: studentId, mastered_at: { [Op.ne]: null } },
       attributes: ['letter', 'case_type'],
       raw: true,
     });

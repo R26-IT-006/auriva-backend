@@ -11,6 +11,10 @@ const mockLmeCreate  = jest.fn();
 const mockLshFindOne = jest.fn();
 const mockLshFindAll = jest.fn();
 const mockLshCreate  = jest.fn();
+// S2 — letter_motor_state_evaluations
+const mockLseFindOne = jest.fn();
+const mockLseFindAll = jest.fn();
+const mockLseCreate  = jest.fn();
 const mockPredict    = jest.fn();
 
 jest.mock('../src/models', () => ({
@@ -25,6 +29,11 @@ jest.mock('../src/models', () => ({
     findAll: (...a) => mockLshFindAll(...a),
     create:  (...a) => mockLshCreate(...a),
   },
+  LetterMotorStateEvaluation: {
+    findOne: (...a) => mockLseFindOne(...a),
+    findAll: (...a) => mockLseFindAll(...a),
+    create:  (...a) => mockLseCreate(...a),
+  },
 }));
 
 jest.mock('../src/services/mlServiceClient', () => ({
@@ -33,6 +42,7 @@ jest.mock('../src/services/mlServiceClient', () => ({
 
 const {
   validateEvidenceEligibility, onLetterMastered, checkAndTriggerMilestones,
+  latestRequiredEvidenceObservedAt,
   getLatestLetterMotorState, getLetterMotorStateHistory, getMasteryEvidenceTrend,
 } = require('../src/services/letterMotorMasteryService');
 const { MILESTONES, MILESTONE_UPPERCASE_STRAIGHT_14, MILESTONE_UPPERCASE_CURVED_17, MILESTONE_FULL_REFERENCE_20 } = require('../src/config/letterMotorMilestones');
@@ -40,7 +50,14 @@ const { MILESTONES, MILESTONE_UPPERCASE_STRAIGHT_14, MILESTONE_UPPERCASE_CURVED_
 const STUDENT_ID = 9;
 const SESSION_KEY = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  // S2 defaults: no prior evaluation, and evaluation writes succeed. Tests
+  // that care override these.
+  mockLseFindOne.mockResolvedValue(null);
+  mockLseFindAll.mockResolvedValue([]);
+  mockLseCreate.mockImplementation(async (payload) => ({ id: 900, ...payload }));
+});
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -61,11 +78,18 @@ function eligibleAttemptRow(overrides = {}) {
   };
 }
 
+// mastered_at ascends with the index, one day apart from EVIDENCE_EPOCH, so
+// "the latest mastered_at among these rows" is deterministic and easy to
+// assert against in the observed_at tests below.
+const EVIDENCE_EPOCH = Date.parse('2026-01-01T00:00:00.000Z');
+const EVIDENCE_STEP_MS = 24 * 60 * 60 * 1000;
+
 function evidenceRowFor(letter, caseType, i = 0, versionOverrides = {}) {
   return {
     id: i + 1, student_id: STUDENT_ID, letter, case_type: caseType,
     smoothness_score: 50 + i, dtw_distance: 10 + i * 0.5, speed_cv: 0.2 + i * 0.01,
     support_level: 'low',
+    mastered_at: new Date(EVIDENCE_EPOCH + i * EVIDENCE_STEP_MS),
     feature_version: 'v1', template_version: 'v1', normalization_version: 'dtw_norm_v1',
     ...versionOverrides,
   };
@@ -281,6 +305,347 @@ describe('checkAndTriggerMilestones', () => {
     const createArgs = mockLshCreate.mock.calls[0][0];
     expect(createArgs.milestone).toBe(MILESTONE_UPPERCASE_STRAIGHT_14);
     expect(createArgs.coverage_n).toBe(14);
+  });
+
+  // ─── S2 — persisted evaluation events ─────────────────────────────────────
+
+  const OOD_PREDICTION = {
+    status: 'outside_reference_range',
+    pattern: null, cluster_id: null, state_code: null, display_name: null, description: null,
+    model_version: 'letter_motor_cluster_v1',
+    features: { smoothness_score: 80, dtw_distance: 31.5, speed_cv: 0.6 },
+    ood: {
+      is_outside_reference_range: true,
+      method: 'standardized_feature_bound_and_centroid_distance_bound_v1',
+      observed_distance: 5.1, threshold: 2.87,
+      observed_max_abs_z: 5.1, feature_threshold: 2.449489742783178,
+      outside_features: ['dtw_distance'],
+      triggered_by: ['feature:dtw_distance', 'distance'],
+      reason: 'dtw_distance_outside_reference_range',
+      standardized_values: { smoothness_score: -0.2, dtw_distance: 5.1, speed_cv: -1.4 },
+    },
+    nearest_distance: 5.1, second_nearest_distance: 6.0, separation_margin: 0.9,
+  };
+
+  it('S2 — an outside-reference-range evaluation is PERSISTED, with the guard diagnostics verbatim', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(OOD_PREDICTION);
+
+    const results = await checkAndTriggerMilestones(params);
+    const first = results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14);
+    expect(first.status).toBe('outside_reference_range');
+
+    expect(mockLseCreate).toHaveBeenCalledTimes(1);
+    const payload = mockLseCreate.mock.calls[0][0];
+    expect(payload.evaluation_status).toBe('outside_reference_range');
+    expect(payload.inside_reference_range).toBe(false);
+    expect(payload.milestone).toBe(MILESTONE_UPPERCASE_STRAIGHT_14);
+    expect(payload.coverage_n).toBe(14);
+    expect(payload.evidence_row_count).toBe(14);
+    expect(payload.model_version).toBe('letter_motor_cluster_v1');
+    // Copied verbatim from the ML service, never recomputed here.
+    expect(payload.ood_reason).toBe('dtw_distance_outside_reference_range');
+    expect(payload.ood_outside_features).toEqual(['dtw_distance']);
+    expect(payload.ood_triggered_by).toEqual(['feature:dtw_distance', 'distance']);
+    expect(payload.ood_detail).toEqual(OOD_PREDICTION.ood);
+  });
+
+  it('S2 — an outside-reference-range evaluation creates NO pattern/cluster assignment anywhere', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(OOD_PREDICTION);
+
+    await checkAndTriggerMilestones(params);
+
+    // No state-history row at all.
+    expect(mockLshCreate).not.toHaveBeenCalled();
+    // And the evaluation row carries no cluster/state field of any kind.
+    const payload = mockLseCreate.mock.calls[0][0];
+    for (const forbidden of ['cluster_id', 'state_code', 'display_name', 'pattern']) {
+      expect(payload).not.toHaveProperty(forbidden);
+    }
+    expect(JSON.stringify(payload)).not.toMatch(/LETTER_STATE_[AB]|PATTERN_C/);
+  });
+
+  it('S2 — the persisted OOD evaluation carries the exact aggregate vector that was evaluated', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(OOD_PREDICTION);
+
+    await checkAndTriggerMilestones(params);
+    const sent = mockPredict.mock.calls[0][0];
+    const payload = mockLseCreate.mock.calls[0][0];
+    expect(payload.smoothness_score).toBe(sent.smoothnessScore);
+    expect(payload.dtw_distance).toBe(sent.dtwDistance);
+    expect(payload.speed_cv).toBe(sent.speedCv);
+  });
+
+  it('S2 — an already-evaluated milestone is never re-sent to the model', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockLseFindOne.mockImplementation(async ({ where }) =>
+      where.milestone === MILESTONE_UPPERCASE_STRAIGHT_14
+        ? { id: 1, milestone: MILESTONE_UPPERCASE_STRAIGHT_14, evaluation_status: 'outside_reference_range' }
+        : null
+    );
+
+    const results = await checkAndTriggerMilestones(params);
+    const first = results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14);
+
+    expect(first.status).toBe('already_evaluated');
+    expect(first.evaluationStatus).toBe('outside_reference_range');
+    expect(mockPredict).not.toHaveBeenCalled();
+    expect(mockLseCreate).not.toHaveBeenCalled();
+    expect(mockLshCreate).not.toHaveBeenCalled();
+  });
+
+  it('S2 — a later milestone is still evaluated normally after an earlier one was rejected', async () => {
+    // The 14 milestone was already rejected; the student now has all 20.
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(TWENTY_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockLseFindOne.mockImplementation(async ({ where }) =>
+      where.milestone === MILESTONE_UPPERCASE_STRAIGHT_14
+        ? { id: 1, milestone: MILESTONE_UPPERCASE_STRAIGHT_14, evaluation_status: 'outside_reference_range' }
+        : null
+    );
+    mockPredict.mockResolvedValue(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValue({ id: 2, observed_at: new Date() });
+
+    const results = await checkAndTriggerMilestones(params);
+    const byCode = Object.fromEntries(results.map(r => [r.milestone, r.status]));
+
+    expect(byCode[MILESTONE_UPPERCASE_STRAIGHT_14]).toBe('already_evaluated');
+    expect(byCode[MILESTONE_UPPERCASE_CURVED_17]).toBe('recorded');
+    expect(byCode[MILESTONE_FULL_REFERENCE_20]).toBe('recorded');
+    expect(mockPredict).toHaveBeenCalledTimes(2);
+  });
+
+  it('S2 — an assigned pattern writes BOTH the history row and a matching evaluation event', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    const observedAt = new Date('2026-05-05T00:00:00.000Z');
+    mockLshCreate.mockResolvedValueOnce({ id: 1, observed_at: observedAt, ...PREDICTION_FIXTURE });
+
+    const results = await checkAndTriggerMilestones(params);
+    expect(results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14).status).toBe('recorded');
+
+    expect(mockLshCreate).toHaveBeenCalledTimes(1);
+    expect(mockLseCreate).toHaveBeenCalledTimes(1);
+    const payload = mockLseCreate.mock.calls[0][0];
+    expect(payload.evaluation_status).toBe('assigned');
+    expect(payload.inside_reference_range).toBe(true);
+    // Both records describe the SAME event at the SAME instant.
+    expect(payload.observed_at).toEqual(observedAt);
+  });
+
+  it('S2 — a failed evaluation write never downgrades a successful pattern assignment', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1, observed_at: new Date(), ...PREDICTION_FIXTURE });
+    mockLseCreate.mockRejectedValueOnce(new Error('evaluations table unavailable'));
+
+    const results = await checkAndTriggerMilestones(params);
+    expect(results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14).status).toBe('recorded');
+  });
+
+  it('S2 — a unique-constraint race on the evaluation write resolves to the existing row', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(OOD_PREDICTION);
+    const raceError = new Error('duplicate'); raceError.name = 'SequelizeUniqueConstraintError';
+    mockLseCreate.mockRejectedValueOnce(raceError);
+    mockLseFindOne
+      .mockResolvedValueOnce(null)                                        // the pre-check
+      .mockResolvedValueOnce({ id: 77, evaluation_status: 'outside_reference_range' }); // the race re-fetch
+
+    const results = await checkAndTriggerMilestones(params);
+    const first = results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14);
+    expect(first.status).toBe('outside_reference_range');
+    expect(first.evaluation.id).toBe(77);
+  });
+
+  it('S2 — a transient ML failure persists NOTHING, so a later retry is still possible', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+    const results = await checkAndTriggerMilestones(params);
+    expect(results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14).status).toBe('ml_service_unavailable');
+    expect(mockLseCreate).not.toHaveBeenCalled();
+    expect(mockLshCreate).not.toHaveBeenCalled();
+  });
+
+  it('S2 — a version mismatch persists NOTHING and never reaches the model', async () => {
+    const rows = evidenceRowsFor(FOURTEEN_SET);
+    rows[3].feature_version = 'v2';
+    mockLmeFindAll.mockResolvedValueOnce(rows);
+    mockLshFindOne.mockResolvedValue(null);
+
+    const results = await checkAndTriggerMilestones(params);
+    expect(results.find(r => r.milestone === MILESTONE_UPPERCASE_STRAIGHT_14).status).toBe('version_mismatch');
+    expect(mockPredict).not.toHaveBeenCalled();
+    expect(mockLseCreate).not.toHaveBeenCalled();
+  });
+
+  it('S2 — a not-yet-eligible milestone persists no evaluation event', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET.slice(0, 10)));
+    mockLshFindOne.mockResolvedValue(null);
+
+    const results = await checkAndTriggerMilestones(params);
+    expect(results.every(r => r.status === 'not_yet_eligible')).toBe(true);
+    expect(mockLseCreate).not.toHaveBeenCalled();
+  });
+
+  it('S2 — the model input is byte-identical to what it was before S2', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1, observed_at: new Date() });
+
+    await checkAndTriggerMilestones(params);
+
+    // Exactly three keys, exactly the frozen model's feature contract.
+    const sent = mockPredict.mock.calls[0][0];
+    expect(Object.keys(sent).sort()).toEqual(['dtwDistance', 'smoothnessScore', 'speedCv']);
+    const rows = evidenceRowsFor(FOURTEEN_SET);
+    const avg = (f) => rows.reduce((s, r) => s + r[f], 0) / rows.length;
+    expect(sent.smoothnessScore).toBeCloseTo(avg('smoothness_score'), 12);
+    expect(sent.dtwDistance).toBeCloseTo(avg('dtw_distance'), 12);
+    expect(sent.speedCv).toBeCloseTo(avg('speed_cv'), 12);
+  });
+
+  it('S2 — a historical observedAt still applies to a rejected evaluation', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(OOD_PREDICTION);
+
+    await checkAndTriggerMilestones({ ...params, observedAt: latestRequiredEvidenceObservedAt });
+    expect(mockLseCreate.mock.calls[0][0].observed_at).toEqual(
+      new Date(EVIDENCE_EPOCH + 13 * EVIDENCE_STEP_MS)
+    );
+  });
+
+  // ─── S1 — observed_at resolution ──────────────────────────────────────────
+
+  it('S1 — observed_at defaults to the current time for a live mastery (unchanged behaviour)', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1 });
+
+    const before = Date.now();
+    await checkAndTriggerMilestones(params);
+    const after = Date.now();
+
+    const observedAt = mockLshCreate.mock.calls[0][0].observed_at;
+    expect(observedAt).toBeInstanceOf(Date);
+    expect(observedAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(observedAt.getTime()).toBeLessThanOrEqual(after);
+  });
+
+  it('S1 — a historical caller gets max(mastered_at) over that milestone\'s REQUIRED pairs', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1 });
+
+    await checkAndTriggerMilestones({ ...params, observedAt: latestRequiredEvidenceObservedAt });
+
+    // 14 rows, indices 0..13 — the latest is index 13.
+    const expected = new Date(EVIDENCE_EPOCH + 13 * EVIDENCE_STEP_MS);
+    expect(mockLshCreate.mock.calls[0][0].observed_at).toEqual(expected);
+  });
+
+  it('S1 — a NON-required later evidence row never pushes the 14 milestone forward', async () => {
+    // The full 14-set, plus one uppercase-curved reference letter mastered
+    // much later. It is real evidence, but it is not part of the 14
+    // milestone's required set, so it must not become that milestone's
+    // observed_at.
+    const rows = [
+      ...evidenceRowsFor(FOURTEEN_SET),
+      { ...evidenceRowFor('C', 'uppercase', 99), mastered_at: new Date(EVIDENCE_EPOCH + 900 * EVIDENCE_STEP_MS) },
+    ];
+    mockLmeFindAll.mockResolvedValueOnce(rows);
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1 });
+
+    await checkAndTriggerMilestones({ ...params, observedAt: latestRequiredEvidenceObservedAt });
+
+    const expected = new Date(EVIDENCE_EPOCH + 13 * EVIDENCE_STEP_MS);
+    expect(mockLshCreate.mock.calls[0][0].observed_at).toEqual(expected);
+  });
+
+  it('S1 — each milestone gets its OWN required-pair timestamp, not one shared value', async () => {
+    // A full 20-set: the 14 milestone must stamp the latest of ITS 14, and
+    // the 20 milestone the latest of all 20.
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(TWENTY_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValue(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValue({ id: 1 });
+
+    await checkAndTriggerMilestones({ ...params, observedAt: latestRequiredEvidenceObservedAt });
+
+    const byMilestone = Object.fromEntries(
+      mockLshCreate.mock.calls.map(([args]) => [args.milestone, args.observed_at])
+    );
+    expect(byMilestone[MILESTONE_UPPERCASE_STRAIGHT_14]).toEqual(new Date(EVIDENCE_EPOCH + 13 * EVIDENCE_STEP_MS));
+    expect(byMilestone[MILESTONE_UPPERCASE_CURVED_17]).toEqual(new Date(EVIDENCE_EPOCH + 16 * EVIDENCE_STEP_MS));
+    expect(byMilestone[MILESTONE_FULL_REFERENCE_20]).toEqual(new Date(EVIDENCE_EPOCH + 19 * EVIDENCE_STEP_MS));
+  });
+
+  it('S1 — an explicit Date is used verbatim', async () => {
+    const fixed = new Date('2025-06-01T12:00:00.000Z');
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1 });
+
+    await checkAndTriggerMilestones({ ...params, observedAt: fixed });
+    expect(mockLshCreate.mock.calls[0][0].observed_at).toEqual(fixed);
+  });
+
+  it('S1 — an unusable resolved value falls back to now, never an Invalid Date', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1 });
+
+    await checkAndTriggerMilestones({ ...params, observedAt: () => 'not a date' });
+
+    const observedAt = mockLshCreate.mock.calls[0][0].observed_at;
+    expect(observedAt).toBeInstanceOf(Date);
+    expect(Number.isFinite(observedAt.getTime())).toBe(true);
+  });
+
+  it('S1 — observed_at never affects the model input or the persisted feature values', async () => {
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1 });
+    await checkAndTriggerMilestones({ ...params, observedAt: latestRequiredEvidenceObservedAt });
+    const historicalVector = mockPredict.mock.calls[0][0];
+    const historicalCreate = mockLshCreate.mock.calls[0][0];
+
+    jest.clearAllMocks();
+
+    mockLmeFindAll.mockResolvedValueOnce(evidenceRowsFor(FOURTEEN_SET));
+    mockLshFindOne.mockResolvedValue(null);
+    mockPredict.mockResolvedValueOnce(PREDICTION_FIXTURE);
+    mockLshCreate.mockResolvedValueOnce({ id: 1 });
+    await checkAndTriggerMilestones(params);
+    const liveVector = mockPredict.mock.calls[0][0];
+    const liveCreate = mockLshCreate.mock.calls[0][0];
+
+    expect(historicalVector).toEqual(liveVector);
+    expect(historicalCreate.smoothness_score).toEqual(liveCreate.smoothness_score);
+    expect(historicalCreate.dtw_distance).toEqual(liveCreate.dtw_distance);
+    expect(historicalCreate.speed_cv).toEqual(liveCreate.speed_cv);
+    expect(historicalCreate.cluster_id).toEqual(liveCreate.cluster_id);
+    expect(historicalCreate.state_code).toEqual(liveCreate.state_code);
   });
 
   it('Scenario — 14 evidence rows that are NOT the exact required set never qualify (wrong composition)', async () => {

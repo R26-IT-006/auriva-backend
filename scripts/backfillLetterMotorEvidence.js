@@ -51,11 +51,14 @@
 
 require('dotenv').config({ quiet: true });
 
+const { Op } = require('sequelize');
 const db = require('../src/models');
 const { LetterMotorMasteryEvidence } = db;
 const { classifyLetter } = require('./auditLetterMotorBackfill');
 const { isReferenceLetter } = require('../src/config/letterMotorReferenceLetters');
-const { checkAndTriggerMilestones } = require('../src/services/letterMotorMasteryService');
+const {
+  checkAndTriggerMilestones, latestRequiredEvidenceObservedAt,
+} = require('../src/services/letterMotorMasteryService');
 
 /**
  * Builds the evidence payload for one approved attempt row. Pure — every
@@ -96,8 +99,13 @@ async function backfill({ commit = false } = {}) {
   let blocked = 0;
 
   for (const s of students) {
+    // Mastery-semantics correction: only MASTERED letters can be a source
+    // of Feature 11B evidence. A letter_progress row alone does not mean
+    // mastery - the failure branch creates rows to hold blocked_attempts -
+    // so a never-passed letter must never be considered here.
     const progress = await LetterProgress.findAll({
-      where: { student_id: s.sid }, attributes: ['letter', 'case_type'], raw: true,
+      where: { student_id: s.sid, mastered_at: { [Op.ne]: null } },
+      attributes: ['letter', 'case_type'], raw: true,
     });
     const referenceMastered = progress.filter(p => isReferenceLetter(p.letter, p.case_type));
     if (referenceMastered.length === 0) continue;
@@ -160,9 +168,20 @@ async function backfill({ commit = false } = {}) {
     // returns 'not_yet_eligible' unless a milestone's exact required pair
     // set is now complete — so a student below the first milestone gets no
     // history row and no model call at all.
+    //
+    // observed_at is derived historically, never stamped with the run time:
+    // latestRequiredEvidenceObservedAt() returns the latest `mastered_at`
+    // among THAT milestone's own required evidence rows — the instant the
+    // milestone actually became true. Each of those timestamps is itself a
+    // real recorded `letter_attempts.created_at`, copied unchanged by
+    // buildEvidencePayload() above. Nothing is reconstructed, and no source
+    // attempt or evidence row is modified.
     let milestoneResults = null;
     if (commit && perLetter.some(l => l.action === 'created')) {
-      milestoneResults = await checkAndTriggerMilestones({ studentId: s.sid });
+      milestoneResults = await checkAndTriggerMilestones({
+        studentId: s.sid,
+        observedAt: latestRequiredEvidenceObservedAt,
+      });
     }
 
     results.push({ sid: s.sid, name: s.full_name, perLetter, milestoneResults });

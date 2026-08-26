@@ -335,6 +335,150 @@ describe('Test 38 — replacement older cycles used where appropriate', () => {
   });
 });
 
+// ─── Window SELECTION — trailing-burst regression (C1) ─────────────────────
+//
+// Reproduces the live student-10 shape: months of well-separated practice
+// whose most recent cycles land in a single sitting. Before the fix,
+// splitLongitudinalWindows() considered only the newest 10 usable cycles, so
+// the earlier/recent boundary fell inside that sitting and the 24h rule could
+// never be satisfied — reported as insufficient_temporal_dispersion despite
+// dozens of separated cycles.
+
+const MIN_ID = 5; // WINDOW_SIZE, restated locally to keep these tests self-describing
+
+/** N cycles spaced `stepMs` apart, starting at `startMs`. */
+function burst(startMs, count, { stepMs = 15_000, outcome = 'success' } = {}) {
+  return Array.from({ length: count }, (_, i) => usableCycle(startMs + i * stepMs, outcome));
+}
+
+describe('C1 Test A — trailing burst no longer defeats the separation rule', () => {
+  it('selects an older, genuinely separated window instead of reporting insufficient dispersion', () => {
+    // 10 well-separated cycles (one per day), then 6 more in one sitting.
+    const cycles = [
+      ...Array.from({ length: 10 }, (_, i) => usableCycle(i * DAY_MS)),
+      ...burst(20 * DAY_MS, 6),
+    ];
+    const result = splitLongitudinalWindows(cycles);
+
+    expect(result.status).toBe('ok');
+    expect(result.separationSatisfied).toBe(true);
+    expect(result.earlierWindow).toHaveLength(MIN_ID);
+    expect(result.recentWindow).toHaveLength(MIN_ID);
+
+    // The selected boundary must clear the real 24h rule.
+    const sep = evaluateTemporalSeparation({
+      earlierWindow: result.earlierWindow, recentWindow: result.recentWindow,
+    });
+    expect(sep.meetsMinimum).toBe(true);
+    expect(sep.separationMs).toBeGreaterThanOrEqual(MIN_WINDOW_SEPARATION_MS);
+
+    // And the full decision is a real verdict, not insufficient_data.
+    const decision = evaluatePersistentDifficultyWindows({
+      earlierWindow: result.earlierWindow, recentWindow: result.recentWindow,
+    });
+    expect(decision.status).not.toBe(PERSISTENT_DIFFICULTY_STATUSES.INSUFFICIENT_DATA);
+  });
+
+  it('reports how many newer usable cycles were skipped to reach that window', () => {
+    const cycles = [
+      ...Array.from({ length: 10 }, (_, i) => usableCycle(i * DAY_MS)),
+      ...burst(20 * DAY_MS, 6),
+    ];
+    const result = splitLongitudinalWindows(cycles);
+    expect(result.cyclesNewerThanWindow).toBeGreaterThan(0);
+  });
+});
+
+describe('C1 Test B — newest-data preference is preserved', () => {
+  it('when the newest 10 are already separated, exactly those 10 are used', () => {
+    const cycles = Array.from({ length: 14 }, (_, i) => usableCycle(i * DAY_MS));
+    const result = splitLongitudinalWindows(cycles);
+
+    expect(result.separationSatisfied).toBe(true);
+    expect(result.cyclesNewerThanWindow).toBe(0);
+    // The newest cycle must be present, and the 4 oldest absent.
+    const used = [...result.earlierWindow, ...result.recentWindow];
+    expect(used.some((c) => c.createdAt === iso(0, 13 * DAY_MS))).toBe(true);
+    expect(used.some((c) => c.createdAt === iso(0, 3 * DAY_MS))).toBe(false);
+  });
+
+  it('picks the MOST RECENT separated window when several qualify', () => {
+    // 20 day-spaced cycles: many candidate windows qualify; the newest wins.
+    const cycles = Array.from({ length: 20 }, (_, i) => usableCycle(i * DAY_MS));
+    const result = splitLongitudinalWindows(cycles);
+    expect(result.cyclesNewerThanWindow).toBe(0);
+    expect(result.recentWindow[result.recentWindow.length - 1].createdAt).toBe(iso(0, 19 * DAY_MS));
+  });
+});
+
+describe('C1 Test C — genuinely undispersed history is unchanged', () => {
+  it('a stream that is one single sitting still reports insufficient_temporal_dispersion', () => {
+    const cycles = burst(0, 13);
+    const result = splitLongitudinalWindows(cycles);
+
+    // Still 'ok' with the newest 10 — the previous behaviour exactly, so the
+    // decision function produces the same status/reason it always did.
+    expect(result.status).toBe('ok');
+    expect(result.separationSatisfied).toBe(false);
+    expect(result.cyclesNewerThanWindow).toBe(0);
+
+    const decision = evaluatePersistentDifficultyWindows({
+      earlierWindow: result.earlierWindow, recentWindow: result.recentWindow,
+    });
+    expect(decision.status).toBe(PERSISTENT_DIFFICULTY_STATUSES.INSUFFICIENT_DATA);
+    expect(decision.reason).toBe(PERSISTENT_DIFFICULTY_REASONS.INSUFFICIENT_TEMPORAL_DISPERSION);
+    expect(decision.separationMs).toBeLessThan(MIN_WINDOW_SEPARATION_MS);
+  });
+});
+
+describe('C1 Test D — window invariants hold for a scanned-back selection', () => {
+  it('windows stay non-overlapping, complete, and chronologically ordered', () => {
+    const cycles = [
+      ...Array.from({ length: 10 }, (_, i) => usableCycle(i * DAY_MS)),
+      ...burst(20 * DAY_MS, 8),
+    ];
+    const result = splitLongitudinalWindows(cycles);
+
+    expect(result.earlierWindow).toHaveLength(MIN_ID);
+    expect(result.recentWindow).toHaveLength(MIN_ID);
+
+    const earlierSet = new Set(result.earlierWindow.map((c) => c.createdAt));
+    expect(result.recentWindow.filter((c) => earlierSet.has(c.createdAt))).toHaveLength(0);
+
+    const maxEarlier = Math.max(...result.earlierWindow.map((c) => new Date(c.createdAt).getTime()));
+    const minRecent = Math.min(...result.recentWindow.map((c) => new Date(c.createdAt).getTime()));
+    expect(maxEarlier).toBeLessThan(minRecent);
+  });
+
+  it('still never uses an unknown-outcome cycle', () => {
+    const cycles = [
+      ...Array.from({ length: 10 }, (_, i) => usableCycle(i * DAY_MS)),
+      { letter: 'c', outcome: 'unknown', createdAt: iso(0, 15 * DAY_MS) },
+      ...burst(20 * DAY_MS, 6),
+    ];
+    const result = splitLongitudinalWindows(cycles);
+    const outcomes = [...result.earlierWindow, ...result.recentWindow].map((c) => c.outcome);
+    expect(outcomes).not.toContain('unknown');
+    expect(result.unknownCount).toBe(1);
+  });
+});
+
+describe('C1 Test E — the separation threshold itself is untouched', () => {
+  it('a boundary just under 24h is still rejected, just over is still accepted', () => {
+    const justUnder = [
+      ...Array.from({ length: 5 }, (_, i) => usableCycle(i * 1000)),
+      ...Array.from({ length: 5 }, (_, i) => usableCycle(MIN_WINDOW_SEPARATION_MS - 1000 + i * 1000)),
+    ];
+    expect(splitLongitudinalWindows(justUnder).separationSatisfied).toBe(false);
+
+    const justOver = [
+      ...Array.from({ length: 5 }, (_, i) => usableCycle(i * 1000)),
+      ...Array.from({ length: 5 }, (_, i) => usableCycle(4000 + MIN_WINDOW_SEPARATION_MS + i * 1000)),
+    ];
+    expect(splitLongitudinalWindows(justOver).separationSatisfied).toBe(true);
+  });
+});
+
 // ─── §62 Tests 39-48 — persistence evaluation ──────────────────────────────
 
 function difficultWindow(startMs, { successCount = 1 } = {}) {

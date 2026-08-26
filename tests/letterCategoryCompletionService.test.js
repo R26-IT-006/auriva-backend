@@ -105,10 +105,26 @@ describe('getMasteredLetterPairs', () => {
     ]);
   });
 
-  it('is scoped to student_id only (no letter/case filter — the full mastered set)', async () => {
+  it('is scoped to the student with no letter/case filter — the full MASTERED set', async () => {
     mockLpFindAll.mockResolvedValueOnce([]);
     await getMasteredLetterPairs({ studentId: STUDENT_ID });
-    expect(mockLpFindAll.mock.calls[0][0].where).toEqual({ student_id: STUDENT_ID });
+    const where = mockLpFindAll.mock.calls[0][0].where;
+
+    // Still no letter/case narrowing — this returns every mastered pair.
+    expect(Object.keys(where).sort()).toEqual(['mastered_at', 'student_id']);
+    expect(where.student_id).toBe(STUDENT_ID);
+    expect(where).not.toHaveProperty('letter');
+    expect(where).not.toHaveProperty('case_type');
+  });
+
+  it('mastery-semantics correction: a merely-attempted row is never returned', async () => {
+    // The failure branch of recordLetterCompletion creates letter_progress
+    // rows to hold blocked_attempts. Those must not read as mastery, or a
+    // failed letter disappears from the child's practice sequence.
+    mockLpFindAll.mockResolvedValueOnce([]);
+    await getMasteredLetterPairs({ studentId: STUDENT_ID });
+    const { Op } = require('sequelize');
+    expect(mockLpFindAll.mock.calls[0][0].where.mastered_at).toEqual({ [Op.ne]: null });
   });
 
   it('returns read_failed on an unexpected DB error, never throws', async () => {

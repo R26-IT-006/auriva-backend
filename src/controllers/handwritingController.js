@@ -12,7 +12,7 @@ const {
   ShapeFeature,
   LetterAttempt,
 } = require('../models');
-const { fn, col } = require('sequelize');
+const { fn, col, Op } = require('sequelize');
 const ApiError = require('../utils/ApiError');
 const { LETTER_TO_PRIMITIVE, PRIMITIVE_LABELS } = require('../config/letterMotorPrimitives');
 const logger   = require('../utils/logger');
@@ -45,6 +45,9 @@ const { buildInitialMotorBaselineSummary } = require('../utils/initialMotorBasel
 // teacher-facing baseline summary and does not influence adaptive
 // progression.
 const { predictInitialMotorCluster } = require('../services/motorClusterService');
+const letterMotorPatternCheckService = require('../services/letterMotorPatternCheckService');
+const worksheetService = require('../services/worksheetService');
+const models = require('../models');
 // Feature 11B Phase 5 — mastery-evidence accumulation + milestone K=2
 // prediction (replaces Phase 4's rejected explicit-reassessment design).
 // Imported as namespaces (not destructured), matching how
@@ -348,8 +351,12 @@ async function getProgress(req, res) {
       where: { student_id: studentId },
       order: [['created_at', 'DESC']],
     }),
-    LetterProgress.count({ where: { student_id: studentId, case_type: 'lowercase' } }),
-    LetterProgress.count({ where: { student_id: studentId, case_type: 'uppercase' } }),
+    // Mastery-semantics correction: these two counts drive the child's
+    // progress display AND the word-unlock gate, so they must count only
+    // MASTERED letters. Counting rows alone let a failed letter contribute to
+    // unlocking word practice.
+    LetterProgress.count({ where: { student_id: studentId, case_type: 'lowercase', mastered_at: { [Op.ne]: null } } }),
+    LetterProgress.count({ where: { student_id: studentId, case_type: 'uppercase', mastered_at: { [Op.ne]: null } } }),
   ]);
 
   const reason = latest ? deriveReason(latest.shapes) : 'Continue regular letter practice.';
@@ -766,10 +773,32 @@ async function recordLetterCompletion(req, res) {
   // retroactively applied if the row already existed (findOrCreate ignores
   // `defaults` on an existing row), preserving historical rows exactly as
   // they are (spec §25).
+  // Mastery-semantics correction — this is the ONLY place mastered_at is ever
+  // set. Reaching this line already means the existing, unchanged mastery
+  // condition held (bestScore >= threshold, checked above); nothing about that
+  // decision is re-evaluated here.
+  //
+  // `defaults` covers the direct-PASS case (row created here, mastered now).
+  // The FAIL -> PASS case needs the explicit update below, because
+  // findOrCreate ignores `defaults` on a row the failure branch already
+  // created — which is precisely the case this whole fix exists for.
+  const masteredAt = new Date();
   const [record, created] = await LetterProgress.findOrCreate({
     where:    { student_id, letter, case_type },
-    defaults: { student_id, letter, case_type, blocked_attempts: 0, progression_score_version: PROGRESSION_SCORE_VERSION },
+    defaults: {
+      student_id, letter, case_type, blocked_attempts: 0,
+      progression_score_version: PROGRESSION_SCORE_VERSION,
+      mastered_at: masteredAt,
+    },
   });
+
+  // FAIL -> PASS: the row exists but was never mastered. Stamp it now.
+  // Guarded on NULL so a later re-pass can never rewrite the ORIGINAL mastery
+  // timestamp — first mastery wins, permanently, matching the immutability
+  // discipline the evidence table already follows.
+  if (!created && record.mastered_at == null) {
+    await record.update({ mastered_at: masteredAt });
+  }
 
   const recentPasses = await LetterProgress.findAll({
     where: { student_id, case_type },
@@ -2375,6 +2404,274 @@ async function getLetterMotorStateHistory(req, res) {
   throw new ApiError(500, 'Failed to read letter motor state history');
 }
 
+// ---- Homework practice worksheets ---------------------------------------
+// Teacher-facing throughout. A worksheet is SUPPORT MATERIAL: none of these
+// handlers touch mastery, Motor Score, thresholds, sequencing or word unlock.
+
+/** GET /handwriting/worksheets/candidates/:studentId — persistent streams a worksheet could target. */
+async function getWorksheetCandidates(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) throw new ApiError(422, 'Invalid student ID');
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await worksheetService.getWorksheetCandidates({ studentId });
+  if (result.status === 'evaluated') {
+    return res.json({ status: 'evaluated', candidates: result.candidates });
+  }
+  if (result.status === 'invalid_input') throw new ApiError(422, 'Invalid student ID');
+  throw new ApiError(500, 'Failed to evaluate worksheet candidates');
+}
+
+/**
+ * POST /handwriting/worksheets/generate
+ *
+ * TEACHER-APPROVED generation. The teacher's chosen target_letter is
+ * authoritative and may override the system's own suggestion.
+ */
+async function generateWorksheet(req, res) {
+  const studentId = Number(req.body?.student_id);
+  if (!Number.isInteger(studentId) || studentId <= 0) throw new ApiError(422, 'Invalid student ID');
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await worksheetService.generateWorksheet({
+    studentId,
+    targetLetter: req.body?.target_letter,
+    caseType: req.body?.case_type,
+    family: req.body?.motor_family ?? null,
+    intensity: req.body?.worksheet_intensity ?? 'standard',
+    teacherNote: req.body?.teacher_note ?? null,
+    recommendationFingerprint: req.body?.recommendation_fingerprint ?? null,
+    dueDate: req.body?.due_date ?? null,
+  });
+
+  if (result.status === 'created') {
+    return res.status(201).json({ status: 'created', worksheet: result.worksheet, plan: result.plan });
+  }
+  // Not an error — the teacher is told a worksheet is already out, and can
+  // view/reprint/review it instead of creating a duplicate.
+  if (result.status === 'already_assigned') {
+    return res.status(200).json({ status: 'already_assigned', worksheet: result.worksheet, plan: result.plan });
+  }
+  if (result.status === 'unmapped_letter') {
+    return res.status(200).json({ status: 'unmapped_letter', letter: result.letter, worksheet: null });
+  }
+  if (result.status === 'invalid_input') throw new ApiError(422, 'Invalid worksheet request');
+  throw new ApiError(500, 'Failed to generate worksheet');
+}
+
+/** PATCH /handwriting/worksheets/:worksheetId/assign — mark as handed out. */
+async function assignWorksheet(req, res) {
+  const worksheetId = Number(req.params.worksheetId);
+  if (!Number.isInteger(worksheetId) || worksheetId <= 0) throw new ApiError(422, 'Invalid worksheet ID');
+
+  const existing = await models.HandwritingWorksheet.findByPk(worksheetId);
+  if (!existing) throw new ApiError(404, 'Worksheet not found');
+  await teacherService.getOwnStudentById(req.user.id, existing.student_id);
+
+  const result = await worksheetService.assignWorksheet({
+    worksheetId, fileUrl: req.body?.worksheet_file_url ?? null,
+  });
+  if (result.status === 'assigned') return res.json({ status: 'assigned', worksheet: result.worksheet });
+  throw new ApiError(500, 'Failed to assign worksheet');
+}
+
+/**
+ * POST /handwriting/worksheets/:worksheetId/submit
+ *
+ * Uploads the completed paper (photo or scan). The image is STORED and shown
+ * to the teacher — it is never analysed, scored or graded.
+ */
+async function submitWorksheet(req, res) {
+  const worksheetId = Number(req.params.worksheetId);
+  if (!Number.isInteger(worksheetId) || worksheetId <= 0) throw new ApiError(422, 'Invalid worksheet ID');
+  if (!req.file) throw new ApiError(422, 'A worksheet photo or scan is required');
+
+  const worksheet = await models.HandwritingWorksheet.findByPk(worksheetId);
+  if (!worksheet) throw new ApiError(404, 'Worksheet not found');
+  await teacherService.getOwnStudentById(req.user.id, worksheet.student_id);
+
+  // Lazy-required: blobService pulls in azureBlob.js, which constructs a
+  // storage credential at import time and throws without the Azure env vars.
+  // Requiring it at module load would break every controller test suite and
+  // any environment without blob storage configured, for a dependency only
+  // this one handler needs.
+  const { uploadBuffer, buildBlobPath } = require('../services/blobService');
+  const blobPath = buildBlobPath('worksheets', worksheet.worksheet_code, req.file.originalname);
+  const fileUrl = await uploadBuffer(req.file.buffer, blobPath, req.file.mimetype);
+
+  const result = await worksheetService.submitWorksheet({
+    worksheetId, studentId: worksheet.student_id,
+    fileReference: fileUrl,
+    submissionType: req.body?.submission_type === 'scan' ? 'scan' : 'photo',
+  });
+  if (result.status === 'submitted') {
+    return res.status(201).json({ status: 'submitted', submission: result.submission });
+  }
+  if (result.status === 'student_mismatch') throw new ApiError(422, 'Worksheet does not belong to this student');
+  throw new ApiError(500, 'Failed to record worksheet submission');
+}
+
+/** PATCH /handwriting/worksheet-submissions/:submissionId/review — the teacher's own review. */
+async function reviewWorksheetSubmission(req, res) {
+  const submissionId = Number(req.params.submissionId);
+  if (!Number.isInteger(submissionId) || submissionId <= 0) throw new ApiError(422, 'Invalid submission ID');
+
+  const existing = await models.HandwritingWorksheetSubmission.findByPk(submissionId);
+  if (!existing) throw new ApiError(404, 'Submission not found');
+  await teacherService.getOwnStudentById(req.user.id, existing.student_id);
+
+  const result = await worksheetService.reviewSubmission({
+    submissionId,
+    reviewStatus: req.body?.review_status,
+    teacherComment: req.body?.teacher_comment ?? null,
+  });
+  if (result.status === 'reviewed') {
+    return res.json({ status: 'reviewed', submission: result.submission, worksheet: result.worksheet });
+  }
+  if (result.status === 'invalid_input') throw new ApiError(422, 'Invalid review');
+  throw new ApiError(500, 'Failed to save review');
+}
+
+/** GET /handwriting/worksheets/:studentId — worksheet history, newest first. */
+async function getWorksheetHistory(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) throw new ApiError(422, 'Invalid student ID');
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await worksheetService.getWorksheetHistory({ studentId });
+  if (result.status === 'found') {
+    return res.json({ status: 'found', worksheets: result.worksheets, active: result.active });
+  }
+  throw new ApiError(500, 'Failed to read worksheet history');
+}
+
+// ---- Writing Check (Letter Motor Pattern Check) -------------------------
+// Teacher-initiated, descriptive assessment only. Every handler below verifies
+// teacher ownership first, exactly like the other letter-motor reads.
+
+/**
+ * POST /handwriting/writing-check/start
+ *
+ * Starts a Writing Check, or resumes the student's unfinished one. Returns the
+ * remaining required letter/case pairs in protocol order so the child screen
+ * can continue exactly where it stopped.
+ */
+async function startWritingCheck(req, res) {
+  const studentId = Number(req.body?.student_id);
+  const collectionSessionId = req.body?.collection_session_id;
+  if (!Number.isInteger(studentId) || studentId <= 0) throw new ApiError(422, 'Invalid student ID');
+  if (!collectionSessionId) throw new ApiError(422, 'collection_session_id is required');
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await letterMotorPatternCheckService.startOrResumePatternCheck({
+    studentId, collectionSessionId,
+  });
+  if (result.status === 'started' || result.status === 'resumed') {
+    return res.status(result.status === 'started' ? 201 : 200).json({
+      status: result.status,
+      check: result.check,
+      remaining: result.remaining,
+      required_count: letterMotorPatternCheckService.REQUIRED_COUNT,
+    });
+  }
+  if (result.status === 'invalid_input') throw new ApiError(422, 'Invalid Writing Check request');
+  throw new ApiError(500, 'Failed to start Writing Check');
+}
+
+/**
+ * GET /handwriting/writing-check/:checkId/progress
+ *
+ * Live progress, recomputed from the captured attempt rows every call.
+ */
+async function getWritingCheckProgress(req, res) {
+  const checkId = Number(req.params.checkId);
+  if (!Number.isInteger(checkId) || checkId <= 0) throw new ApiError(422, 'Invalid check ID');
+
+  const result = await letterMotorPatternCheckService.getPatternCheckProgress({ checkId });
+  if (result.status === 'not_found') throw new ApiError(404, 'Writing Check not found');
+  if (result.status !== 'found') throw new ApiError(500, 'Failed to read Writing Check progress');
+  await teacherService.getOwnStudentById(req.user.id, result.check.student_id);
+
+  return res.json({
+    status: 'found', check: result.check,
+    captured_count: result.capturedCount, required_count: result.requiredCount,
+    remaining: result.remaining, complete: result.complete,
+  });
+}
+
+/**
+ * POST /handwriting/writing-check/:checkId/complete
+ *
+ * Evaluates the check through the UNCHANGED frozen model + reference-range
+ * guard. Only ever called with all 20 required pairs captured; an incomplete
+ * check returns an honest `incomplete` and the model is never invoked.
+ */
+async function completeWritingCheck(req, res) {
+  const checkId = Number(req.params.checkId);
+  if (!Number.isInteger(checkId) || checkId <= 0) throw new ApiError(422, 'Invalid check ID');
+
+  const progress = await letterMotorPatternCheckService.getPatternCheckProgress({ checkId });
+  if (progress.status === 'not_found') throw new ApiError(404, 'Writing Check not found');
+  if (progress.status !== 'found') throw new ApiError(500, 'Failed to read Writing Check');
+  await teacherService.getOwnStudentById(req.user.id, progress.check.student_id);
+
+  const result = await letterMotorPatternCheckService.completeAndEvaluatePatternCheck({ checkId });
+  if (result.status === 'save_failed' || result.status === 'read_failed') {
+    throw new ApiError(500, 'Failed to evaluate Writing Check');
+  }
+  // 'incomplete' and 'ml_service_unavailable' are honest, retryable outcomes,
+  // not server errors - reported as 200 with their own status.
+  return res.json({ status: result.status, check: result.check ?? null });
+}
+
+/**
+ * GET /handwriting/writing-check/history/:studentId
+ *
+ * Teacher-facing Writing Check history, newest first. Never calls the ML
+ * service - it only reads what a past evaluation concluded.
+ */
+async function getWritingCheckHistory(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) throw new ApiError(422, 'Invalid student ID');
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await letterMotorPatternCheckService.getPatternCheckHistory({ studentId });
+  if (result.status !== 'found') throw new ApiError(500, 'Failed to read Writing Check history');
+  return res.json({ status: 'found', checks: result.checks });
+}
+
+/**
+ * GET /handwriting/letter-motor-evaluations/:studentId
+ *
+ * Feature 11B S2 — read-only milestone EVALUATION log (oldest -> newest),
+ * plus the latest event. Includes reference-range rejections, which persist
+ * no letter_motor_state_history row and were therefore previously invisible
+ * to every teacher-facing surface.
+ *
+ * Like the two reads above, this NEVER calls the ML service — it only reads
+ * what a past evaluation already concluded.
+ */
+async function getLetterMotorEvaluations(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const [logResult, latestResult] = await Promise.all([
+    letterMotorMasteryService.getLetterMotorEvaluations({ studentId }),
+    letterMotorMasteryService.getLatestLetterMotorEvaluation({ studentId }),
+  ]);
+  if (logResult.status === 'found') {
+    return res.json({
+      status: 'found',
+      results: logResult.results,
+      latest: latestResult.status === 'found' ? latestResult.result : null,
+    });
+  }
+  throw new ApiError(500, 'Failed to read letter motor evaluations');
+}
+
 /**
  * GET /handwriting/letter-motor-evidence-trend/:studentId
  *
@@ -2451,5 +2748,9 @@ module.exports = {
   postWorksheetRecommendationValidation,
   postWordAttempt, postWordActivity, getWordProgress, getWordAttempts, getWordReport,
   getLatestLetterMotorState, getLetterMotorStateHistory, getLetterMotorEvidenceTrend,
+  getLetterMotorEvaluations,
+  startWritingCheck, getWritingCheckProgress, completeWritingCheck, getWritingCheckHistory,
+  getWorksheetCandidates, generateWorksheet, assignWorksheet, submitWorksheet,
+  reviewWorksheetSubmission, getWorksheetHistory,
   getMasteredLetters, getCategoryCompletionStatus,
 };

@@ -3,14 +3,14 @@
 /**
  * letterMotorMilestones.js
  *
- * Feature 11B Phase 5 — the three pilot cluster-eligibility milestones
- * (spec §1/§13/§14/§15), derived programmatically from
- * letterLearningCategories.js + letterMotorReferenceLetters.js rather than
- * hardcoded a third time, so the milestone letter sets can never silently
- * drift from the taxonomy/reference-set files they're built from.
+ * Feature 11B Phase 5 — the three pilot cluster-eligibility milestones,
+ * derived programmatically from letterLearningCategories.js +
+ * letterMotorReferenceLetters.js rather than hardcoded a third time, so the
+ * milestone letter sets can never silently drift from the taxonomy/
+ * reference-set files they're built from.
  *
  *   UPPERCASE_STRAIGHT_14 — first eligible milestone. Required set = every
- *     reference letter in the 4 lowercase categories (10) + uppercase
+ *     reference letter in the 3 lowercase categories (10) + uppercase
  *     straight (4) = 14.
  *   UPPERCASE_CURVED_17   — 14-set + uppercase curved's 3 reference letters
  *     (C, O, S) = 17.
@@ -19,14 +19,49 @@
  *
  * Each milestone's requiredPairs is therefore always an exact, named,
  * reviewable subset of the 20 reference letters — never "any N reference
- * letters," matching spec §13's "Do not substitute other letters to reach
- * count 14" requirement.
+ * letters." Substituting other letters to reach a count is not permitted;
+ * see tests/letterMotorMasteryService.test.js's wrong-composition scenario.
  *
- * PILOT POLICY, per the research decision this file encodes (spec §1):
- * these three thresholds come from an n=7 pilot perturbation study and are
- * NOT claimed to generalize. 3/20, 7/20, 10/20 (lowercase-only coverage)
- * are deliberately NOT milestones here — trend/evidence display only, no
- * ML call, no state-history row (spec §12/§18).
+ * ── Where 14 / 17 / 20 come from ─────────────────────────────────────────
+ * These three counts are a CURRICULUM-BOUNDARY ENGINEERING RULE, not a
+ * model requirement and not a validated research threshold. Each milestone
+ * is placed where a teaching category in letterLearningCategories.js
+ * finishes: 14 is "every reference letter in the three lowercase
+ * categories, plus uppercase straight"; 17 adds uppercase curved; 20 adds
+ * uppercase mixed and completes the reference set. The counts are a
+ * consequence of that placement, not inputs to it.
+ *
+ * Two things this rule is explicitly NOT:
+ *
+ *   - It is NOT derived from the frozen model. letter_motor_cluster_v1 was
+ *     fitted on 7 rows — one per pilot participant, each the mean over that
+ *     participant's 20 collection-protocol letters (verify with
+ *     scaler.n_samples_seen_ === 7). The model consumes one aggregated
+ *     [smoothness_score, dtw_distance, speed_cv] vector and has no letter
+ *     identity or letter count in its input at all. Aggregating 14 letters
+ *     rather than 20, and from normal learning rather than the collection
+ *     protocol, is a runtime policy choice the model does not constrain —
+ *     and one its own metadata flags as unvalidated ("Runtime
+ *     representative-window policy requires separate validation").
+ *
+ *   - It is NOT validated by the perturbation study. The n=7 perturbation
+ *     figures in auriva_letter_motor_metadata_v1.json
+ *     (perturbation_0_10_mean_ari 0.9399, same_partition_percent 92.3)
+ *     measure cluster stability under +/-0-10% perturbation of FEATURE
+ *     VALUES. No artefact in this repository tests whether a 14-letter
+ *     subset reproduces a 20-letter aggregate. Earlier revisions of this
+ *     header cited that study, and a specification document, as authority
+ *     for 14/17/20; neither supports it, and the specification is not
+ *     present in the repository. Those citations have been removed rather
+ *     than restated.
+ *
+ * Treat 14/17/20 as a reviewable product decision about when it is
+ * reasonable to describe a pattern, open to revision on evidence — not as a
+ * settled research finding. The sets themselves are unchanged.
+ *
+ * 3/20, 7/20, 10/20 (lowercase-only coverage) are deliberately NOT
+ * milestones here — trend/evidence display only, no ML call, no
+ * state-history row.
  */
 
 const { getCategoryLetters, isReferenceLetterInCategory } = (() => {

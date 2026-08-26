@@ -252,13 +252,49 @@ function buildFamilyCaseEvidence({ attempts, caseType, family }) {
  * replacement usable cycle instead, up to the full length of the list
  * provided (Step 2 spec §26/§38 — "continue backward ... if possible").
  *
+ * ── Window SELECTION (corrected) ──────────────────────────────────────────
+ * The window pair is chosen by scanning BACKWARD from the newest usable
+ * cycle and taking the FIRST (i.e. most recent) 10-cycle candidate whose
+ * earlier/recent boundary already satisfies MIN_WINDOW_SEPARATION_MS.
+ *
+ * The previous implementation considered only the newest 10 usable cycles
+ * and then tested that one candidate's boundary. Because a single practice
+ * sitting routinely produces six or more attempt-3 cycles for the same
+ * family within minutes, that fixed slice could straddle a seconds-long
+ * gap even when the student had months of well-separated history behind
+ * it — making the separation rule unsatisfiable by construction rather
+ * than by evidence. Live data confirmed the failure: a student with 67
+ * usable lowercase/straight cycles across 9 distinct days over two months
+ * was reported `insufficient_temporal_dispersion` on a 15.6-second
+ * boundary.
+ *
+ * NOTHING about the rules themselves changed here — WINDOW_SIZE,
+ * REQUIRED_WINDOW_COUNT, MIN_USABLE_CYCLES, MIN_WINDOW_SEPARATION_MS and
+ * DIFFICULTY_MAX_SUCCESSFUL_CYCLES are all untouched, and the separation
+ * test is still evaluateTemporalSeparation()'s own. Only WHICH ten usable
+ * cycles are offered to that test changed, and newest-data preference is
+ * preserved: the scan starts at the newest candidate and stops at the
+ * first match, so a student whose newest 10 cycles are already separated
+ * gets exactly the window the previous implementation gave them.
+ *
+ * When NO candidate window anywhere in the student's history satisfies the
+ * separation rule, the newest 10 are returned unchanged (`status: 'ok'`,
+ * `separationSatisfied: false`) so evaluatePersistentDifficultyWindows()
+ * still reports `insufficient_data` / `insufficient_temporal_dispersion`
+ * with a real separationMs — the existing status/reason vocabulary is not
+ * widened, and the genuinely-undispersed case behaves exactly as before.
+ *
  * @param {Array<{outcome: string}>} cycles — chronologically ASCENDING,
  *   as returned by buildFamilyCaseEvidence().
  * @returns {{
  *   status: 'ok'|'insufficient',
  *   usableCount: number, unknownCount: number,
  *   earlierWindow: Array<Object>|null, recentWindow: Array<Object>|null,
- * }}
+ *   separationSatisfied: boolean, cyclesNewerThanWindow: number,
+ * }} `separationSatisfied` reports whether the SELECTED window pair meets
+ *   MIN_WINDOW_SEPARATION_MS; `cyclesNewerThanWindow` is how many usable
+ *   cycles are newer than the selected window (0 when the newest candidate
+ *   was chosen), so a caller can show why the newest data was not used.
  */
 function splitLongitudinalWindows(cycles) {
   const list = cycles ?? [];
@@ -266,18 +302,42 @@ function splitLongitudinalWindows(cycles) {
   const unknownCount = list.length - usable.length;
 
   if (usable.length < MIN_USABLE_CYCLES) {
-    return { status: 'insufficient', usableCount: usable.length, unknownCount, earlierWindow: null, recentWindow: null };
+    return {
+      status: 'insufficient', usableCount: usable.length, unknownCount,
+      earlierWindow: null, recentWindow: null,
+      separationSatisfied: false, cyclesNewerThanWindow: 0,
+    };
   }
 
-  // "Latest 10 usable cycles" (Step 2 spec §34) — older usable cycles
-  // beyond the most recent 10 are not considered, mirroring Feature 2's own
-  // "nothing 'recent' would be gained by looking further back once the
-  // window is satisfied" discipline.
-  const lastTen = usable.slice(-MIN_USABLE_CYCLES);
-  const earlierWindow = lastTen.slice(0, WINDOW_SIZE);
-  const recentWindow = lastTen.slice(WINDOW_SIZE);
+  // `end` is an exclusive index into `usable`: the candidate is the
+  // MIN_USABLE_CYCLES cycles ending there, split into two non-overlapping
+  // WINDOW_SIZE halves. Never a sliding/overlapping split (Step 2 spec §14).
+  const candidateAt = (end) => ({
+    earlierWindow: usable.slice(end - MIN_USABLE_CYCLES, end - WINDOW_SIZE),
+    recentWindow: usable.slice(end - WINDOW_SIZE, end),
+  });
 
-  return { status: 'ok', usableCount: usable.length, unknownCount, earlierWindow, recentWindow };
+  for (let end = usable.length; end >= MIN_USABLE_CYCLES; end--) {
+    const candidate = candidateAt(end);
+    if (evaluateTemporalSeparation(candidate).meetsMinimum) {
+      return {
+        status: 'ok', usableCount: usable.length, unknownCount,
+        ...candidate,
+        separationSatisfied: true, cyclesNewerThanWindow: usable.length - end,
+      };
+    }
+  }
+
+  // No temporally-separated candidate exists anywhere in this stream's
+  // history. Fall back to the newest 10 — identical to the previous
+  // behaviour — so the decision function reports the same
+  // insufficient_temporal_dispersion outcome, with the same separationMs,
+  // as it always did for this case.
+  return {
+    status: 'ok', usableCount: usable.length, unknownCount,
+    ...candidateAt(usable.length),
+    separationSatisfied: false, cyclesNewerThanWindow: 0,
+  };
 }
 
 // ─── evaluateDifficultyWindow — pure ───────────────────────────────────────

@@ -31,6 +31,7 @@
 
 require('dotenv').config({ quiet: true });
 
+const { Op } = require('sequelize');
 const db = require('../src/models');
 const { LetterAttempt, LetterProgress, LetterMotorMasteryEvidence, LetterMotorStateHistory, Student } = db;
 const { isReferenceLetter, getReferenceLetterCount } = require('../src/config/letterMotorReferenceLetters');
@@ -108,8 +109,13 @@ async function auditAll() {
   const perStudent = [];
 
   for (const s of students) {
+    // Mastery-semantics correction: only MASTERED letters can be a source
+    // of Feature 11B evidence. A letter_progress row alone does not mean
+    // mastery - the failure branch creates rows to hold blocked_attempts -
+    // so a never-passed letter must never be considered here.
     const progress = await LetterProgress.findAll({
-      where: { student_id: s.sid }, attributes: ['letter', 'case_type'], raw: true,
+      where: { student_id: s.sid, mastered_at: { [Op.ne]: null } },
+      attributes: ['letter', 'case_type'], raw: true,
     });
     if (progress.length === 0) continue;
 

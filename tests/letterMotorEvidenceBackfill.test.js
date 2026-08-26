@@ -30,6 +30,10 @@ const mockHistoryFindOne = jest.fn();
 const mockHistoryCreate = jest.fn();
 const mockPredictLetterMotorState = jest.fn();
 
+const mockEvaluationFindOne = jest.fn();
+const mockEvaluationFindAll = jest.fn();
+const mockEvaluationCreate  = jest.fn();
+
 jest.mock('../src/models', () => ({
   Student: { findAll: (...a) => mockStudentFindAll(...a) },
   LetterProgress: {
@@ -51,6 +55,12 @@ jest.mock('../src/models', () => ({
     findOne: (...a) => mockHistoryFindOne(...a),
     create: (...a) => mockHistoryCreate(...a),
     count: jest.fn().mockResolvedValue(0),
+  },
+  // S2 - the sibling evaluation-events table.
+  LetterMotorStateEvaluation: {
+    findOne: (...a) => mockEvaluationFindOne(...a),
+    findAll: (...a) => mockEvaluationFindAll(...a),
+    create: (...a) => mockEvaluationCreate(...a),
   },
   sequelize: { options: {}, close: jest.fn() },
 }));
@@ -110,6 +120,10 @@ beforeEach(() => {
   mockEvidenceCreate.mockImplementation(async p => ({ id: 1, ...p }));
   mockHistoryFindOne.mockResolvedValue(null);
   mockHistoryCreate.mockImplementation(async p => ({ id: 1, ...p }));
+  // S2 defaults: nothing evaluated yet, and evaluation writes succeed.
+  mockEvaluationFindOne.mockResolvedValue(null);
+  mockEvaluationFindAll.mockResolvedValue([]);
+  mockEvaluationCreate.mockImplementation(async p => ({ id: 1, ...p }));
 });
 
 // ─── The exact bug being recovered from ────────────────────────────────────
