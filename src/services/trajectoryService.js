@@ -389,15 +389,32 @@ async function getTrajectoryExplanation(studentId, wordId) {
 async function getTrajectoryReport(studentId) {
   const words = await DialogueWord.findAll({
     where: { category: { [Op.in]: IN_SCOPE_CATEGORIES } },
-    attributes: ['id', 'word', 'category', 'difficulty', 'teaching_order'],
+    attributes: ['id', 'word', 'category', 'difficulty', 'teaching_order', 'asset_key'],
     order: [
       ['category', 'ASC'],
       ['teaching_order', 'ASC'],
     ],
   });
 
+  // Retired abilities words ("Can you...?", "I can...", "Yes, I can",
+  // "No, I can't") still exist as dialogue_words rows but are no longer part of
+  // the taught curriculum — their sub-activity's table was dropped by
+  // FSD-CAT3-SUBACTIVITY-DROP-001 and their image assets have been removed.
+  // CAT3_ASSET_ORDER in category3Service.js is the authoritative list of what
+  // abilities actually teaches, so the report follows it rather than keeping a
+  // second list here that would drift from it.
+  //
+  // Required lazily on purpose: category3Service requires this module at load
+  // time, so a top-level require here would be a cycle and CAT3_ASSET_ORDER
+  // would arrive undefined.
+  const { CAT3_ASSET_ORDER } = require('./category3Service');
+  const liveWords = words.filter((w) => {
+    const plain = w.get({ plain: true });
+    return plain.category !== 'abilities' || CAT3_ASSET_ORDER.includes(plain.asset_key);
+  });
+
   const rows = [];
-  for (const w of words) {
+  for (const w of liveWords) {
     const word = w.get({ plain: true });
     let result;
     try {

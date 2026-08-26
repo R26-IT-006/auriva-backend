@@ -14,6 +14,18 @@ jest.mock('../../utils/logger', () => ({
   error: jest.fn(),
 }));
 
+// getTrajectoryReport lazily requires category3Service for the authoritative
+// list of abilities words still being taught. Mocked to just that list so this
+// stays a unit test — loading the real service would drag in the speech
+// assessment stack (and its open handles) for one constant.
+jest.mock('../category3Service', () => ({
+  CAT3_ASSET_ORDER: [
+    'cat3_yes', 'cat3_no',
+    'clap', 'run', 'walk', 'jump', 'talk', 'dance', 'sing',
+    'brush', 'wash', 'eat', 'drink', 'write', 'play', 'sleep', 'watch',
+  ],
+}));
+
 // Mock Sequelize models — the service imports them as named exports from '../models'
 // (resolves to src/models from the service's perspective, src/models from test's
 // perspective via ../../models).
@@ -827,10 +839,12 @@ describe('TASK-43 — tier2 accepted, tier1 fallbacks', () => {
 });
 
 describe('TASK-43 — getTrajectoryReport (batch, one report per student)', () => {
+  // asset_key is carried because the report filters abilities rows against the
+  // taught-curriculum list; 'clap' is a current word, so all three survive.
   const WORDS = [
-    { id: 10, word: 'hello',  category: 'greetings',   difficulty: 1, teaching_order: 1 },
-    { id: 11, word: 'please', category: 'magic_words', difficulty: 2, teaching_order: 1 },
-    { id: 12, word: 'clap',   category: 'abilities',   difficulty: 1, teaching_order: 1 },
+    { id: 10, word: 'hello',  category: 'greetings',   difficulty: 1, teaching_order: 1, asset_key: 'hello' },
+    { id: 11, word: 'please', category: 'magic_words', difficulty: 2, teaching_order: 1, asset_key: 'please' },
+    { id: 12, word: 'clap',   category: 'abilities',   difficulty: 1, teaching_order: 1, asset_key: 'clap' },
   ];
 
   beforeEach(() => {
@@ -920,6 +934,53 @@ describe('TASK-43 — getTrajectoryReport (batch, one report per student)', () =
     expect(words[0].explanation).toEqual(SHAP_EXPLANATION);
     expect(words[2].explanation).toEqual(SHAP_EXPLANATION);
     expect(totals.explained).toBe(2);
+  });
+
+  // AD HOC 2026-08-20 — retired abilities words ("Can you...?", "I can...",
+  // "Yes, I can", "No, I can't") are still rows in dialogue_words but are no
+  // longer taught, so they must not appear on a teacher's report.
+  it('excludes retired abilities words that are no longer in the taught curriculum', async () => {
+    DialogueWord.findAll.mockResolvedValue([
+      mockRow({ id: 10, word: 'hello',      category: 'greetings',   difficulty: 1, teaching_order: 1, asset_key: 'hello' }),
+      mockRow({ id: 30, word: 'Clap',       category: 'abilities',   difficulty: 1, teaching_order: 1, asset_key: 'clap' }),
+      mockRow({ id: 31, word: 'Can you...?', category: 'abilities',  difficulty: 1, teaching_order: 2, asset_key: 'can_you' }),
+      mockRow({ id: 32, word: 'I can...',   category: 'abilities',   difficulty: 1, teaching_order: 3, asset_key: 'i_can' }),
+      mockRow({ id: 33, word: 'Yes, I can', category: 'abilities',   difficulty: 1, teaching_order: 4, asset_key: 'yes_i_can' }),
+      mockRow({ id: 34, word: "No, I can't", category: 'abilities',  difficulty: 1, teaching_order: 5, asset_key: 'no_i_cant' }),
+      mockRow({ id: 35, word: 'Yes',        category: 'abilities',   difficulty: 1, teaching_order: 6, asset_key: 'cat3_yes' }),
+    ]);
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'struggling', confidence: 0.9 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+
+    const { words, totals } = await getTrajectoryReport(1);
+
+    expect(words.map((w) => w.word_id)).toEqual([10, 30, 35]);
+    // Assert on the word text the teacher would actually have seen on screen —
+    // report rows carry `word`, not `asset_key`, so asserting on asset_key here
+    // would pass even if the filter did nothing.
+    const shown = words.map((w) => w.word);
+    for (const retired of ['Can you...?', 'I can...', 'Yes, I can', "No, I can't"]) {
+      expect([retired, shown.includes(retired)]).toEqual([retired, false]);
+    }
+    expect(shown).toEqual(['hello', 'Clap', 'Yes']);
+    // Retired rows must not inflate the headline counts either.
+    expect(totals.words_total).toBe(3);
+  });
+
+  it('keeps every non-abilities word regardless of the abilities curriculum list', async () => {
+    DialogueWord.findAll.mockResolvedValue([
+      mockRow({ id: 10, word: 'hello',  category: 'greetings',   difficulty: 1, teaching_order: 1, asset_key: 'hello' }),
+      mockRow({ id: 11, word: 'please', category: 'magic_words', difficulty: 1, teaching_order: 1, asset_key: 'please' }),
+    ]);
+    primeMicroservice({
+      predict: { status: 200, data: { trajectory: 'fast', confidence: 0.9 } },
+      explain: { status: 200, data: SHAP_EXPLANATION },
+    });
+
+    const { words } = await getTrajectoryReport(1);
+    expect(words.map((w) => w.word_id)).toEqual([10, 11]);
   });
 
   it('survives a row that throws outright', async () => {

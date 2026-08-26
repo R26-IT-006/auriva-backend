@@ -79,6 +79,11 @@ router.get('/student/:studentId/word/:wordId/trajectory', ctrl.getTrajectory);
 router.get('/student/:studentId/word/:wordId/trajectory/explain', ctrl.getTrajectoryExplanation);
 router.get('/student/:studentId/dialogue/trajectory-report',      ctrl.getTrajectoryReport);
 
+// ── TASK-47 — practice-trend timelines (module-level and per-word) ────────
+
+router.get('/student/:studentId/dialogue/timeline',           ctrl.getDialogueTimeline);
+router.get('/student/:studentId/word/:wordId/dialogue/timeline', ctrl.getWordTimeline);
+
 // ── TASK-12 — Non-Verbal Adaptive Wait-Time Escalation ────────────────────
 
 router.get('/student/:studentId/speech-state', ctrl.getDailySpeechState);

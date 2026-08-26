@@ -659,4 +659,7 @@ module.exports = {
   recordPhase3Check,
   completeWordSession,
   recordProbeResult,
+  // The authoritative list of abilities words currently taught. Exported so the
+  // teacher report can exclude retired rows rather than keeping its own copy.
+  CAT3_ASSET_ORDER,
 };

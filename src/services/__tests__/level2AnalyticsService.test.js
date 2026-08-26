@@ -9,6 +9,9 @@ jest.mock('../../models', () => ({
   Level2NonVerbalAttempt:{ count:   jest.fn() },
 }));
 
+// TASK-47 — the timeline functions use raw date-grouped SQL.
+jest.mock('../../config/database', () => ({ query: jest.fn() }));
+
 const {
   Level2TopicProgress,
   Level2Session,
@@ -16,7 +19,19 @@ const {
   Level2NonVerbalAttempt,
 } = require('../../models');
 
-const { getLevel2Report, TOPICS } = require('../level2AnalyticsService');
+const sequelize = require('../../config/database');
+const {
+  getLevel2Report,
+  getModuleTimeline,
+  getTopicTimeline,
+  TOPICS,
+} = require('../level2AnalyticsService');
+
+/** Last raw query text + replacements, normalised to single-spaced SQL. */
+function lastQuery() {
+  const [sql, options] = sequelize.query.mock.calls[sequelize.query.mock.calls.length - 1];
+  return { sql: sql.replace(/\s+/g, ' '), ...options };
+}
 
 /** A Sequelize-ish row: real attributes plus .get({ plain: true }). */
 function row(data) {
@@ -34,6 +49,7 @@ function primeEmpty() {
 beforeEach(() => {
   jest.clearAllMocks();
   primeEmpty();
+  sequelize.query.mockResolvedValue([]);
 });
 
 describe('module export', () => {
@@ -281,5 +297,124 @@ describe('totals reflect each topic\'s own status', () => {
     for (const call of Level2Session.findOne.mock.calls) {
       expect(call[0].order).toEqual([['started_at', 'DESC']]);
     }
+  });
+});
+
+// ===========================================================================
+// TASK-47 — practice-trend timelines
+// ===========================================================================
+
+describe('AC1 — Level 2 timelines return TrendSparkline\'s point shape', () => {
+  it('converts a date\'s mean score out of five into accuracy', async () => {
+    sequelize.query.mockResolvedValue([
+      { date: '2026-08-24', attempts: 1, correct: 1, avg_score: 4 },
+    ]);
+    const result = await getModuleTimeline(1);
+    expect(Object.keys(result)).toEqual(['points']);
+    expect(result.points[0]).toEqual({
+      date: '2026-08-24', attempts: 1, correct: 1, accuracy: 0.8,
+    });
+  });
+
+  it('averages two sessions that landed on the same date into one point', async () => {
+    // TrendSparkline keys its dots by date, so same-date sessions must collapse.
+    sequelize.query.mockResolvedValue([
+      { date: '2026-08-24', attempts: 2, correct: 1, avg_score: 3 },
+    ]);
+    const { points } = await getModuleTimeline(1);
+    expect(points).toHaveLength(1);
+    expect(points[0].attempts).toBe(2);
+    expect(points[0].accuracy).toBe(0.6);
+  });
+
+  it('reports accuracy as null rather than 0 when a date has no score', async () => {
+    sequelize.query.mockResolvedValue([
+      { date: '2026-08-24', attempts: 1, correct: 0, avg_score: null },
+    ]);
+    const { points } = await getModuleTimeline(1);
+    expect(points[0].accuracy).toBeNull();
+  });
+
+  it('returns an empty points array when there is no activity', async () => {
+    expect(await getModuleTimeline(1)).toEqual({ points: [] });
+    expect(await getTopicTimeline(1, 'describe_pet')).toEqual({ points: [] });
+  });
+});
+
+describe('AC3 — two session dates produce two independently-correct points', () => {
+  it('keeps each date\'s own score rather than repeating the latest', async () => {
+    sequelize.query.mockResolvedValue([
+      { date: '2026-08-24', attempts: 1, correct: 0, avg_score: 2 },
+      { date: '2026-08-26', attempts: 1, correct: 1, avg_score: 5 },
+    ]);
+    const { points } = await getTopicTimeline(1, 'self_introduction');
+
+    expect(points).toHaveLength(2);
+    expect(points[0]).toEqual({ date: '2026-08-24', attempts: 1, correct: 0, accuracy: 0.4 });
+    expect(points[1]).toEqual({ date: '2026-08-26', attempts: 1, correct: 1, accuracy: 1 });
+    expect(points[0].date).not.toBe(points[1].date);
+  });
+
+  it('does not truncate a single topic\'s history to a window', async () => {
+    await getTopicTimeline(1, 'describe_friend');
+    const q = lastQuery();
+    expect(q.sql).not.toContain('INTERVAL');
+    expect(q.replacements).not.toHaveProperty('days');
+    expect(q.replacements.topic).toBe('describe_friend');
+  });
+});
+
+describe('TASK-47 — Level 2 timeline query shape', () => {
+  it('counts only completed sessions that actually have a score', async () => {
+    await getModuleTimeline(1);
+    const { sql } = lastQuery();
+    expect(sql).toContain('s.is_complete = TRUE');
+    expect(sql).toContain('IS NOT NULL');
+  });
+
+  it('prefers sxs_element_score, falling back to the paragraph score', async () => {
+    // Grounded in level2Service.js's completeSession: sxs_element_score is
+    // written on every completed session and is the value the mastery algorithm
+    // reads; full_paragraph_total_score exists only for self_introduction.
+    await getModuleTimeline(1);
+    expect(lastQuery().sql)
+      .toContain('COALESCE(s.sxs_element_score, s.full_paragraph_total_score)');
+  });
+
+  it('defaults to a 90-day window and clamps absurd values', async () => {
+    await getModuleTimeline(1);
+    expect(lastQuery().replacements.days).toBe(90);
+    await getModuleTimeline(1, 5000);
+    expect(lastQuery().replacements.days).toBe(365);
+    await getModuleTimeline(1, 'nonsense');
+    expect(lastQuery().replacements.days).toBe(90);
+  });
+
+  it('AC7 — never reads or recomputes Level2TopicProgress.status', async () => {
+    await getModuleTimeline(1);
+    await getTopicTimeline(1, 'describe_pet');
+    for (const call of sequelize.query.mock.calls) {
+      expect(call[0]).not.toContain('level2_topic_progress');
+      expect(call[0]).not.toContain('status');
+      expect(call[0]).not.toContain('session_pass_count');
+      expect(call[0]).not.toContain('consecutive_fail_count');
+    }
+  });
+});
+
+describe('AC5 — the batch report contract is unchanged by TASK-47', () => {
+  it('getLevel2Report still returns exactly { totals, topics } and no timeline', async () => {
+    const report = await getLevel2Report(1);
+    expect(Object.keys(report).sort()).toEqual(['topics', 'totals']);
+    for (const t of report.topics) {
+      expect(t).not.toHaveProperty('timeline');
+      expect(t).not.toHaveProperty('points');
+      expect(t).not.toHaveProperty('history');
+    }
+  });
+
+  it('getLevel2Report issues no raw timeline query', async () => {
+    await getLevel2Report(1);
+    expect(sequelize.query).not.toHaveBeenCalled();
   });
 });

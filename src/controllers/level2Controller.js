@@ -93,6 +93,25 @@ async function getReport(req, res) {
   res.json({ data });
 }
 
+// TASK-47 — practice-trend timelines. Read-only; neither handler recomputes
+// Level2TopicProgress.status.
+async function getTimeline(req, res) {
+  const data = await level2AnalyticsService.getModuleTimeline(
+    req.params.studentId,
+    req.query.days ?? 90
+  );
+  res.json({ data });
+}
+
+async function getTopicTimeline(req, res) {
+  validate(req);
+  const data = await level2AnalyticsService.getTopicTimeline(
+    req.params.studentId,
+    req.params.topic
+  );
+  res.json({ data });
+}
+
 // ── Teaching flow ─────────────────────────────────────────────────────────
 
 async function recordStep3(req, res) {
@@ -206,6 +225,8 @@ module.exports = {
   completeSession,
   getProgress,
   getReport,
+  getTimeline,
+  getTopicTimeline,
   recordStep3,
   assessStep4,
   recordNonVerbalTeaching,

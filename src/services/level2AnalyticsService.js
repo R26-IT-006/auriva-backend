@@ -1,5 +1,7 @@
 'use strict';
 
+const { QueryTypes } = require('sequelize');
+const sequelize = require('../config/database');
 const {
   Level2TopicProgress,
   Level2Session,
@@ -137,4 +139,110 @@ async function getLevel2Report(studentId) {
   };
 }
 
-module.exports = { getLevel2Report, TOPICS, PARAGRAPH_ELEMENTS };
+// ---------------------------------------------------------------------------
+// TASK-47 — practice-trend timelines
+//
+// SCOPE: these are *session practice accuracy over time*, NOT a recomputation of
+// Level2TopicProgress.status. That status is written solely by
+// level2Service.js's completeSession and remains the single source of truth for
+// mastered/struggling; nothing below reads or re-derives it.
+// ---------------------------------------------------------------------------
+
+/** Both Level 2 scores are counts out of five. */
+const LEVEL2_MAX_SCORE = 5;
+
+/** A session counts as "correct" at 3 of 5 or better. */
+const LEVEL2_CORRECT_AT = 3;
+
+const r3 = (v) => (v === null ? null : Math.round(v * 1000) / 1000);
+
+function clampDays(days) {
+  const n = Number(days);
+  return Number.isFinite(n) ? Math.max(1, Math.min(365, n)) : 90;
+}
+
+/**
+ * Which score represents a session's real production attempt — grounded in
+ * level2Service.js rather than assumed:
+ *
+ * - `completeSession` (level2Service.js:959-982) computes `sxs_element_score`
+ *   from the session's sentence_by_sentence production attempts and writes it on
+ *   EVERY completed session, for every topic. The mastery algorithm directly
+ *   below it uses that value and nothing else (`isPass = sxsScore >= 4`).
+ * - `full_paragraph_total_score` is written only by `assessParagraph`, which
+ *   throws 409 for any topic other than self_introduction
+ *   (level2Service.js:825-827) — describe_friend/describe_pet sessions
+ *   structurally cannot have one.
+ *
+ * So sxs_element_score takes precedence, with the paragraph score as a fallback
+ * for a self_introduction session that recorded one but no sentence attempts.
+ */
+const SESSION_SCORE = 'COALESCE(s.sxs_element_score, s.full_paragraph_total_score)';
+
+/**
+ * One point per calendar date, not per session: two sessions on the same day
+ * must collapse into one point, both because TrendSparkline keys its dots by
+ * date and because a date axis with two dots on one date is meaningless.
+ * `accuracy` is that date's mean score over five.
+ */
+const LEVEL2_POINT_COLUMNS = `
+  to_char(COALESCE(s.ended_at, s.started_at)::date, 'YYYY-MM-DD')        AS date,
+  COUNT(*)::int                                                          AS attempts,
+  COUNT(*) FILTER (WHERE ${SESSION_SCORE} >= ${LEVEL2_CORRECT_AT})::int  AS correct,
+  AVG(${SESSION_SCORE})::float                                           AS avg_score
+`;
+
+const toLevel2Points = (rows) => ({
+  points: rows.map((t) => ({
+    date:     t.date,
+    attempts: t.attempts,
+    correct:  t.correct,
+    accuracy: t.avg_score === null ? null : r3(Number(t.avg_score) / LEVEL2_MAX_SCORE),
+  })),
+});
+
+/** Module-level: all three topics, grouped by date, last N days. */
+async function getModuleTimeline(studentId, days = 90) {
+  const rows = await sequelize.query(
+    `SELECT ${LEVEL2_POINT_COLUMNS}
+       FROM level2_sessions s
+      WHERE s.student_id = :sid
+        AND s.is_complete = TRUE
+        AND ${SESSION_SCORE} IS NOT NULL
+        AND COALESCE(s.ended_at, s.started_at) >= NOW() - (:days * INTERVAL '1 day')
+      GROUP BY 1
+      ORDER BY 1 ASC`,
+    {
+      replacements: { sid: Number(studentId), days: clampDays(days) },
+      type: QueryTypes.SELECT,
+    },
+  );
+  return toLevel2Points(rows);
+}
+
+/** One topic, every recorded session date, no window truncation. */
+async function getTopicTimeline(studentId, topic) {
+  const rows = await sequelize.query(
+    `SELECT ${LEVEL2_POINT_COLUMNS}
+       FROM level2_sessions s
+      WHERE s.student_id = :sid
+        AND s.topic = :topic
+        AND s.is_complete = TRUE
+        AND ${SESSION_SCORE} IS NOT NULL
+      GROUP BY 1
+      ORDER BY 1 ASC`,
+    {
+      replacements: { sid: Number(studentId), topic },
+      type: QueryTypes.SELECT,
+    },
+  );
+  return toLevel2Points(rows);
+}
+
+module.exports = {
+  getLevel2Report,
+  getModuleTimeline,
+  getTopicTimeline,
+  TOPICS,
+  PARAGRAPH_ELEMENTS,
+};

@@ -51,6 +51,14 @@ router.get('/student/:studentId/level2/progress', [
 // Auth is the router-level verifyToken + isTeacher applied at the top.
 router.get('/student/:studentId/level2/report', ctrl.getReport);
 
+// TASK-47 — practice-trend timelines (module-level and per-topic).
+router.get('/student/:studentId/level2/timeline', ctrl.getTimeline);
+
+router.get('/student/:studentId/level2/topic/:topic/timeline', [
+  param('topic').isIn(['self_introduction', 'describe_friend', 'describe_pet'])
+    .withMessage('topic must be one of: self_introduction, describe_friend, describe_pet'),
+], ctrl.getTopicTimeline);
+
 router.post('/student/:studentId/level2/session/start', [
   body('session_id').optional().isInt({ min: 1 }).withMessage('session_id must be a positive integer'),
   body('topic').optional().isIn(['self_introduction', 'describe_friend', 'describe_pet'])
