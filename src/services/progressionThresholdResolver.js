@@ -59,6 +59,22 @@ const logger = require('../utils/logger');
 // as an individualized/legacy value; the same constant for every student.
 const GLOBAL_DEFAULT = 55;
 
+// ── Pilot mastery policy (Phase 2 + Phase 3) ────────────────────────────
+// GLOBAL_DEFAULT above is UNCHANGED and still exported for its own callers.
+// It is simply no longer what normal letter practice is judged against:
+// at 55, 96.6% of real independent attempts passed, so it gated nothing.
+const {
+  NORMAL_PRACTICE_MASTERY_THRESHOLD,
+  PROGRESSION_FAMILY_THRESHOLDS_ENABLED,
+} = require('../config/masteryPolicy');
+
+// A distinct, honestly-named source. NOT reported as `global_safe_fallback`,
+// because it is not a fallback — it is the deliberate pilot policy value.
+const SOURCE_NORMAL_PRACTICE_PILOT = 'normal_practice_pilot';
+
+// Why the Feature 2 family branch was skipped, when it was.
+const FALLBACK_REASON_FAMILY_DISABLED = 'progression_family_thresholds_disabled';
+
 const SOURCE_REQUEST_OVERRIDE = 'request_override';
 const SOURCE_FEATURE2_FAMILY = 'feature2_family';
 // Replaces the old legacy_letter / legacy_default / global_default / read-
@@ -150,6 +166,27 @@ async function resolveProgressionThreshold({ studentId, letter, caseType, reques
   // than throwing.
   const family = getBaselineFamily(letter, caseType);
 
+  // Phase 2 — the operational link from StudentMotorBaseline.progression_*
+  // to mastery gating is disabled for the pilot. Baselines and threshold
+  // history are still written, still readable, and still preserved with
+  // full provenance; they simply do not decide what a child is judged
+  // against while Motor Score calibration is outstanding. See
+  // config/masteryPolicy.js for the audit findings behind this.
+  //
+  // Placed AFTER the request-override check above, so a teacher-set
+  // threshold still wins — a human decision outranks a pilot default.
+  // `family` is still resolved and reported so reports and diagnostics keep
+  // showing which family a letter belongs to.
+  if (!PROGRESSION_FAMILY_THRESHOLDS_ENABLED) {
+    return resolved(
+      NORMAL_PRACTICE_MASTERY_THRESHOLD,
+      SOURCE_NORMAL_PRACTICE_PILOT,
+      family,
+      null,
+      FALLBACK_REASON_FAMILY_DISABLED,
+    );
+  }
+
   if (!family) {
     // Feature 2 genuinely cannot exist for this letter/case — an ambiguous
     // (unmapped) letter has no baseline family at all, ever. Never a
@@ -201,6 +238,8 @@ async function resolveProgressionThreshold({ studentId, letter, caseType, reques
 module.exports = {
   resolveProgressionThreshold,
   GLOBAL_DEFAULT,
+  SOURCE_NORMAL_PRACTICE_PILOT,
+  FALLBACK_REASON_FAMILY_DISABLED,
   SOURCE_REQUEST_OVERRIDE,
   SOURCE_FEATURE2_FAMILY,
   SOURCE_GLOBAL_SAFE_FALLBACK,

@@ -61,6 +61,11 @@
  *
  * Formula (pilot engineering default, NOT clinically validated):
  *   rawTarget = baselineFamilyScore + margin
+ *   target    = min(rawTarget, INITIAL_PERSONALIZED_THRESHOLD_CEILING)
+ *
+ * The ceiling applies to INITIAL derivation only — never to a teacher
+ * override, never to a future automatic adjustment. See the constant's own
+ * comment for why an upper bound exists at all.
  *
  * No ceiling is inherited from the legacy per-letter system (its 85 cap has
  * no established relevance to a family-level target — see the Feature 2
@@ -85,6 +90,43 @@ const { PROGRESSION_SCORE_VERSION } = require('../config/motorScoreRegime');
 // Pilot engineering default — NOT clinically validated. Centralized here so
 // it is never scattered as a bare "+5" magic number.
 const INITIAL_THRESHOLD_MARGIN = 5;
+
+/**
+ * Upper bound on an INITIAL personalized family threshold.
+ *
+ * ── What this is ─────────────────────────────────────────────────────────
+ * A pilot engineering safeguard. NOT clinically validated, and NOT derived
+ * from any empirical study — exactly the same standing as
+ * INITIAL_THRESHOLD_MARGIN above, and it will need teacher/pilot validation
+ * before it can be called anything more.
+ *
+ * ── Why a ceiling exists at all ──────────────────────────────────────────
+ * `baseline + margin` has no upper bound of its own, and this module has no
+ * automatic DOWNWARD adaptation: there is no 'lower' decision anywhere in it,
+ * and no automatic threshold write of any kind yet. An initial threshold is
+ * therefore effectively permanent until a teacher intervenes. That makes an
+ * over-strict start unrecoverable in a way an over-lenient start is not, so
+ * the one direction the system cannot fix by itself is the one that gets a
+ * bound.
+ *
+ * A strong baseline was also the case the unbounded formula handled worst: a
+ * child scoring 97.5 on the complex family produced a raw target of 102.5 and
+ * received `requires_review` — i.e. no automatic threshold at all — which is
+ * the opposite of what their result deserved.
+ *
+ * ── Why 85 specifically ──────────────────────────────────────────────────
+ * 85 is not a new number. It is the ceiling the legacy per-letter threshold
+ * system already used. The Feature 2 audit declined to INHERIT it silently,
+ * which was right; adopting it deliberately, for this one purpose, with this
+ * comment attached, is a different act. No claim is made that 85 is correct —
+ * only that it is an existing, familiar bound rather than an invented one.
+ *
+ * ── Scope ────────────────────────────────────────────────────────────────
+ * Applies ONLY to `initial_from_baseline` derivation. It does not cap a
+ * teacher override, a future automatic adjustment, or any historical row —
+ * see deriveFamilyThreshold, the single place it is read.
+ */
+const INITIAL_PERSONALIZED_THRESHOLD_CEILING = 85;
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 100;
@@ -149,16 +191,36 @@ function deriveFamilyThreshold(baselineScore, margin) {
   // explicitly, per the same "prove it" discipline used throughout this
   // feature rather than trusting arithmetic silently.
   if (rawTarget < baselineScore) {
-    return { baselineScore, margin, rawTarget, status: 'invalid_derivation', reason: 'target_below_baseline' };
+    return {
+      baselineScore, margin, rawTarget, target: null,
+      ceiling: INITIAL_PERSONALIZED_THRESHOLD_CEILING, ceilingApplied: false,
+      status: 'invalid_derivation', reason: 'target_below_baseline',
+    };
   }
 
-  if (rawTarget > SCORE_MAX) {
-    // Deliberately NOT clamped to 100 — flagged for explicit review instead,
-    // so a deployable value is never silently fabricated. See module header.
-    return { baselineScore, margin, rawTarget, status: 'requires_review', reason: 'target_exceeds_score_range' };
+  // The pilot ceiling. A raw target above it resolves to the ceiling rather
+  // than to `requires_review` — a strong baseline now yields a usable
+  // threshold instead of none. `rawTarget` is still reported unchanged so the
+  // history row can record what the formula asked for before bounding.
+  const ceilingApplied = rawTarget > INITIAL_PERSONALIZED_THRESHOLD_CEILING;
+  const target = ceilingApplied ? INITIAL_PERSONALIZED_THRESHOLD_CEILING : rawTarget;
+
+  // Defensive only, and unreachable while the ceiling is <= SCORE_MAX. Kept
+  // so the status vocabulary survives intact: if the ceiling were ever raised
+  // above the score space, a value would still never be silently fabricated.
+  if (target > SCORE_MAX) {
+    return {
+      baselineScore, margin, rawTarget, target: null,
+      ceiling: INITIAL_PERSONALIZED_THRESHOLD_CEILING, ceilingApplied,
+      status: 'requires_review', reason: 'target_exceeds_score_range',
+    };
   }
 
-  return { baselineScore, margin, rawTarget, status: 'ready', reason: null };
+  return {
+    baselineScore, margin, rawTarget, target,
+    ceiling: INITIAL_PERSONALIZED_THRESHOLD_CEILING, ceilingApplied,
+    status: 'ready', reason: null,
+  };
 }
 
 // ─── Main service function ─────────────────────────────────────────────────
@@ -328,7 +390,14 @@ async function classifyFamilyInitialization({ studentId, margin = INITIAL_THRESH
       // invalid_baseline_score / invalid_derivation — never persisted.
       classification[family] = { action: 'skipped_invalid_baseline', reason: familyResult.reason };
     } else {
-      classification[family] = { action: 'would_create', rawTarget: familyResult.rawTarget, baselineScore: familyResult.baselineScore };
+      classification[family] = {
+        action: 'would_create',
+        rawTarget: familyResult.rawTarget,
+        target: familyResult.target,
+        ceiling: familyResult.ceiling,
+        ceilingApplied: familyResult.ceilingApplied,
+        baselineScore: familyResult.baselineScore,
+      };
     }
   }
 
@@ -411,13 +480,28 @@ async function createInitialFamilyThresholds({ studentId, margin = INITIAL_THRES
           scope_key:        family,
           baseline_family:  family,
           old_threshold:    null, // initial event — no prior value
-          new_threshold:    c.rawTarget,
+          // The BOUNDED target, not the raw one.
+          new_threshold:    c.target,
           source:           SOURCE_INITIAL,
+          // Deliberately unchanged: report consumers and existing tests read
+          // this exact string. What the ceiling did is recorded additively
+          // below rather than by renaming the reason out from under them.
           reason:           REASON_BASELINE_MARGIN,
           baseline_id:      baselineId,
           baseline_version: baselineVersion,
           mapping_version:  mappingVersion,
-          recent_window_snapshot: null, // recent-window logic not implemented yet
+          // Additive provenance: what the formula asked for, and whether the
+          // pilot ceiling changed it. Reuses the existing JSON column rather
+          // than adding one; `null` remains the shape for every other source.
+          recent_window_snapshot: {
+            initialization: {
+              baseline_score:  c.baselineScore,
+              margin:          derivation.margin,
+              raw_target:      c.rawTarget,
+              ceiling_value:   c.ceiling,
+              ceiling_applied: c.ceilingApplied,
+            },
+          },
         },
       });
     }
@@ -1752,6 +1836,7 @@ async function processDynamicThresholdAfterLetterSession({
 }
 
 module.exports = {
+  INITIAL_PERSONALIZED_THRESHOLD_CEILING,
   INITIAL_THRESHOLD_MARGIN,
   deriveInitialFamilyThresholds,
   classifyFamilyInitialization,

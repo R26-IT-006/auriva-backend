@@ -7,6 +7,22 @@
 // actual reviewed mapping data, not a stand-in. This resolver no longer
 // reads ../src/models (Student/personal_thresholds) at all — the legacy
 // tier was removed entirely, so there is nothing to mock there anymore.
+// PILOT NOTE: PROGRESSION_FAMILY_THRESHOLDS_ENABLED is currently `false` in
+// production (see config/masteryPolicy.js) — while Motor Score calibration is
+// outstanding, the resolver short-circuits to the pilot mastery threshold and
+// the whole Feature 2 family branch below is bypassed at runtime.
+//
+// This suite deliberately forces the flag ON rather than deleting those tests.
+// The family branch is not gone, it is switched off, and it WILL be switched
+// back on once calibration is validated. Deleting its safety net now would
+// mean re-enabling it later with no test coverage at all — exactly when
+// coverage matters most. The disabled-path behaviour is covered separately in
+// tests/progressionThresholdPilotPolicy.test.js.
+jest.mock('../src/config/masteryPolicy', () => ({
+  ...jest.requireActual('../src/config/masteryPolicy'),
+  PROGRESSION_FAMILY_THRESHOLDS_ENABLED: true,
+}));
+
 const mockGetCurrentFamilyThreshold = jest.fn();
 const mockCreateInitialFamilyThresholds = jest.fn();
 

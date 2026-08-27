@@ -3,6 +3,20 @@
 // Verifies finalizeAssessment()'s idempotency (Reliability Step 1) in
 // isolation, without hitting the real database or the real explainability
 // engine. Mock names must start with "mock" for Jest's hoisting.
+// PILOT NOTE: PROGRESSION_FAMILY_THRESHOLDS_ENABLED is `false` in production
+// (config/masteryPolicy.js), so finalize currently SKIPS automatic Feature 2
+// threshold initialization — the progression_* values it derives from are not
+// yet trustworthy as a mastery threshold source.
+//
+// This suite forces the flag ON rather than deleting the initialization tests.
+// The behaviour is switched off, not removed, and will be switched back on
+// after Motor Score calibration; its safety net must survive that gap. The
+// disabled path is covered in tests/finalizeFeature2Disabled.test.js.
+jest.mock('../src/config/masteryPolicy', () => ({
+  ...jest.requireActual('../src/config/masteryPolicy'),
+  PROGRESSION_FAMILY_THRESHOLDS_ENABLED: true,
+}));
+
 const mockFindByPk             = jest.fn(); // HandwritingAssessment.findByPk
 const mockExplanationFindAll   = jest.fn(); // ExplanationResult.findAll — the idempotency anchor
 const mockExplanationCreate    = jest.fn(); // ExplanationResult.create

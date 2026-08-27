@@ -74,9 +74,14 @@ function makeReq(overrides = {}) {
       student_id: 13, letter: 'c', case_type: 'lowercase',
       attempt_scores: [90], wrote_correctly: true,
       attempts: [
-        { attempt_number: 1, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },
-        { attempt_number: 2, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },
-        { attempt_number: 3, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },
+        // Fixture note: `strokes` must be NON-EMPTY. Capture completeness is checked
+        // before coverage (src/utils/captureStatus.js), and an attempt with no strokes
+        // is a CAPTURE FAULT that never reaches evaluation — so an empty array here
+        // would silently stop these suites from testing what they are about. The
+        // geometry itself is irrelevant; computeMotorScore is mocked.
+        { attempt_number: 1, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
+        { attempt_number: 2, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
+        { attempt_number: 3, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
       ],
       ...overrides,
     },

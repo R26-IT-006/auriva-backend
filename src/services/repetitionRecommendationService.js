@@ -65,6 +65,11 @@ const { getBaselineFamily } = require('../config/letterBaselineFamilies');
 const { evaluateDynamicThresholds } = require('./dynamicThresholdService');
 const { evaluateSupportRecommendations } = require('./adaptiveSupportService');
 const { MAX_ADAPTIVE_REPETITIONS_PER_LETTER_PER_INTERACTION, REPETITION_REASON } = require('../config/repetitionPolicy');
+// The practice-date ceiling is AUTHORITATIVE over this feature: a letter that
+// has already used both of today's cycles must not be reinserted later in the
+// sequence, or the spaced repetition would silently become cycle 3.
+const { getCycleUsageForDate } = require('./letterCycleService');
+const { CYCLE_CAP_REASON } = require('../config/practiceCyclePolicy');
 const logger = require('../utils/logger');
 
 const VALID_CASE_TYPES = ['lowercase', 'uppercase'];
@@ -217,6 +222,24 @@ async function evaluateRepetitionRecommendation({
     return {
       status: 'evaluated', studentId, letter, caseType, family,
       shouldRepeat: false, reason: REPETITION_REASON.CAP_REACHED,
+      signals: null, policy: buildPolicy(adaptiveRepetitionsUsed), history: null,
+    };
+  }
+
+  // ── Step 2b: the PRACTICE-DATE ceiling, which outranks this feature ────
+  // Two completed cycles today means this letter is finished for the date.
+  // Feature 5 exists to give a struggling letter a second look; once the
+  // child has already had both looks, inserting a third is exactly the
+  // over-exposure the ceiling was added to prevent. Checked here rather than
+  // at the insertion site so both the decision and its reason are visible to
+  // the caller and to tests. Read to DECIDE only - the response shape is
+  // deliberately unchanged, so every existing consumer sees exactly what it
+  // saw before except the new reason string on a newly-blocked repetition.
+  const cycleUsage = await getCycleUsageForDate({ studentId, letter, caseType });
+  if (cycleUsage.status === 'ok' && cycleUsage.capReached) {
+    return {
+      status: 'evaluated', studentId, letter, caseType, family,
+      shouldRepeat: false, reason: CYCLE_CAP_REASON.CAP_REACHED,
       signals: null, policy: buildPolicy(adaptiveRepetitionsUsed), history: null,
     };
   }

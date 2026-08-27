@@ -87,9 +87,14 @@ function makeReq(overrides = {}) {
       student_id: 13, letter: 'l', case_type: 'lowercase',
       attempt_scores: [90], wrote_correctly: true,
       attempts: [
-        { attempt_number: 1, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },
-        { attempt_number: 2, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },
-        { attempt_number: 3, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] },
+        // Fixture note: `strokes` must be NON-EMPTY. Capture completeness is checked
+        // before coverage (src/utils/captureStatus.js), and an attempt with no strokes
+        // is a CAPTURE FAULT that never reaches evaluation — so an empty array here
+        // would silently stop these suites from testing what they are about. The
+        // geometry itself is irrelevant; computeMotorScore is mocked.
+        { attempt_number: 1, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
+        { attempt_number: 2, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
+        { attempt_number: 3, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
       ],
       ...overrides,
     },
@@ -137,13 +142,26 @@ describe('First mastery (created === true) triggers the evidence-freeze hook', (
       .toBeLessThan(mockOnLetterMastered.mock.invocationCallOrder[0]);
   });
 
-  it('response shape is completely unchanged by Feature 11B — no new field leaks in', async () => {
+  it('Feature 11B still leaks no field of its own into the response', async () => {
     const res = makeRes();
     await recordLetterCompletion(makeReq(), res);
     const body = res.json.mock.calls[0][0];
+    // The three mastery_* fields are the attempt-3-only policy's own
+    // ADDITIVE metadata (see config/masteryPolicy.js), not Feature 11B's.
+    // Every pre-existing field is still present and unchanged — that is what
+    // this assertion protects.
     expect(Object.keys(body).sort()).toEqual(
-      ['dynamicThresholdNextThreshold', 'dynamicThresholdStatus', 'id', 'letter', 'case_type', 'threshold', 'thresholdFamily', 'thresholdSource'].sort()
+      [
+        'dynamicThresholdNextThreshold', 'dynamicThresholdStatus', 'id', 'letter',
+        'case_type', 'threshold', 'thresholdFamily', 'thresholdSource',
+        'mastery_score', 'mastery_attempt_number', 'mastery_policy_version',
+        // P1 capture fix — additive: whether the cycle was actually judged,
+        // and whether it spends one of the day's three.
+        'evaluation_status', 'cycle_consumed',
+      ].sort()
     );
+    // Nothing named after the evidence hook ever appears.
+    expect(Object.keys(body).some(k => /evidence|milestone/i.test(k))).toBe(false);
   });
 });
 

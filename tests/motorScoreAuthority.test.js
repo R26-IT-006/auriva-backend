@@ -120,7 +120,17 @@ function makeReq({ attemptQuality, attemptScores, letter = 'l' } = {}) {
       student_id: STUDENT_ID, letter, case_type: 'lowercase', wrote_correctly: true,
       // The adversarial payload — a client claiming whatever score it wants.
       attempt_scores: attemptScores,
-      attempts: [makeAttempt({ good: attemptQuality === 'good' })],
+      // A FULL cycle. Mastery is decided on attempt 3 only (see
+      // config/masteryPolicy.js), so a one-attempt payload could never
+      // master regardless of quality — that would test the cycle-shape rule
+      // rather than the property this suite is about, which is that the
+      // CLIENT's claimed scores never affect the outcome. All three attempts
+      // share the same quality so the only variable is the claim.
+      attempts: [
+        makeAttempt({ good: attemptQuality === 'good' }),
+        makeAttempt({ good: attemptQuality === 'good' }),
+        makeAttempt({ good: attemptQuality === 'good' }),
+      ],
     },
   };
 }
@@ -250,7 +260,12 @@ describe('Contradiction regression: computeMotorScore() wins where the retired d
       body: {
         student_id: STUDENT_ID, letter: 'l', case_type: 'lowercase', wrote_correctly: true,
         attempt_scores: [94], // client mirrors the old formula's number too — still overridden
-        attempts: [{ attempt_number: 1, strokes: divergentStrokes(), features: divergentFeatures }],
+        // Full three-attempt cycle — see makeReq above for why.
+        attempts: [
+          { attempt_number: 1, strokes: divergentStrokes(), features: divergentFeatures },
+          { attempt_number: 2, strokes: divergentStrokes(), features: divergentFeatures },
+          { attempt_number: 3, strokes: divergentStrokes(), features: divergentFeatures },
+        ],
       },
     }, res);
 

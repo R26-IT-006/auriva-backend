@@ -81,7 +81,19 @@ function makeReq(overrides = {}) {
     body: {
       student_id: 13, letter: 'c', case_type: 'lowercase',
       attempt_scores: [90], wrote_correctly: true,
-      attempts: [{ attempt_number: 1, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [] }],
+      // A FULL cycle: mastery is decided on attempt 3 only (see
+      // config/masteryPolicy.js), so a one-attempt payload can never reach
+      // the success branch these tests are about.
+      attempts: [
+        // Fixture note: `strokes` must be NON-EMPTY. Capture completeness is checked
+        // before coverage (src/utils/captureStatus.js), and an attempt with no strokes
+        // is a CAPTURE FAULT that never reaches evaluation — so an empty array here
+        // would silently stop these suites from testing what they are about. The
+        // geometry itself is irrelevant; computeMotorScore is mocked.
+        { attempt_number: 1, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
+        { attempt_number: 2, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
+        { attempt_number: 3, features: { smoothness: 0.1, dtw_distance: 10 }, strokes: [{ stroke_id: 1, points: [{ x: 10, y: 10 }, { x: 200, y: 10 }] }] },
+      ],
       ...overrides,
     },
   };
@@ -407,7 +419,27 @@ describe('Section 33 — byte-identical behavior for a student with no family ta
     expect(res.json).toHaveBeenCalledWith({
       completed: false, bestScore: 50, threshold: 57,
       thresholdSource: 'legacy_default', thresholdFamily: null,
+      // Attempt-3-only mastery metadata — ADDITIVE. Every pre-existing field
+      // here is unchanged, which is the property this section pins.
+      // mastery_score equals bestScore only because this fixture's three
+      // attempts are identical; the two are computed independently.
+      mastery_score: 50,
+      mastery_attempt_number: 3,
+      mastery_fail_reason: null,
+      mastery_policy_version: 'attempt3-only-3cycle-v1',
+      // P1 capture fix — a real captured attempt that scored below threshold
+      // is an EVALUATED failure and still spends a cycle. Only a capture
+      // fault sets cycle_consumed:false.
+      evaluation_status: 'evaluated',
+      cycle_consumed: true,
+      // Present only on a capture fault; null for every evaluated outcome.
+      retry_session_key: null,
       dynamicThresholdStatus: 'not_applicable', dynamicThresholdNextThreshold: null,
+      // Practice-date cycle ceiling: one ADDITIVE, informational field. It is
+      // null here because this suite stubs the models, so the usage lookup
+      // finds nothing. The threshold decision this section exists to pin -
+      // completed/bestScore/threshold/source/family/dynamic* - is unchanged.
+      cycle_usage: null,
       message: 'Quality threshold not met',
     });
   });

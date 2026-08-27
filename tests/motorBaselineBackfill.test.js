@@ -7,15 +7,43 @@
 // matches production, not a hand-rolled duplicate of the rules.
 const mockStudentFindAll    = jest.fn(); // Student.findAll
 const mockAssessmentFindOne = jest.fn(); // HandwritingAssessment.findOne
+// The candidate selector now walks the student's assessments in chronological
+// order (earliest ELIGIBLE, not merely earliest), so it queries findAll.
+// Backed by a list rather than a once-queue - see the beforeEach reset below.
+// Every existing test expresses "this is the student's assessment" through
+// mockAssessmentFindOne; the selector now asks for the ordered list, so this
+// shim presents that same value as a one-element list. Queues are reset in
+// beforeEach so a test that returns early cannot leave one behind.
+const mockAssessmentFindAll = jest.fn(async (...args) => {
+  const single = await mockAssessmentFindOne(...args);
+  if (single === undefined || single === null) return [];
+  return Array.isArray(single) ? single : [single];
+});
 const mockBaselineFindOne   = jest.fn(); // StudentMotorBaseline.findOne
+
+// The selector now also requires linked initial-assessment shape evidence.
+// Default: complete canonical evidence for every assessment queried, so an
+// existing "this assessment is eligible" fixture still reads that way. Tests
+// that care about missing/duplicate/non-finite evidence override it.
+const CANONICAL_SHAPES = [
+  'horizontal_line', 'vertical_line', 'full_circle', 'half_circle', 'zigzag', 'curve_wave',
+];
+const mockShapeFindAll = jest.fn(async (opts) => {
+  const ids = opts?.where?.assessment_id;
+  const list = Array.isArray(ids) ? ids : (ids == null ? [] : [ids]);
+  return list.flatMap((assessment_id) =>
+    CANONICAL_SHAPES.map((shape_type) => ({ assessment_id, shape_type, motor_score: 80 })));
+});
+
 const mockCreateInitialMotorBaseline = jest.fn(); // motorBaselineService.createInitialMotorBaseline
 
 jest.mock('fs'); // auto-mocked: existsSync/mkdirSync/writeFileSync all become no-op jest.fn()
 
 jest.mock('../src/models', () => ({
   Student:               { findAll: mockStudentFindAll },
-  HandwritingAssessment: { findOne: mockAssessmentFindOne },
+  HandwritingAssessment: { findOne: mockAssessmentFindOne, findAll: mockAssessmentFindAll },
   StudentMotorBaseline:  { findOne: mockBaselineFindOne },
+  ShapeFeature: { findAll: mockShapeFindAll },
 }));
 
 jest.mock('../src/services/motorBaselineService', () => {
@@ -53,7 +81,15 @@ function makeBaselineRow(overrides = {}) {
 }
 
 beforeEach(() => {
+  mockShapeFindAll.mockClear();
+  // mockReset, not just clearAllMocks: clearAllMocks does not drain a
+  // mockResolvedValueOnce queue, so an early-returning test could otherwise
+  // leave a queued value for the next one.
   jest.clearAllMocks();
+  mockStudentFindAll.mockReset();
+  mockAssessmentFindOne.mockReset();
+  mockBaselineFindOne.mockReset();
+  mockCreateInitialMotorBaseline.mockReset();
 });
 
 // ─── CLI argument parsing ───────────────────────────────────────────────────

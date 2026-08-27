@@ -34,7 +34,17 @@ const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../serv
 // (computeMotorScore-domain) family baseline alongside the existing,
 // untouched Feature 11A baseline. See that service's own header.
 const { attachAuthoritativeFamilyProfile } = require('../services/authoritativeMotorBaselineService');
-const { computeAuthoritativeBestScore } = require('../utils/authoritativeAttemptScoring');
+const {
+  computeAuthoritativeBestScore, computeAuthoritativeMasteryScore,
+} = require('../utils/authoritativeAttemptScoring');
+const {
+  NORMAL_PRACTICE_MASTERY_THRESHOLD, MASTERY_ATTEMPT_NUMBER,
+  MASTERY_FAIL_REASON, CYCLE_BRANCH, MASTERY_POLICY_VERSION,
+  PROGRESSION_FAMILY_THRESHOLDS_ENABLED, EVALUATION_STATUS, cycleIsConsumed,
+} = require('../config/masteryPolicy');
+const {
+  MAX_CYCLES_PER_LETTER_PER_DATE, currentPracticeDate,
+} = require('../config/practiceCyclePolicy');
 const { PROGRESSION_SCORE_VERSION } = require('../config/motorScoreRegime');
 // Pure, deterministic teacher-facing summary of the four authoritative
 // Feature 1 baseline scores — the active replacement for the former
@@ -55,6 +65,9 @@ const models = require('../models');
 const letterMotorMasteryService = require('../services/letterMotorMasteryService');
 const letterCategoryCompletionService = require('../services/letterCategoryCompletionService');
 const teacherService = require('../services/teacherService');
+// Practice-date cycle ceiling — read only, so the client can keep enforcing
+// the same limit after an app restart on the same date.
+const letterCycleService = require('../services/letterCycleService');
 const wordWritingService = require('../services/wordWritingService');
 const { normalizeShapeFeatures, normalizeLetterFeatures } = require('../utils/featureNormalization');
 const { computeMotorScore } = require('../utils/motorScore');
@@ -91,11 +104,15 @@ const teacherRecommendationValidationService = require('../services/teacherRecom
 // item 7 / item 8: a row only counts as fully captured for ML if it has both
 // raw points and a non-empty features object — used to set capture_status
 // uniformly for both normal and collection mode (never blocks a save).
-function rowCaptureStatus({ strokePoints, features }) {
-  const hasStrokes  = Array.isArray(strokePoints) && strokePoints.length > 0;
-  const hasFeatures = features != null && typeof features === 'object' && Object.keys(features).length > 0;
-  return hasStrokes && hasFeatures ? 'complete' : 'incomplete';
-}
+//
+// MOVED to utils/captureStatus.js and re-exported here unchanged. The mastery
+// gate now uses the SAME predicate to decide which attempt it refuses to
+// evaluate, so the row labelled 'incomplete' and the attempt treated as a
+// capture fault can never be two different sets. Semantics are byte-identical
+// to the previous local copy.
+const { rowCaptureStatus, CAPTURE_STATUS } = require('../utils/captureStatus');
+const { resolveRetrySessionKey } = require('../services/letterRetrySessionService');
+const { getInitialAssessmentStatus } = require('../services/initialAssessmentStatusService');
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
@@ -186,6 +203,20 @@ async function submitAssessment(req, res) {
 
   const existingCount = await HandwritingAssessment.count({ where: { student_id } });
   const is_initial    = existingCount === 0;
+
+  // DEV-ONLY forward-path diagnostic. Never in production, never rendered.
+  // Added for the initial-assessment device verification so the submission
+  // that creates an assessment is visible next to the rows it produces.
+  if (process.env.NODE_ENV !== 'production') {
+    logger.info('[INITIAL_ASSESSMENT_SUBMIT]', {
+      student_id,
+      shape_count: Array.isArray(shapes) ? shapes.length : 0,
+      shape_names: Array.isArray(shapes) ? shapes.map(s => s?.shape_id ?? null) : [],
+      collection_mode: collection_mode ?? false,
+      is_initial,
+      endpoint: 'POST /handwriting/assessment',
+    });
+  }
 
   const assessment = await HandwritingAssessment.create({
     student_id,
@@ -433,20 +464,55 @@ function resolveAttemptDemoSpeedLevel(rawValue, context) {
 
 // ML: bulk-insert one immutable row per attempt element from a single POST call.
 // All rows share the same session_key so the full session is always queryable.
-// Never updates existing rows — true append-only store.
-function saveLetterAttempts(attempts, {
+//
+// APPEND-ONLY, with exactly one documented exception: `resumedSessionKey`.
+// When a cycle's attempt 3 suffered a TECHNICAL CAPTURE FAULT, the client
+// retries and re-sends attempts 1 and 2 alongside a fresh attempt 3, under
+// the SAME server-issued session_key. Without special handling that produced
+// duplicate attempt-1/attempt-2 rows in the research store.
+//
+// The rule when resuming:
+//   - an attempt_number that ALREADY has a `complete` row is SKIPPED
+//     entirely — attempts 1 and 2 are never rewritten, so append-only still
+//     holds for every row that was successfully captured
+//   - an attempt_number whose only row is `incomplete` is UPDATED in place —
+//     completing a row that was never finished, not rewriting history
+//   - an attempt_number with no row at all is inserted, as normal
+//
+// That also makes a replayed retry idempotent: sending it twice converges on
+// the same single row per attempt_number rather than accumulating rows.
+async function saveLetterAttempts(attempts, {
   student_id, letter, case_type, sessionKey, passed, bestScore, threshold, collection_mode,
   collection_session_id, protocol_version, device_type, app_version,
   feature_version, template_version, normalization_version, task_order, canvas_width, canvas_height,
   // Motor Score Unification (spec §24/§26) — see config/motorScoreRegime.js.
   progressionScoreVersion = null,
+  // Set ONLY when this POST is completing a capture-fault cycle under a
+  // previously-issued session_key. Null for every ordinary cycle.
+  resumedSessionKey = null,
 }) {
-  if (!Array.isArray(attempts) || attempts.length === 0) return Promise.resolve();
+  if (!Array.isArray(attempts) || attempts.length === 0) return undefined;
 
   const thresholdPassed = (bestScore != null && threshold != null) ? bestScore >= threshold : null;
 
-  return LetterAttempt.bulkCreate(
-    attempts.map(a => {
+  // Resume bookkeeping — only consulted when this POST is completing a
+  // capture-fault cycle under a previously-issued session_key.
+  const completeAlready = new Set();
+  const incompleteRowIdByAttempt = new Map();
+  if (resumedSessionKey) {
+    const existing = await LetterAttempt.findAll({
+      where: { session_key: resumedSessionKey },
+      attributes: ['id', 'attempt_number', 'capture_status'],
+      raw: true,
+    });
+    for (const r of existing) {
+      const n = Number(r.attempt_number);
+      if (r.capture_status === CAPTURE_STATUS.COMPLETE) completeAlready.add(n);
+      else if (!incompleteRowIdByAttempt.has(n)) incompleteRowIdByAttempt.set(n, r.id);
+    }
+  }
+
+  const buildRow = (a) => {
       const { normalized, validity } = normalizeLetterFeatures(a.features, { strokePoints: a.strokes });
       const { motor_score, quality_score, score_version } = computeMotorScore(normalized);
 
@@ -512,8 +578,39 @@ function saveLetterAttempts(attempts, {
         // was possible (single-stroke letter/template).
         stroke_order_matches_template: normalized.stroke_order_meta?.strokeOrderMatchesTemplate ?? null,
       };
-    })
-  );
+  };
+
+  // Normal path (no resume): unchanged bulk insert, one row per attempt.
+  if (!resumedSessionKey) {
+    return LetterAttempt.bulkCreate(attempts.map(buildRow));
+  }
+
+  // Resume path — see this function's header for the three rules.
+  const toInsert = [];
+  for (const a of attempts) {
+    const n = Number(a.attempt_number ?? 1);
+
+    // Already captured successfully: leave the stored row exactly as it is.
+    // This is what keeps attempts 1 and 2 append-only and byte-identical
+    // across a technical retry.
+    if (completeAlready.has(n)) continue;
+
+    const incompleteRowId = incompleteRowIdByAttempt.get(n);
+    if (incompleteRowId != null) {
+      // Complete a row that was never finished. Not a rewrite of history —
+      // this row has never represented a captured attempt.
+      const row = buildRow(a);
+      delete row.student_id; delete row.letter; delete row.case_type;
+      delete row.session_key; delete row.attempt_number;
+      await LetterAttempt.update(row, { where: { id: incompleteRowId } });
+      continue;
+    }
+
+    toInsert.push(buildRow(a));
+  }
+
+  if (toInsert.length > 0) return LetterAttempt.bulkCreate(toInsert);
+  return undefined;
 }
 
 // Feature 2 Step 8 — the ONLY trigger point for automatic Feature 2
@@ -575,7 +672,11 @@ async function recordLetterCompletion(req, res) {
           attempts, collection_mode,
           collection_session_id, protocol_version, device_type, app_version,
           feature_version, template_version, normalization_version, task_order,
-          canvas_width, canvas_height } = req.body;   // ML: attempts is optional — old clients omit it
+          canvas_width, canvas_height,
+          // Capture-fault retry: the server-issued session_key from the
+          // capture_incomplete response. Validated from scratch below — the
+          // client is a courier for it, never an authority.
+          retry_session_key } = req.body;   // ML: attempts is optional — old clients omit it
 
   if (!student_id || !letter || !case_type) {
     throw new ApiError(422, 'student_id, letter, and case_type are required');
@@ -595,8 +696,30 @@ async function recordLetterCompletion(req, res) {
   // gets past this line.
   await teacherService.getOwnStudentById(req.user.id, Number(student_id));
 
-  // ML: one UUID groups all attempt rows from this single POST call
-  const sessionKey = randomUUID();
+  // ML: one UUID groups all attempt rows from this single POST call.
+  //
+  // ...unless this POST is COMPLETING a cycle whose attempt 3 suffered a
+  // technical capture fault. Then the client returns the session_key the
+  // server itself issued, and — once re-validated against the database
+  // (same student, letter, case, practice date, normal learning, still
+  // unfinished) — that cycle is resumed instead of a second one being
+  // created. See services/letterRetrySessionService.js.
+  //
+  // Placed AFTER the ownership check above, so a key naming another
+  // teacher's student can never even be looked up on their behalf.
+  const retryResolution = await resolveRetrySessionKey({
+    studentId: Number(student_id), letter, caseType: case_type,
+    retrySessionKey: retry_session_key,
+  });
+  if (retryResolution.status === 'rejected') {
+    // Never an error to the child: an unusable key is ignored and this
+    // becomes an ordinary new cycle.
+    logger.warn('Retry session key not honoured — starting a new session', {
+      student_id, letter, case_type, reason: retryResolution.reason,
+    });
+  }
+  const resumedSessionKey = retryResolution.status === 'accepted' ? retryResolution.sessionKey : null;
+  const sessionKey = resumedSessionKey ?? randomUUID();
   const metaFields = {
     collection_session_id, protocol_version, device_type, app_version,
     feature_version, template_version, normalization_version, task_order, canvas_width, canvas_height,
@@ -639,6 +762,11 @@ async function recordLetterCompletion(req, res) {
 
   let bestScore = null;
   let threshold = null;
+  // Attempt-3-only mastery (see config/masteryPolicy.js). `bestScore` stays
+  // exactly as it was — it is still computed, still persisted, still what
+  // reports read. It simply no longer decides mastery.
+  let masteryScore  = null;
+  let masteryResult = null;
   // Feature 2 Step 7 — additive response/diagnostic metadata only; the
   // gate itself is still exactly `bestScore < threshold` below, unchanged.
   let thresholdSource = null;
@@ -678,6 +806,15 @@ async function recordLetterCompletion(req, res) {
     });
     bestScore = authoritativeResult.bestScore;
 
+    // The MASTERY value: attempt 3 only, no Math.max, no fallback to an
+    // earlier attempt. Attempts 1 and 2 are drawn with on-screen guidance,
+    // so mastering on the best of the three certified a guided drawing as
+    // independent writing — it did so in roughly 76% of real cycles.
+    masteryResult = computeAuthoritativeMasteryScore({
+      attempts, canvasWidth: canvas_width, canvasHeight: canvas_height,
+    });
+    masteryScore = masteryResult.masteryScore;
+
     // Feature 2 Step 7: resolveProgressionThreshold() replaces the old
     // inline ternary (`typeof quality_threshold === 'number' ? ... :
     // await getStudentThreshold(...)`) with a priority chain that ALSO
@@ -700,7 +837,11 @@ async function recordLetterCompletion(req, res) {
       thresholdFamily = null;
     }
 
-    if (bestScore == null || bestScore < threshold) {
+    // THE MASTERY GATE. Reads masteryScore (attempt 3), never bestScore.
+    // A null masteryScore is a FAIL by policy — a missing, coverage-invalid
+    // or unscoreable independent attempt cannot master a letter, and must
+    // never fall back to a guided one.
+    if (masteryScore == null || masteryScore < threshold) {
       const [rec] = await LetterProgress.findOrCreate({
         where:    { student_id, letter, case_type },
         defaults: { student_id, letter, case_type, blocked_attempts: 0 },
@@ -733,6 +874,7 @@ async function recordLetterCompletion(req, res) {
           student_id, letter, case_type, sessionKey, passed: false, bestScore, threshold,
           collection_mode: false,
           progressionScoreVersion: PROGRESSION_SCORE_VERSION,
+          resumedSessionKey,
           ...metaFields,
         });
         attemptsSaved = true;
@@ -756,13 +898,76 @@ async function recordLetterCompletion(req, res) {
       }
 
       logger.info(`Letter blocked: student=${student_id} ` +
-        `letter=${letter} bestScore=${bestScore} ` +
+        `letter=${letter} masteryScore=${masteryScore} bestScore=${bestScore} ` +
         `threshold=${threshold} wroteCorrectly=${wrote_correctly}`);
+      // How many cycles this letter has now used on this practice date.
+      // ADDITIVE: the client uses it to enforce the same two-cycle ceiling
+      // its own in-memory guard enforces, so closing and reopening the app
+      // cannot buy a third cycle. A read failure degrades to `null`, which
+      // the client treats as "no server opinion" and falls back to its own
+      // guard — never as permission for another cycle.
+      let cycleUsage = null;
+      try {
+        const usage = await letterCycleService.getCycleUsageForDate({
+          studentId: student_id, letter, caseType: case_type,
+        });
+        if (usage.status === 'ok') {
+          cycleUsage = {
+            practice_date: usage.date,
+            cycles_today: usage.cycles,
+            failed_cycles_today: usage.failedCycles,
+            remaining_today: usage.remaining,
+            cap_reached: usage.capReached,
+          };
+        }
+      } catch (err) {
+        logger.warn('Cycle usage lookup failed on blocked letter', {
+          student_id, letter, case_type, errorMessage: err.message,
+        });
+      }
+
+      logger.info(`Letter blocked: student=${student_id} ` +
+        `letter=${letter} cyclesToday=${cycleUsage ? cycleUsage.cycles_today : 'unknown'}`);
+
+      // Did the system actually get to JUDGE this cycle? A capture fault
+      // means there was nothing to judge, so the cycle must not be spent.
+      // Every evaluated outcome — below-threshold AND coverage-invalid —
+      // consumes one, unchanged.
+      const captureIncomplete = masteryResult?.failReason === MASTERY_FAIL_REASON.CAPTURE_INCOMPLETE;
+      const evaluationStatus  = captureIncomplete
+        ? EVALUATION_STATUS.CAPTURE_INCOMPLETE
+        : EVALUATION_STATUS.EVALUATED;
+
+      logNormalLetterCycle({
+        student_id, letter, case_type, attempts, masteryResult, masteryScore,
+        threshold, passed: false, cycleUsage, evaluationStatus,
+      });
+
       return res.status(200).json({
         completed: false, bestScore, threshold,
         thresholdSource, thresholdFamily,
+        // Attempt-3-only mastery — additive, so existing readers of
+        // bestScore keep working unchanged.
+        mastery_score:          masteryScore,
+        mastery_attempt_number: MASTERY_ATTEMPT_NUMBER,
+        mastery_fail_reason:    masteryResult?.failReason ?? null,
+        mastery_policy_version: MASTERY_POLICY_VERSION,
+        // P1 capture fix — additive. The client reads cycle_consumed to
+        // decide whether to spend one of the day's three cycles. This is the
+        // server stating "I did not count this", which is categorically
+        // different from a stale/failed cycle_usage read, and is why it is an
+        // explicit flag rather than something inferred from the count.
+        evaluation_status: evaluationStatus,
+        cycle_consumed:    cycleIsConsumed(masteryResult?.failReason),
+        // Server-issued, single-purpose: present ONLY on a capture fault, and
+        // only so the retry completes THIS cycle instead of creating a second
+        // one with duplicate attempt-1/2 rows. Re-validated on return.
+        retry_session_key: captureIncomplete ? sessionKey : null,
         dynamicThresholdStatus, dynamicThresholdNextThreshold,
-        message: 'Quality threshold not met'
+        cycle_usage: cycleUsage,
+        message: captureIncomplete
+          ? 'Attempt not captured'
+          : 'Quality threshold not met'
       });
     }
   }
@@ -774,9 +979,10 @@ async function recordLetterCompletion(req, res) {
   // `defaults` on an existing row), preserving historical rows exactly as
   // they are (spec §25).
   // Mastery-semantics correction — this is the ONLY place mastered_at is ever
-  // set. Reaching this line already means the existing, unchanged mastery
-  // condition held (bestScore >= threshold, checked above); nothing about that
-  // decision is re-evaluated here.
+  // set. Reaching this line already means the mastery condition held
+  // (masteryScore >= threshold — the ATTEMPT-3 score, checked above);
+  // nothing about that decision is re-evaluated here. Cycle exhaustion,
+  // homework review and Writing Check can never reach this line.
   //
   // `defaults` covers the direct-PASS case (row created here, mastered now).
   // The FAIL -> PASS case needs the explicit update below, because
@@ -829,6 +1035,7 @@ async function recordLetterCompletion(req, res) {
   try {
     await saveLetterAttempts(attempts, {
       student_id, letter, case_type, sessionKey, passed: true, bestScore, threshold,
+      resumedSessionKey,
       collection_mode: false,
       progressionScoreVersion: PROGRESSION_SCORE_VERSION,
       ...metaFields,
@@ -888,12 +1095,98 @@ async function recordLetterCompletion(req, res) {
   }
 
   logger.info(`Letter complete: student=${student_id} ` +
-    `letter=${letter} bestScore=${bestScore ?? 'n/a'} ` +
+    `letter=${letter} masteryScore=${masteryScore ?? 'n/a'} bestScore=${bestScore ?? 'n/a'} ` +
     `threshold=${threshold ?? 'default'} wroteCorrectly=${wrote_correctly}`);
+
+  logNormalLetterCycle({
+    student_id, letter, case_type, attempts, masteryResult, masteryScore,
+    threshold, passed: true, cycleUsage: null,
+    evaluationStatus: EVALUATION_STATUS.EVALUATED,
+  });
+
   res.status(created ? 201 : 200).json({
     id: record.id, letter, case_type,
     threshold, thresholdSource, thresholdFamily,
+    // Attempt-3-only mastery — additive.
+    mastery_score:          masteryScore,
+    mastery_attempt_number: MASTERY_ATTEMPT_NUMBER,
+    mastery_policy_version: MASTERY_POLICY_VERSION,
+    // A pass is always an evaluated outcome that spends a cycle.
+    evaluation_status: EVALUATION_STATUS.EVALUATED,
+    cycle_consumed:    true,
     dynamicThresholdStatus, dynamicThresholdNextThreshold,
+  });
+}
+
+/**
+ * DEV-ONLY device diagnostics for the normal-practice cycle decision.
+ *
+ * Never runs in production, never rendered, never persisted. Exists so the
+ * Attempt-3-only rule is VISIBLE on the device during the pilot: the whole
+ * point of the policy is that attempts 1 and 2 can look good while attempt
+ * 3 does not, and a log that only showed the final verdict would hide
+ * exactly the case worth watching.
+ */
+function logNormalLetterCycle({
+  student_id, letter, case_type, attempts, masteryResult, masteryScore,
+  threshold, passed, cycleUsage, evaluationStatus,
+}) {
+  if (process.env.NODE_ENV === 'production') return;
+
+  const used      = cycleUsage?.cycles_today ?? null;
+  const remaining = used == null ? null : Math.max(0, MAX_CYCLES_PER_LETTER_PER_DATE - used);
+
+  const captureIncomplete =
+    masteryResult?.failReason === MASTERY_FAIL_REASON.CAPTURE_INCOMPLETE;
+
+  let branch;
+  // A capture fault is not a cycle outcome at all — the child stays exactly
+  // where they were and retries attempt 3, so none of the FAILED_* branches
+  // apply.
+  if (captureIncomplete)     branch = 'CAPTURE_INCOMPLETE_RETRY_ATTEMPT_3';
+  else if (passed)           branch = CYCLE_BRANCH.MASTERED_ADVANCE;
+  else if (used === 1)       branch = CYCLE_BRANCH.FAILED_START_CYCLE_2;
+  else if (used === 2)       branch = CYCLE_BRANCH.FAILED_START_CYCLE_3;
+  else if (used != null && used >= MAX_CYCLES_PER_LETTER_PER_DATE)
+                             branch = CYCLE_BRANCH.FAILED_ADVANCE_AFTER_CYCLE_3;
+  else                       branch = 'FAILED_CYCLE_COUNT_UNKNOWN';
+
+  // Per-attempt authoritative scores, so a device log shows the guided
+  // attempts NEXT TO the one that actually decided the outcome.
+  let perAttempt = null;
+  try {
+    perAttempt = computeAuthoritativeBestScore({ attempts, canvasWidth: null, canvasHeight: null }).attemptScores;
+  } catch { /* diagnostics must never affect the request */ }
+
+  logger.info('[PRACTICE_CYCLE_STATUS]', {
+    student: student_id, letter, case: case_type,
+    practice_date: currentPracticeDate(),
+    cycles_used: used, cycles_remaining: remaining,
+    max_cycles: MAX_CYCLES_PER_LETTER_PER_DATE,
+  });
+
+  const attempt3 = Array.isArray(attempts) ? attempts[MASTERY_ATTEMPT_NUMBER - 1] : null;
+
+  logger.info('[NORMAL_LETTER_CYCLE]', {
+    cycle: used ?? 'unknown',
+    attempt1_score: perAttempt?.[0] ?? null,
+    attempt2_score: perAttempt?.[1] ?? null,
+    attempt3_score: perAttempt?.[2] ?? null,
+    // The exact capture label the attempt-3 ROW was stored with — same
+    // predicate, so the log and the database can never disagree.
+    attempt3_capture_status: attempt3
+      ? rowCaptureStatus({ strokePoints: attempt3.strokes, features: attempt3.features })
+      : 'missing',
+    mastery_score:  masteryScore,
+    mastery_attempt_number: MASTERY_ATTEMPT_NUMBER,
+    threshold,
+    coverage_valid:    masteryResult?.coverageValid ?? null,
+    evaluation_status: evaluationStatus ?? null,
+    fail_reason:       masteryResult?.failReason ?? null,
+    cycle_consumed:    cycleIsConsumed(masteryResult?.failReason),
+    passed,
+    branch,
+    policy_version: MASTERY_POLICY_VERSION,
   });
 }
 
@@ -1307,8 +1600,21 @@ async function finalizeAssessment(req, res) {
   // than duplicating history rows. A failure here must never roll back the
   // finalize, change this endpoint's success status, or block the baseline
   // result already computed.
+  //
+  // PHASE 2 (pilot): automatic family-threshold INITIALIZATION is switched
+  // off while Motor Score calibration is outstanding — the progression_*
+  // values it would derive from are not yet trustworthy as the source of a
+  // mastery threshold (see config/masteryPolicy.js for the audit findings).
+  //
+  // Only this one link is cut. The baseline above is still computed and
+  // stored, existing threshold history is untouched and still readable, and
+  // provenance is fully preserved. Re-enabling needs no migration: the
+  // resolver's own lazy-repair path will initialize any student who missed
+  // it, on their next letter.
   let familyThresholdResult = { status: 'skipped_no_baseline', created: null };
-  if (['created', 'already_exists', 'student_baseline_already_exists'].includes(baselineResult.status)) {
+  if (!PROGRESSION_FAMILY_THRESHOLDS_ENABLED) {
+    familyThresholdResult = { status: 'skipped_policy_disabled', created: null };
+  } else if (['created', 'already_exists', 'student_baseline_already_exists'].includes(baselineResult.status)) {
     try {
       familyThresholdResult = await createInitialFamilyThresholds({ studentId: assessment.student_id });
     } catch (error) {
@@ -1379,8 +1685,21 @@ async function getInitialReport(req, res) {
     order: [['created_at', 'ASC']],
   });
 
+  // Additive routing semantics (see services/initialAssessmentStatusService.js).
+  // `hasData` below is DELIBERATELY unchanged — it still means "there is a row
+  // I can render a report from", which is the right question for this
+  // endpoint's other two consumers (the teacher report's initial-assessment
+  // section, and the shape-preview loader). `assessmentStatus` answers the
+  // separate ROUTING question the Welcome screen actually needs.
+  const initialStatus = await getInitialAssessmentStatus({ studentId });
+
   if (!assessment) {
-    return res.json({ hasData: false, letterMastery });
+    return res.json({
+      hasData: false,
+      assessmentStatus:       initialStatus.status,
+      assessmentStatusReason: initialStatus.reason,
+      letterMastery,
+    });
   }
 
   const explanation = await ExplanationResult.findOne({
@@ -1421,7 +1740,14 @@ async function getInitialReport(req, res) {
     : assessment.shapes;
 
   res.json({
+    // UNCHANGED semantics: a renderable assessment row exists.
     hasData: true,
+    // ADDITIVE: whether that assessment is actually USABLE, i.e. whether the
+    // learner should proceed to normal practice. An assessment row with a
+    // null motor_profile keeps hasData:true (the teacher can still see it was
+    // attempted) while reporting assessmentStatus:'incomplete'.
+    assessmentStatus:       initialStatus.status,
+    assessmentStatusReason: initialStatus.reason,
     assessment: {
       id:            assessment.id,
       motor_score:   assessment.motor_score,

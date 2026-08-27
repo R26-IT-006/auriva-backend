@@ -24,7 +24,9 @@
  * not baseline-score sources — see Step 1 audit).
  */
 
-const { HandwritingAssessment, StudentMotorBaseline } = require('../models');
+const { HandwritingAssessment, StudentMotorBaseline, ShapeFeature } = require('../models');
+// The canonical six-shape protocol, reused - never a second copy of the list.
+const { FAMILY_SHAPES } = require('./authoritativeMotorBaselineService');
 const logger = require('../utils/logger');
 
 const BASELINE_VERSION = 'baseline-v1';
@@ -110,6 +112,157 @@ function validateMotorProfileForBaseline(motorProfile, motorScore) {
   };
 }
 
+/**
+ * Is THIS assessment usable as a student's initial motor baseline?
+ *
+ * One predicate, one place. It asks exactly what createInitialMotorBaseline
+ * actually needs and nothing more:
+ *   - not a research/collection-protocol assessment
+ *   - a persisted motor_profile whose three family scores are valid
+ *   - a valid overall motor_score
+ *
+ * Deliberately does NOT require `is_initial` (documented as historically
+ * unreliable) or a finalized flag.
+ *
+ * This is the LEGACY half only. A baseline row exists to do three jobs -
+ * describe the initial motor summary, carry the authoritative progression
+ * family scores, and initialize personalized family thresholds - and the last
+ * two need linked ShapeFeature evidence that motor_profile alone cannot
+ * provide. `findEarliestEligibleAssessment` applies both halves; use it, not
+ * this predicate on its own, to decide what may become a baseline.
+ *
+ * Pure — no DB access, no logging. Shared by the real-time path and the
+ * historical backfill so the two can never drift.
+ *
+ * @param {Object|null} assessment — a HandwritingAssessment row/instance
+ * @returns {{eligible: boolean, reason: string|null}}
+ */
+function isEligibleInitialMotorAssessment(assessment) {
+  if (!assessment) return { eligible: false, reason: 'assessment_missing' };
+  if (assessment.collection_mode === true) {
+    return { eligible: false, reason: 'collection_assessment_not_eligible' };
+  }
+  const validation = validateMotorProfileForBaseline(assessment.motor_profile, assessment.motor_score);
+  if (!validation.valid) return { eligible: false, reason: validation.reason };
+  return { eligible: true, reason: null };
+}
+
+/**
+ * The EARLIEST ELIGIBLE non-collection assessment for a student.
+ *
+ * ── Why this replaced "the earliest non-collection assessment" ───────────
+ * That older rule assumed the earliest row was the real initial assessment.
+ * Live data disproved it: student 10's earliest non-collection assessment
+ * (2026-05-01) carries motor_profile = NULL, and the rule rejected the whole
+ * student rather than looking past it — while 59 perfectly valid assessments
+ * sat behind it. The student could therefore NEVER receive a baseline, and
+ * every letter threshold fell back to the global default forever.
+ *
+ * Chronology is still respected, and this still never "picks a later
+ * assessment because an earlier one failed to pass validation for an
+ * interesting reason": it walks forward in time and takes the FIRST row that
+ * is genuinely usable. An earlier eligible row always wins over a later one.
+ *
+ * @param {{studentId: number}} args
+ * @returns {Promise<{assessment: Object|null, skipped: Array<{id, reason}>}>}
+ */
+async function findEarliestEligibleAssessment({ studentId }) {
+  const candidates = await HandwritingAssessment.findAll({
+    where: { student_id: studentId, collection_mode: false },
+    order: [['created_at', 'ASC'], ['id', 'ASC']],
+  });
+  if (candidates.length === 0) return { assessment: null, skipped: [] };
+
+  // ONE evidence query for every candidate, not one per assessment - a
+  // long-running student can have well over a hundred of them.
+  //
+  // source = 'initial_assessment' is what excludes pre-writing warm-up
+  // captures, which are written with assessment_id NULL by design and must
+  // never become baseline evidence.
+  let evidenceRows = [];
+  try {
+    evidenceRows = await ShapeFeature.findAll({
+      where: {
+        student_id: studentId,
+        assessment_id: candidates.map((c) => c.id),
+        source: SOURCE_INITIAL_ASSESSMENT_EVIDENCE,
+        collection_mode: false,
+      },
+      attributes: ['assessment_id', 'shape_type', 'motor_score'],
+      raw: true,
+    });
+  } catch (err) {
+    logEvent('warn', 'Motor baseline: shape-evidence lookup failed', {
+      studentId, assessmentId: null, status: 'evidence_read_failed',
+    });
+    // Fails CLOSED: with no evidence readable, nothing is fully eligible, so
+    // no baseline is created from an unverified assessment.
+  }
+
+  const byAssessment = new Map();
+  for (const row of evidenceRows) {
+    if (!byAssessment.has(row.assessment_id)) byAssessment.set(row.assessment_id, []);
+    byAssessment.get(row.assessment_id).push(row);
+  }
+
+  const skipped = [];
+  for (const candidate of candidates) {
+    // Half 1 - the legacy descriptive fields.
+    const { eligible, reason } = isEligibleInitialMotorAssessment(candidate);
+    if (!eligible) {
+      skipped.push({ id: candidate.id, reason });
+      continue;
+    }
+    // Half 2 - the authoritative progression evidence.
+    const evidence = evaluateShapeEvidence(byAssessment.get(candidate.id));
+    if (!evidence.sufficient) {
+      skipped.push({ id: candidate.id, reason: evidence.reason, missing: evidence.missing });
+      continue;
+    }
+    return { assessment: candidate, skipped };
+  }
+  return { assessment: null, skipped };
+}
+
+// ─── Authoritative shape evidence ───────────────────────────────────────────
+//
+// The six canonical initial-assessment tasks, flattened from the SAME family
+// map computeAuthoritativeFamilyProfile() averages over. Deliberately derived
+// rather than re-listed: a second hand-written copy of these six strings is
+// exactly how the two would drift.
+const REQUIRED_SHAPES = Object.freeze(Object.values(FAMILY_SHAPES).flat());
+const SOURCE_INITIAL_ASSESSMENT_EVIDENCE = 'initial_assessment';
+
+/**
+ * Does this assessment carry the evidence the AUTHORITATIVE progression
+ * scores actually need?
+ *
+ * Checks the canonical task SET, not a row count. Six rows that are five
+ * copies of horizontal_line plus a zigzag would satisfy `COUNT(*) >= 6` and
+ * produce a baseline with two null families - so presence is checked per
+ * shape, and each must carry a finite motor_score.
+ *
+ * Pure: takes the already-loaded rows, so the caller can fetch every
+ * candidate's evidence in ONE query instead of one per assessment.
+ *
+ * @param {Array<{shape_type: string, motor_score: number|null}>} rows
+ * @returns {{sufficient: boolean, reason: string|null, missing: string[]}}
+ */
+function evaluateShapeEvidence(rows) {
+  const usable = new Map();
+  for (const row of rows ?? []) {
+    const score = row?.motor_score;
+    if (typeof score !== 'number' || !Number.isFinite(score)) continue;
+    if (!usable.has(row.shape_type)) usable.set(row.shape_type, score);
+  }
+
+  const missing = REQUIRED_SHAPES.filter((shape) => !usable.has(shape));
+  if (missing.length > 0) {
+    return { sufficient: false, reason: 'incomplete_shape_evidence', missing };
+  }
+  return { sufficient: true, reason: null, missing: [] };
+}
+
 function result(status, baseline, reason = null) {
   return { status, baseline, reason };
 }
@@ -172,17 +325,44 @@ async function createInitialMotorBaseline({ studentId, assessmentId, isBackfille
     // in handwritingController.js). Reuse that same existing project
     // convention: the earliest non-collection assessment for this student.
     // id is a deterministic tiebreaker for equal created_at timestamps.
-    const earliestAssessment = await HandwritingAssessment.findOne({
-      where: { student_id: studentId, collection_mode: false },
-      order: [['created_at', 'ASC'], ['id', 'ASC']],
-    });
-    if (!earliestAssessment || earliestAssessment.id !== assessment.id) {
-      // Deliberately does NOT fall back to a later assessment when the
-      // earliest one is ineligible — see invalid_motor_profile handling
-      // below. A later assessment must never silently become "the" baseline;
-      // that is the controlled backfill utility's job, not this path.
-      logEvent('info', 'Motor baseline: not the eligible initial assessment', { studentId, assessmentId, status: 'not_initial_assessment' });
-      return result('not_initial_assessment', null);
+    // If THIS assessment is itself unusable, say so specifically rather than
+    // reporting the generic "not the initial one". Its own reason
+    // (motor_profile_missing, missing_curved_score, ...) is far more useful
+    // to a caller and to the backfill utility, and step 6 below produces it.
+    // Falling through here keeps that contract byte-identical.
+    const selfEligibility = isEligibleInitialMotorAssessment(assessment);
+    if (!selfEligibility.eligible) {
+      logEvent('info', 'Motor baseline: invalid motor profile', { studentId, assessmentId, status: 'invalid_motor_profile' });
+      return result('invalid_motor_profile', null, selfEligibility.reason);
+    }
+
+    const { assessment: earliestEligible, skipped } = await findEarliestEligibleAssessment({ studentId });
+    if (!earliestEligible) {
+      // No usable assessment anywhere for this student. Honest status, no
+      // fabricated baseline - the threshold resolver's safe global fallback
+      // keeps the child unblocked.
+      logEvent('info', 'Motor baseline: no eligible assessment for this student', {
+        studentId, assessmentId, status: 'not_initial_assessment',
+      });
+      return result('not_initial_assessment', null, 'no_eligible_assessment');
+    }
+    if (earliestEligible.id !== assessment.id) {
+      // Chronology is preserved: an EARLIER eligible assessment already owns
+      // this student's baseline, so this later one must not become it.
+      logEvent('info', 'Motor baseline: not the earliest eligible assessment', {
+        studentId, assessmentId, status: 'not_initial_assessment',
+      });
+      return result('not_initial_assessment', null, 'earlier_eligible_assessment_exists');
+    }
+    if (skipped.length > 0) {
+      // Visible, not silent: this student had earlier rows that could not be
+      // used, and which ones. Exactly the case that used to block a baseline
+      // outright (see findEarliestEligibleAssessment's header).
+      logEvent('info', 'Motor baseline: skipped earlier ineligible assessments', {
+        studentId, assessmentId, status: 'skipped_ineligible',
+        skippedCount: skipped.length,
+        skippedReasons: [...new Set(skipped.map(s => s.reason))].join(','),
+      });
     }
 
     // 5. Idempotency — one baseline per source assessment (also enforced by
@@ -307,4 +487,8 @@ async function getStudentMotorBaseline({ studentId }) {
   }
 }
 
-module.exports = { createInitialMotorBaseline, getStudentMotorBaseline, validateMotorProfileForBaseline };
+module.exports = {
+  isEligibleInitialMotorAssessment,
+  findEarliestEligibleAssessment,
+  evaluateShapeEvidence,
+  REQUIRED_SHAPES, createInitialMotorBaseline, getStudentMotorBaseline, validateMotorProfileForBaseline };

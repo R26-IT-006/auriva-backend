@@ -56,6 +56,7 @@ const {
   computeEvidenceFingerprint, classifyAutomaticThresholdPersistence, persistAutomaticThresholdDecisions,
   processDynamicThresholdAfterLetterSession,
   INITIAL_THRESHOLD_MARGIN,
+  INITIAL_PERSONALIZED_THRESHOLD_CEILING,
 } = require('../src/services/dynamicThresholdService');
 const { MAPPING_VERSION, getBaselineFamily } = require('../src/config/letterBaselineFamilies');
 
@@ -196,6 +197,20 @@ beforeEach(() => {
 
 // ─── Test 1 — Normal derivation ────────────────────────────────────────────
 
+// Bounded initialization: every derivation result now also reports the
+// BOUNDED target and whether the pilot ceiling changed it. `rawTarget` still
+// reports what the formula asked for, unchanged.
+function derived({ baselineScore, margin = 5, status = 'ready', reason = null }) {
+  const rawTarget = baselineScore + margin;
+  const ceiling = INITIAL_PERSONALIZED_THRESHOLD_CEILING;
+  const ceilingApplied = rawTarget > ceiling;
+  return {
+    baselineScore, margin, rawTarget,
+    target: status === 'ready' ? (ceilingApplied ? ceiling : rawTarget) : null,
+    ceiling, ceilingApplied, status, reason,
+  };
+}
+
 describe('Test 1 — normal derivation', () => {
   it('derives straight=67, curved=88, complex=73 from the known student 13 baseline shape', async () => {
     mockFindOne.mockResolvedValueOnce(makeBaselineRow());
@@ -203,9 +218,14 @@ describe('Test 1 — normal derivation', () => {
     const result = await deriveInitialFamilyThresholds({ studentId: 13 });
 
     expect(result.status).toBe('derived');
-    expect(result.thresholds.straight).toEqual({ baselineScore: 62, margin: 5, rawTarget: 67, status: 'ready', reason: null });
-    expect(result.thresholds.curved).toEqual({ baselineScore: 83, margin: 5, rawTarget: 88, status: 'ready', reason: null });
-    expect(result.thresholds.complex).toEqual({ baselineScore: 68, margin: 5, rawTarget: 73, status: 'ready', reason: null });
+    // 62+5 and 68+5 are below the ceiling and pass through untouched; 83+5=88
+    // is above it and bounds to 85.
+    expect(result.thresholds.straight).toEqual(derived({ baselineScore: 62 }));
+    expect(result.thresholds.curved).toEqual(derived({ baselineScore: 83 }));
+    expect(result.thresholds.complex).toEqual(derived({ baselineScore: 68 }));
+    expect(result.thresholds.straight.target).toBe(67);
+    expect(result.thresholds.curved.target).toBe(85);   // bounded
+    expect(result.thresholds.complex.target).toBe(73);
   });
 
   it('defaults margin to INITIAL_THRESHOLD_MARGIN (5) when not supplied', async () => {
@@ -286,7 +306,8 @@ describe('Test 7 — zero margin is allowed', () => {
     const result = await deriveInitialFamilyThresholds({ studentId: 13, margin: 0 });
 
     expect(result.status).toBe('derived');
-    expect(result.thresholds.straight).toEqual({ baselineScore: 62, margin: 0, rawTarget: 62, status: 'ready', reason: null });
+    expect(result.thresholds.straight).toEqual(derived({ baselineScore: 62, margin: 0 }));
+    expect(result.thresholds.straight.target).toBe(62); // below the ceiling
     expect(result.thresholds.curved.rawTarget).toBe(83);
     expect(result.thresholds.complex.rawTarget).toBe(68);
   });
@@ -294,15 +315,20 @@ describe('Test 7 — zero margin is allowed', () => {
 
 // ─── Test 8 — Target > 100 ──────────────────────────────────────────────────
 
-describe('Test 8 — target exceeds 100', () => {
-  it('baseline=98, margin=5 -> rawTarget=103, requires_review, no clamping', async () => {
+describe('Test 8 — a raw target above the score space', () => {
+  it('baseline=98 -> rawTarget=103 is BOUNDED to 85, not sent to requires_review', async () => {
+    // Policy change: an unbounded raw target used to leave a strong child
+    // with no automatic threshold at all. The ceiling resolves it to a usable
+    // value instead, and rawTarget still records what the formula asked for.
     mockFindOne.mockResolvedValueOnce(makeBaselineRow({ complex_score: 98 }));
 
     const result = await deriveInitialFamilyThresholds({ studentId: 13 });
 
-    expect(result.thresholds.complex).toEqual({
-      baselineScore: 98, margin: 5, rawTarget: 103, status: 'requires_review', reason: 'target_exceeds_score_range',
-    });
+    expect(result.thresholds.complex).toEqual(derived({ baselineScore: 98 }));
+    expect(result.thresholds.complex.status).toBe('ready');
+    expect(result.thresholds.complex.rawTarget).toBe(103);
+    expect(result.thresholds.complex.target).toBe(85);
+    expect(result.thresholds.complex.ceilingApplied).toBe(true);
     // Other families are unaffected — independence, not an all-or-nothing failure.
     expect(result.thresholds.straight.status).toBe('ready');
     expect(result.status).toBe('derived'); // top-level status still 'derived' — per-family granularity
@@ -312,12 +338,15 @@ describe('Test 8 — target exceeds 100', () => {
 // ─── Test 9 — Exactly 100 ───────────────────────────────────────────────────
 
 describe('Test 9 — exactly 100', () => {
-  it('baseline=95, margin=5 -> rawTarget=100, status ready (not requires_review)', async () => {
+  it('baseline=95 -> rawTarget=100, bounded to 85, status ready', async () => {
     mockFindOne.mockResolvedValueOnce(makeBaselineRow({ straight_score: 95 }));
 
     const result = await deriveInitialFamilyThresholds({ studentId: 13 });
 
-    expect(result.thresholds.straight).toEqual({ baselineScore: 95, margin: 5, rawTarget: 100, status: 'ready', reason: null });
+    expect(result.thresholds.straight).toEqual(derived({ baselineScore: 95 }));
+    expect(result.thresholds.straight.rawTarget).toBe(100);
+    expect(result.thresholds.straight.target).toBe(85);
+    expect(result.thresholds.straight.ceilingApplied).toBe(true);
   });
 });
 
@@ -437,7 +466,7 @@ describe('Persistence Test 1 — 3-family creation', () => {
 
     expect(result.status).toBe('created');
     expect(result.created.straight).toMatchObject({ status: 'created', newThreshold: 67 });
-    expect(result.created.curved).toMatchObject({ status: 'created', newThreshold: 88 });
+    expect(result.created.curved).toMatchObject({ status: 'created', newThreshold: 85 });
     expect(result.created.complex).toMatchObject({ status: 'created', newThreshold: 73 });
     expect(mockThBulkCreate).toHaveBeenCalledTimes(1);
     expect(mockThBulkCreate.mock.calls[0][0]).toHaveLength(3);
@@ -461,7 +490,6 @@ describe('Persistence Test 2 — exact row metadata', () => {
       old_threshold: null, new_threshold: 67,
       source: 'initial_from_baseline', reason: 'baseline_plus_margin',
       baseline_id: 1, baseline_version: 'baseline-v1', mapping_version: 'letter-baseline-family-v1',
-      recent_window_snapshot: null,
     });
     expect(straightRow).not.toHaveProperty('created_at'); // DB/model default, never set here
   });
@@ -525,17 +553,38 @@ describe('Persistence Test 5 — missing baseline', () => {
 
 // ─── Persistence Test 6 — requires_review family skipped ──────────────────
 
-describe('Persistence Test 6 — requires_review family skipped', () => {
-  it('a family with rawTarget>100 is skipped, never persisted', async () => {
+describe('Persistence Test 6 — a high baseline is bounded, not skipped', () => {
+  it('a family whose raw target exceeds the score space IS persisted, at the ceiling', async () => {
+    // Policy change: this family used to be skipped as requires_review,
+    // leaving a strong child with no automatic threshold. It is now created
+    // at the ceiling, with the raw target preserved as provenance.
     mockFindOne.mockResolvedValueOnce(makeBaselineRow({ complex_score: 98 }));
     mockThFindAll.mockResolvedValueOnce([]);
     mockThBulkCreate.mockImplementationOnce(echoBulkCreate());
 
     const result = await createInitialFamilyThresholds({ studentId: 13 });
 
-    expect(result.created.complex).toEqual({ status: 'skipped_requires_review', reason: 'target_exceeds_score_range' });
-    const insertedKeys = mockThBulkCreate.mock.calls[0][0].map(r => r.scope_key);
-    expect(insertedKeys).not.toContain('complex');
+    expect(result.created.complex.status).toBe('created');
+    const rows = mockThBulkCreate.mock.calls[0][0];
+    expect(rows.map(r => r.scope_key)).toContain('complex');
+
+    const complexRow = rows.find(r => r.scope_key === 'complex');
+    expect(complexRow.new_threshold).toBe(INITIAL_PERSONALIZED_THRESHOLD_CEILING);
+    // Backward compatible: source/reason are untouched for existing readers.
+    expect(complexRow.source).toBe('initial_from_baseline');
+    expect(complexRow.reason).toBe('baseline_plus_margin');
+    // ...and what the ceiling did is recorded additively.
+    expect(complexRow.recent_window_snapshot.initialization).toEqual({
+      baseline_score: 98, margin: 5, raw_target: 103,
+      ceiling_value: 85, ceiling_applied: true,
+    });
+  });
+
+  it('SENTINEL — without the ceiling this row would be 103, outside the score space', () => {
+    // Proof the bound is load-bearing: the formula's own output is invalid.
+    expect(98 + 5).toBeGreaterThan(100);
+    expect(INITIAL_PERSONALIZED_THRESHOLD_CEILING).toBe(85);
+    expect(Math.min(98 + 5, INITIAL_PERSONALIZED_THRESHOLD_CEILING)).toBe(85);
   });
 });
 
@@ -1269,8 +1318,9 @@ describe('getCurrentFamilyThresholdsForStudent — Teacher Dashboard integration
 
     expect(result.status).toBe('resolved');
     expect(result.families.straight).toEqual({ status: 'available', threshold: 14, source: 'initial_from_baseline' });
-    expect(result.families.curved).toEqual({ status: 'available', threshold: 100, source: 'initial_from_baseline' });
-    expect(result.families.complex).toEqual({ status: 'available', threshold: 99, source: 'initial_from_baseline' });
+    expect(result.families.curved).toEqual({ status: 'available', threshold: 85, source: 'initial_from_baseline' });
+    // 94+5=99 exceeds the pilot ceiling and bounds to 85.
+    expect(result.families.complex).toEqual({ status: 'available', threshold: 85, source: 'initial_from_baseline' });
     expect(mockThBulkCreate).toHaveBeenCalledTimes(1); // exactly one repair attempt, not one per family
   });
 

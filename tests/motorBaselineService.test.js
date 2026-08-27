@@ -5,19 +5,43 @@
 // Mock function names below must start with "mock" so Jest's module-factory
 // hoisting can reference them inside jest.mock(...).
 const mockFindByPk         = jest.fn(); // HandwritingAssessment.findByPk
-const mockAssessmentFindOne = jest.fn(); // HandwritingAssessment.findOne (earliest-assessment lookup)
+// The earliest-ELIGIBLE lookup walks the student's assessments in
+// chronological order, so the service uses findAll. Backed by a plain list
+// rather than a mockResolvedValueOnce queue: `jest.clearAllMocks()` does NOT
+// drain a once-queue, so a test that returned early used to leave a queued
+// value behind for the NEXT test to consume.
+let assessmentCandidates = [];
+const mockAssessmentFindOne = jest.fn(); // legacy handle, kept for assertions
+const mockAssessmentFindAll = jest.fn(async () => assessmentCandidates);
 const mockBaselineFindOne  = jest.fn(); // StudentMotorBaseline.findOne
+
+// The selector now also requires linked initial-assessment shape evidence.
+// Default: complete canonical evidence for every assessment queried, so an
+// existing "this assessment is eligible" fixture still reads that way. Tests
+// that care about missing/duplicate/non-finite evidence override it.
+const CANONICAL_SHAPES = [
+  'horizontal_line', 'vertical_line', 'full_circle', 'half_circle', 'zigzag', 'curve_wave',
+];
+const mockShapeFindAll = jest.fn(async (opts) => {
+  const ids = opts?.where?.assessment_id;
+  const list = Array.isArray(ids) ? ids : (ids == null ? [] : [ids]);
+  return list.flatMap((assessment_id) =>
+    CANONICAL_SHAPES.map((shape_type) => ({ assessment_id, shape_type, motor_score: 80 })));
+});
+
 const mockBaselineCreate   = jest.fn(); // StudentMotorBaseline.create
 
 jest.mock('../src/models', () => ({
   HandwritingAssessment: {
     findByPk: mockFindByPk,
     findOne:  mockAssessmentFindOne,
+    findAll:  mockAssessmentFindAll,
   },
   StudentMotorBaseline: {
     findOne: mockBaselineFindOne,
     create:  mockBaselineCreate,
   },
+  ShapeFeature: { findAll: mockShapeFindAll },
 }));
 
 const { createInitialMotorBaseline, getStudentMotorBaseline } = require('../src/services/motorBaselineService');
@@ -59,7 +83,7 @@ function makeBaselineRow(overrides = {}) {
 // common setup shared by every test that needs to reach score validation.
 function queueEligibleAssessment(assessment, { skipBaselineChecks = false } = {}) {
   mockFindByPk.mockResolvedValueOnce(assessment);
-  mockAssessmentFindOne.mockResolvedValueOnce(assessment);
+  assessmentCandidates = [assessment];
   if (!skipBaselineChecks) {
     mockBaselineFindOne.mockResolvedValueOnce(null); // source_assessment_id check
     mockBaselineFindOne.mockResolvedValueOnce(null); // student-level check
@@ -67,7 +91,20 @@ function queueEligibleAssessment(assessment, { skipBaselineChecks = false } = {}
 }
 
 beforeEach(() => {
+  mockShapeFindAll.mockClear();
+  // mockReset, not just clearAllMocks: `clearAllMocks` clears recorded calls
+  // but NOT a pending mockResolvedValueOnce queue. Tests that return early
+  // (e.g. an invalid profile now short-circuits before the baseline lookups)
+  // would otherwise leave queued values behind for the NEXT test to consume,
+  // which is exactly how an unrelated lookup test started failing.
   jest.clearAllMocks();
+  mockFindByPk.mockReset();
+  mockAssessmentFindOne.mockReset();
+  mockBaselineFindOne.mockReset();
+  mockBaselineCreate.mockReset();
+  assessmentCandidates = [];
+  mockAssessmentFindAll.mockReset();
+  mockAssessmentFindAll.mockImplementation(async () => assessmentCandidates);
 });
 
 // ─── Test 1 — Successful creation ──────────────────────────────────────────
@@ -122,7 +159,7 @@ describe('Test 2 — existing baseline', () => {
 
     // Second call: source check now finds the row created above.
     mockFindByPk.mockResolvedValueOnce(assessment);
-    mockAssessmentFindOne.mockResolvedValueOnce(assessment);
+    assessmentCandidates = [assessment];
     mockBaselineFindOne.mockResolvedValueOnce(created);
 
     const first  = await createInitialMotorBaseline({ studentId: 10, assessmentId: 100 });
@@ -145,7 +182,7 @@ describe('Test 3 — student mismatch', () => {
 
     expect(res.status).toBe('student_mismatch');
     expect(res.baseline).toBeNull();
-    expect(mockAssessmentFindOne).not.toHaveBeenCalled();
+    expect(mockAssessmentFindAll).not.toHaveBeenCalled();
     expect(mockBaselineCreate).not.toHaveBeenCalled();
   });
 });
@@ -160,7 +197,7 @@ describe('Test 4 — collection mode', () => {
 
     expect(res.status).toBe('collection_assessment_not_eligible');
     expect(res.baseline).toBeNull();
-    expect(mockAssessmentFindOne).not.toHaveBeenCalled();
+    expect(mockAssessmentFindAll).not.toHaveBeenCalled();
   });
 });
 
@@ -172,7 +209,7 @@ describe('Test 5 — later assessment', () => {
     const assessment2 = makeAssessment({ id: 2, created_at: new Date('2026-02-01T00:00:00Z') });
 
     mockFindByPk.mockResolvedValueOnce(assessment2);
-    mockAssessmentFindOne.mockResolvedValueOnce(assessment1); // earliest is assessment 1, not 2
+    assessmentCandidates = [assessment1, assessment2]; // assessment 1 is the earliest eligible
 
     const res = await createInitialMotorBaseline({ studentId: 10, assessmentId: 2 });
 
@@ -360,7 +397,7 @@ describe('Test 14 — student already has a baseline from a different assessment
     const existingBaseline = makeBaselineRow({ id: 1, source_assessment_id: 100, student_id: 10 });
 
     mockFindByPk.mockResolvedValueOnce(assessmentB);
-    mockAssessmentFindOne.mockResolvedValueOnce(assessmentB);
+    assessmentCandidates = [assessmentB];
     mockBaselineFindOne.mockResolvedValueOnce(null);              // source_assessment_id=200 → none
     mockBaselineFindOne.mockResolvedValueOnce(existingBaseline);  // student-level → found (from assessment 100)
 
@@ -380,7 +417,7 @@ describe('Test 15 — race condition', () => {
     const raceRow     = makeBaselineRow({ id: 42 });
 
     mockFindByPk.mockResolvedValueOnce(assessment);
-    mockAssessmentFindOne.mockResolvedValueOnce(assessment);
+    assessmentCandidates = [assessment];
     mockBaselineFindOne
       .mockResolvedValueOnce(null)     // source check (before insert attempt)
       .mockResolvedValueOnce(null)     // student check
@@ -547,6 +584,6 @@ describe('Test E — deterministic lookup', () => {
     await getStudentMotorBaseline({ studentId: 10 });
 
     expect(mockFindByPk).not.toHaveBeenCalled();
-    expect(mockAssessmentFindOne).not.toHaveBeenCalled();
+    expect(mockAssessmentFindAll).not.toHaveBeenCalled();
   });
 });

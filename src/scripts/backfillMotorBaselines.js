@@ -35,7 +35,9 @@ const fs   = require('fs');
 const path = require('path');
 
 const { Student, HandwritingAssessment, StudentMotorBaseline } = require('../models');
-const { createInitialMotorBaseline, validateMotorProfileForBaseline } = require('../services/motorBaselineService');
+const {
+  createInitialMotorBaseline, validateMotorProfileForBaseline, findEarliestEligibleAssessment,
+} = require('../services/motorBaselineService');
 const logger = require('../utils/logger');
 
 const BASELINE_VERSION    = 'baseline-v1';
@@ -118,15 +120,29 @@ async function evaluateCandidate(studentId) {
     };
   }
 
-  // Earliest non-collection assessment — same convention as
-  // createInitialMotorBaseline / getInitialReport. Does NOT trust
-  // is_initial. id is a deterministic tiebreaker for equal created_at.
-  const earliestAssessment = await HandwritingAssessment.findOne({
-    where: { student_id: studentId, collection_mode: false },
-    order: [['created_at', 'ASC'], ['id', 'ASC']],
-  });
+  // Earliest ELIGIBLE non-collection assessment — the same shared selector
+  // the production service uses, so the two paths cannot drift.
+  //
+  // This used to be the earliest non-collection assessment regardless of
+  // whether it was usable, which is the exact defect that left student 10
+  // (whose first row carries motor_profile = NULL) permanently without a
+  // baseline. Chronology is still respected: the FIRST usable row wins, never
+  // a later one when an earlier usable one exists.
+  const { assessment: earliestAssessment, skipped } = await findEarliestEligibleAssessment({ studentId });
   if (!earliestAssessment) {
-    return { studentId, assessmentId: null, status: 'SKIPPED_NO_ASSESSMENT', reason: null };
+    // `skipped` already distinguishes the two cases without a second query:
+    // empty means the student has no non-collection assessment at all;
+    // non-empty means rows exist but none is usable, and carries the reason.
+    if (skipped.length === 0) {
+      return { studentId, assessmentId: null, status: 'SKIPPED_NO_ASSESSMENT', reason: null };
+    }
+    // Reported through the script's OWN status vocabulary, not a new one -
+    // the first (earliest) unusable row's reason is what the report names.
+    return {
+      studentId, assessmentId: skipped[0].id,
+      status: classifyValidationReason(skipped[0].reason),
+      reason: skipped[0].reason, skippedCount: skipped.length,
+    };
   }
 
   const existingBySource = await StudentMotorBaseline.findOne({
@@ -154,6 +170,8 @@ async function evaluateCandidate(studentId) {
 
   return {
     studentId, assessmentId: earliestAssessment.id, assessmentCreatedAt: earliestAssessment.created_at,
+    // Visible provenance: which earlier rows were stepped over, and why.
+    skippedEarlier: skipped,
     status: CANDIDATE_ELIGIBLE,
     scores: {
       straight: validation.scores.straightScore,

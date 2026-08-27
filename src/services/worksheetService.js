@@ -35,10 +35,40 @@ const { evaluateWorksheetRecommendations } = require('./worksheetRecommendationS
 const { getWorksheetMotorPlan, isValidIntensity } = require('../config/worksheetMotorMap');
 const { PERSISTENT_DIFFICULTY_STATUSES } = require('../config/persistentDifficultyPolicy');
 const logger = require('../utils/logger');
+const letterCycleService = require('./letterCycleService');
 
 // A worksheet occupying a child's desk right now. Only one of these may exist
 // per (student, letter, case) — enforced by a partial unique index too.
 const LIVE_STATUSES = Object.freeze(['generated', 'assigned', 'submitted']);
+
+// Which mechanism produced a candidate. Kept explicit so the teacher UI can
+// present the exact-letter recommendation and the broader family-level one
+// differently, and so neither is ever mistaken for the other.
+const CANDIDATE_SOURCE = Object.freeze({
+  // Emitted by every NEW exact-letter candidate. The cap became three cycles
+  // when mastery moved to attempt-3-only (see config/masteryPolicy.js), so
+  // the old name would have been actively wrong about what happened.
+  THREE_CYCLE_FAILURE: 'three_cycle_failure',
+  // DEPRECATED for writing, PERMANENT for reading. Worksheet rows created
+  // before the three-cycle policy carry this exact string in the database and
+  // in already-issued teacher recommendations. It is never emitted again, and
+  // never removed — a rename without this alias would orphan those rows in
+  // the teacher UI.
+  TWO_CYCLE_FAILURE: 'two_cycle_failure',
+  PERSISTENT_DIFFICULTY: 'persistent_difficulty',
+});
+
+// Every source string that means "this one letter needs home practice",
+// historical included. Read paths must use this, never an === against a
+// single value.
+const EXACT_LETTER_CANDIDATE_SOURCES = Object.freeze([
+  CANDIDATE_SOURCE.THREE_CYCLE_FAILURE,
+  CANDIDATE_SOURCE.TWO_CYCLE_FAILURE,
+]);
+
+function isExactLetterCandidateSource(source) {
+  return EXACT_LETTER_CANDIDATE_SOURCES.includes(source);
+}
 
 // Identifies the STRUCTURE of a stored plan, so a future reader knows which
 // worksheet-generation shape produced a historical artefact. Deliberately a
@@ -137,6 +167,49 @@ function deriveTargetLetters(stream) {
  *
  * Read-only. Composes evaluateWorksheetRecommendations() exactly once.
  */
+/**
+ * The exact-letter home-practice candidates: letters that used ALL THREE of
+ * a practice date's cycles and failed every one, and are still unmastered.
+ *
+ * "Failed" now means the CYCLE's attempt-3 comparison failed — a guided
+ * attempt scoring well never counted and never counts. The three-cycle
+ * requirement is not hardcoded here: it reads
+ * MAX_CYCLES_PER_LETTER_PER_DATE via letterCycleService, so the cap and the
+ * homework trigger can never drift apart.
+ *
+ * A SECOND, independent source alongside the persistent-difficulty
+ * recommendation. The two answer different questions and are deliberately not
+ * merged:
+ *
+ *   three_cycle_failure     "this letter needs help now"     one letter, one day
+ *   persistent_difficulty   "this movement family is hard"   10 cycles, 2 windows
+ *
+ * The 10-cycle mechanism (evaluateWorksheetRecommendations, WINDOW_SIZE,
+ * MIN_USABLE_CYCLES, the 24-hour separation) is untouched and still drives the
+ * Adaptive Practice Recommendation.
+ */
+async function getTwoCycleCandidates({ studentId, liveKey }) {
+  const result = await letterCycleService.getTwoCycleFailureLetters({ studentId });
+  if (result.status !== 'ok') return [];
+
+  return result.letters.map((entry) => ({
+    source: CANDIDATE_SOURCE.THREE_CYCLE_FAILURE,
+    // No fingerprint: this candidate is identified by the letter itself, not
+    // by a longitudinal evidence window.
+    recommendationFingerprint: null,
+    caseType: entry.caseType,
+    family: null,
+    title: 'Additional Home Practice',
+    // Teacher-facing, and deliberately says nothing about cycle counts,
+    // thresholds or scores.
+    rationale: 'More practice is recommended for this letter.',
+    candidateLetters: [{ letter: entry.letter, failedCycles: entry.cycles, totalCycles: entry.cycles }],
+    suggestedLetter: entry.letter,
+    practiceDate: result.date,
+    alreadyAssigned: liveKey.has(`${entry.letter}|${entry.caseType}`),
+  }));
+}
+
 async function getWorksheetCandidates({ studentId }) {
   if (!isPositiveInteger(studentId)) return { status: 'invalid_input', candidates: [] };
 
@@ -163,10 +236,11 @@ async function getWorksheetCandidates({ studentId }) {
   }
   const liveKey = new Set(live.map(w => `${w.target_letter}|${w.case_type}`));
 
-  const candidates = (evaluation.recommendations ?? []).map((rec) => {
+  const persistent = (evaluation.recommendations ?? []).map((rec) => {
     const targets = deriveTargetLetters(rec);
     const suggested = targets[0] ?? null;
     return {
+      source: CANDIDATE_SOURCE.PERSISTENT_DIFFICULTY,
       recommendationFingerprint: rec.recommendationFingerprint ?? null,
       caseType: rec.caseType,
       family: rec.family,
@@ -179,6 +253,18 @@ async function getWorksheetCandidates({ studentId }) {
       alreadyAssigned: suggested ? liveKey.has(`${suggested.letter}|${rec.caseType}`) : false,
     };
   });
+
+  const twoCycle = await getTwoCycleCandidates({ studentId, liveKey });
+
+  // Exact-letter candidates come first, and a letter covered by one is
+  // dropped from the persistent-difficulty list so the teacher never sees two
+  // home-practice cards for the same letter. The persistent recommendation
+  // itself is unchanged - only its duplicate SUGGESTION is suppressed here.
+  const twoCycleKey = new Set(twoCycle.map(c => `${c.suggestedLetter}|${c.caseType}`));
+  const candidates = [
+    ...twoCycle,
+    ...persistent.filter(c => !twoCycleKey.has(`${c.suggestedLetter}|${c.caseType}`)),
+  ];
 
   return { status: 'evaluated', candidates, liveWorksheets: live };
 }
@@ -404,7 +490,10 @@ async function getWorksheetHistory({ studentId }) {
 }
 
 module.exports = {
+  EXACT_LETTER_CANDIDATE_SOURCES,
+  isExactLetterCandidateSource,
   LIVE_STATUSES, WORKSHEET_STATUS, REVIEW_STATUS, VALID_REVIEW_STATUSES,
+  CANDIDATE_SOURCE,
   WORKSHEET_PLAN_VERSION, freezePlan,
   deriveTargetLetters,
   getWorksheetCandidates,

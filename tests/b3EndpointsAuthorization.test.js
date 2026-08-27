@@ -156,7 +156,17 @@ describe('getInitialReport — GET /handwriting/initial-report/:studentId', () =
     const res = makeRes();
     await getInitialReport(makeReq(String(STUDENT_A_ID)), res);
     expect(mockGetOwnStudentById).toHaveBeenCalledWith(TEACHER_A_ID, STUDENT_A_ID);
-    expect(res.json).toHaveBeenCalledWith({ hasData: false, letterMastery: [] });
+    // hasData is UNCHANGED — still "no renderable assessment row". The two
+    // assessmentStatus* fields are ADDITIVE routing semantics (see
+    // services/initialAssessmentStatusService.js). This suite stubs the
+    // models, so the status read fails and correctly reports its own distinct
+    // reason rather than claiming completeness it could not verify.
+    expect(res.json).toHaveBeenCalledWith({
+      hasData: false,
+      assessmentStatus: 'incomplete',
+      assessmentStatusReason: 'initial_assessment_status_read_failed',
+      letterMastery: [],
+    });
   });
 
   it("OTHER TEACHER'S STUDENT — rejected 404, no LetterAttempt/HandwritingAssessment read", async () => {
