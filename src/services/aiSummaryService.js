@@ -155,12 +155,16 @@ function buildNarrativeInput(report) {
  * and is only used to rehydrate the model's output before it reaches the client.
  */
 function buildDigestInput(dashboard, weekStartIso) {
-  const labels = new Map();   // full name → "Student A"
+  // Keyed on studentId, never on fullName. Two children sharing a name would
+  // collapse to one label, and rehydrate would then substitute one child's name
+  // into statements about the other — silently, in a summary a teacher reads and
+  // may act on.
+  const labels = new Map();   // studentId → "Student A"
   const names  = new Map();   // "Student A" → full name
 
   (dashboard.proficiency || []).forEach((p, i) => {
     const label = labelFor(i);
-    labels.set(p.fullName, label);
+    labels.set(p.studentId, label);
     names.set(label, p.fullName);
   });
 
@@ -184,14 +188,14 @@ function buildDigestInput(dashboard, weekStartIso) {
       sessions:             sessionsThisWeek,
     },
     students: (dashboard.proficiency || []).map((p) => ({
-      label:              labels.get(p.fullName),
+      label:              labels.get(p.studentId),
       concepts_assigned:  p.conceptsAssigned,
       concepts_mastered:  p.conceptsMastered,
       avg_score:          p.avgScore,
       last_session_at:    p.lastSessionAt,
     })),
     recent_achievements: (dashboard.recentAchievements || []).map((a) => ({
-      student:  labels.get(a.studentName) || 'a student',
+      student:  labels.get(a.studentId) || 'a student',
       concept:  a.conceptKey,
       category: CATEGORY_LABELS[a.categoryKey] || a.categoryKey,
       passed_at: a.passedAt,

@@ -4,6 +4,16 @@ const router = require('express').Router();
 const { body } = require('express-validator');
 const ctrl   = require('../controllers/conceptController');
 const { singleUpload } = require('../middleware/upload');
+const { ownsStudent } = require('../middleware/ownsStudent');
+
+// Every route below acts on one child, identified by an id in the body, query or
+// path. Mounted here rather than checked in each handler so that a route added
+// later inherits the guard instead of depending on someone remembering it.
+//
+// The parent router (routes/teacher.js) already establishes *who* is calling;
+// this establishes *which children they may touch*. Without it, changing one
+// integer reached any teacher's student.
+router.use(ownsStudent);
 
 router.get('/:category/items', ctrl.getConceptItems);
 router.get('/distractors', ctrl.getDistractors);
@@ -123,7 +133,11 @@ router.post('/tier3/coloring', singleUpload('image'), [
   body('time_spent_ms').optional().isInt({ min: 0 }),
 ], ctrl.saveColoring);
 
-router.get('/coloring/:studentId', ctrl.listColoring);
+// ownsStudent is attached again here, not redundantly: router.use() runs before
+// route matching, so req.params is still empty when the mounted copy executes.
+// This is the only route that identifies the student by path segment, so it is
+// the only one that needs the per-route attachment.
+router.get('/coloring/:studentId', ownsStudent, ctrl.listColoring);
 
 // ─── Cross-concept activities ────────────────────────────────────────────────
 // 3-segment path, so no conflict with /:category/items or /:conceptKey/confusions

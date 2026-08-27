@@ -166,6 +166,11 @@ async function getDashboardStats(teacherId) {
       isActive: s.is_active,
     })),
     recentAchievements: recentAchievements.map((p) => ({
+      // Carried so consumers can join on identity rather than on display name.
+      // aiSummaryService pseudonymises by this id: keyed on name, two children
+      // sharing one would collapse to a single label and the summary would
+      // attribute one child's results to the other.
+      studentId:   p.student_id,
       studentName: p.student?.full_name ?? 'Student',
       conceptKey: p.concept_key,
       categoryKey: p.category_key,

@@ -128,19 +128,36 @@ function buildConfusionMapFromGkb(confusions) {
     const correct  = c.correct_key.split('/').pop();
     const confused = c.confused_key.split('/').pop();
     if (!map[correct]) map[correct] = [];
-    map[correct].push({ key: confused, weight: c.weight });
+    // Summed, not pushed. The category query now UNIONs CONFUSION with
+    // T2_NAME_CONFUSION, so one pair can arrive twice — once from each tier.
+    // Pushing twice would leave a duplicate entry that ordering silently skips,
+    // throwing away the strongest signal the pair carries: a concept the child
+    // mixes up BOTH by sight and by name should outrank one they only mix up once.
+    const existing = map[correct].find((x) => x.key === confused);
+    if (existing) existing.weight += (c.weight || 0);
+    else map[correct].push({ key: confused, weight: c.weight || 0 });
   });
   Object.values(map).forEach((arr) => arr.sort((a, b) => b.weight - a.weight));
   return map;
 }
 
 /**
- * Derives a confusionMap from tier1_fail logs stored in PostgreSQL.
+ * Derives a confusionMap from failure logs stored in PostgreSQL.
  * Used when GKB is unavailable or hasn't synced the latest results yet.
+ *
+ * Both tiers, not just tier 1. The concept list is a single shared list — it is
+ * not per-tier — but its ordering used to read `tier1_fail` alone, so a child who
+ * could tell two pictures apart yet kept attaching the wrong NAME to one of them
+ * produced no reordering and no highlight at all. Half the evidence about what
+ * this child finds hard never reached the screen that is supposed to show it.
  */
 async function buildConfusionMapFromLogs(studentId, categoryKey) {
   const failLogs = await ConceptInteractionLog.findAll({
-    where: { student_id: studentId, category_key: categoryKey, event_type: 'tier1_fail', tier: 1 },
+    where: {
+      student_id:   studentId,
+      category_key: categoryKey,
+      event_type:   ['tier1_fail', 'tier2_fail'],
+    },
   });
   const map = {};
   failLogs.forEach((log) => {
@@ -148,11 +165,15 @@ async function buildConfusionMapFromLogs(studentId, categoryKey) {
     confusedWith.forEach(({ correct_key, selected_key }) => {
       if (!correct_key || !selected_key) return;
       if (!map[correct_key]) map[correct_key] = [];
-      if (!map[correct_key].find((x) => x.key === selected_key)) {
-        map[correct_key].push({ key: selected_key, weight: 1 });
-      }
+      // Repeats increment rather than being dropped, mirroring the GKB path: a
+      // pair the child got wrong in both tiers, or on several occasions, is
+      // stronger evidence than one they missed once.
+      const existing = map[correct_key].find((x) => x.key === selected_key);
+      if (existing) existing.weight += 1;
+      else map[correct_key].push({ key: selected_key, weight: 1 });
     });
   });
+  Object.values(map).forEach((arr) => arr.sort((a, b) => b.weight - a.weight));
   return map;
 }
 
@@ -203,32 +224,53 @@ async function getConceptItems(categoryKey, studentId) {
   // Determine the working sequence (default = original)
   let orderedSequence = sequence;
 
+  // Hoisted out of the try/catch below because it is needed twice now: once to
+  // reorder, and once to tell the client which concepts are confusion nodes.
+  let confusionMap = {};
+
   try {
     const resp = await axios.get(
       `${GNN_BASE}/gkb/student/${studentId}/category/${categoryKey}/confusions`,
       { timeout: 500 },
     );
     const confusions = resp.data?.confusions || [];
-    let confusionMap = confusions.length > 0 ? buildConfusionMapFromGkb(confusions) : {};
+    confusionMap = confusions.length > 0 ? buildConfusionMapFromGkb(confusions) : {};
 
     // GKB returned nothing — GKB sync may not have completed yet (fire-and-forget lag).
     // Fall back to PostgreSQL logs which are always written before completeTier1 returns.
     if (Object.keys(confusionMap).length === 0) {
       confusionMap = await buildConfusionMapFromLogs(studentId, categoryKey);
     }
-
-    if (Object.keys(confusionMap).length > 0) {
-      orderedSequence = applyConfusionOrdering(sequence, confusionMap);
-    }
   } catch {
     // GKB service unreachable — derive ordering directly from PostgreSQL logs.
     try {
-      const confusionMap = await buildConfusionMapFromLogs(studentId, categoryKey);
-      if (Object.keys(confusionMap).length > 0) {
-        orderedSequence = applyConfusionOrdering(sequence, confusionMap);
-      }
-    } catch { /* ignore — keep standard order */ }
+      confusionMap = await buildConfusionMapFromLogs(studentId, categoryKey);
+    } catch { confusionMap = {}; }
   }
+
+  if (Object.keys(confusionMap).length > 0) {
+    orderedSequence = applyConfusionOrdering(sequence, confusionMap);
+  }
+
+  // Both ends of every confusion pair, so the client can mark them.
+  //
+  // Bidirectional deliberately: a dog→sparrow edge means the child mixes those
+  // two up, and which one happened to be the question is an artefact of what
+  // they were asked, not of what they find hard. Marking only `dog` would hide
+  // half of every pair — and in the common case where one side is already passed
+  // it would hide the pair entirely, which is what `is_priority` alone does today.
+  const confusedWith = {};
+  const link = (a, b) => {
+    if (!a || !b || a === b) return;
+    if (!sequence.includes(a) || !sequence.includes(b)) return;
+    (confusedWith[a] ??= new Set()).add(b);
+  };
+  Object.entries(confusionMap).forEach(([correct, list]) => {
+    (list || []).forEach(({ key: confused }) => {
+      link(correct, confused);
+      link(confused, correct);
+    });
+  });
 
   // Build items using the (possibly reordered) sequence.
   //
@@ -240,8 +282,14 @@ async function getConceptItems(categoryKey, studentId) {
     const isPassed       = row?.tier1_status === 'passed';
     const isUnlocked     = true;
     const originalIndex  = sequence.indexOf(conceptKey);
-    // Priority: moved earlier in the sequence AND unlocked AND not yet passed
-    const isPriority     = isUnlocked && !isPassed && originalIndex !== index;
+    // Priority: moved EARLIER in the sequence, unlocked, and not yet passed.
+    //
+    // `index < originalIndex`, not `!==`. Promoting one concept pushes every
+    // concept below it down a slot, so `!==` was true for all of them: a single
+    // dog→sparrow confusion in `animals` promoted sparrow and then starred the
+    // ten concepts it displaced. Only a concept that actually moved up was
+    // chosen by the reordering; the rest just got out of its way.
+    const isPriority     = isUnlocked && !isPassed && index < originalIndex;
 
     return {
       concept_key:    conceptKey,
@@ -249,6 +297,8 @@ async function getConceptItems(categoryKey, studentId) {
       sequence_index: index,
       is_unlocked:    isUnlocked,
       is_priority:    isPriority,
+      // Independent of is_priority and of passed state — see the note above.
+      confused_with:  [...(confusedWith[conceptKey] || [])],
       tier1_status:   row?.tier1_status || 'not_started',
       tier1_score:    row?.tier1_score  ?? null,
       tier2_status:   row?.tier2_status || 'locked',
@@ -486,7 +536,16 @@ async function startTier2(studentId, categoryKey, conceptKey) {
  */
 async function completeTier2(studentId, categoryKey, conceptKey, passed, score, attemptCount, confusedWith) {
   const now = new Date();
-  const updateFields = { tier2_status: passed ? 'passed' : 'failed' };
+
+  // score and attemptCount used to go only to the interaction log, which left
+  // every adaptive decision reading tier-1 numbers for a tier-2 concept. They are
+  // persisted here now, mirroring completeTier1.
+  const updateFields = {
+    tier2_status:   passed ? 'passed' : 'failed',
+    tier2_score:    typeof score === 'number' ? score : null,
+    tier2_attempts: typeof attemptCount === 'number' ? attemptCount : null,
+    ...(passed && { tier2_passed_at: now }),
+  };
 
   const [row, created] = await StudentConceptProgress.findOrCreate({
     where:    { student_id: studentId, category_key: categoryKey, concept_key: conceptKey },
@@ -647,8 +706,7 @@ async function getDistractors(studentId, categoryKey, conceptKey, tier) {
     }
   } catch { /* fall through */ }
 
-  // 3. Content similarity — what the concepts look like (tier 1, the child is
-  // matching pictures) or what their names sound like (tier 2, matching names).
+  // 3. Content similarity — how alike two concepts look, and how alike they sound.
   //
   // This tier exists because the sequential fallback below is arbitrary: apple got
   // banana and cherry purely by list order. Children confuse apple and tomato
@@ -659,9 +717,33 @@ async function getDistractors(studentId, categoryKey, conceptKey, tier) {
   // confusions landing on a concept 1-2 positions ahead in the sequence — not a
   // fact about children, but an artefact of what the fallback showed them. Serving
   // something meaningful here breaks that confound at the source.
-  const kind = tier === 2 ? 'phonetic' : 'visual';
-  const similar = CONCEPT_SIMILARITY.concepts?.[`${categoryKey}/${conceptKey}`]?.[kind];
-  if (similar?.length) {
+  //
+  // VISUAL FIRST FOR BOTH TIERS. This used to be `tier === 2 ? 'phonetic' : 'visual'`,
+  // which meant the two tiers drew from disjoint pools and could never be asked
+  // about the same pair: dog/sparrow are the closest-looking animals (0.99) and
+  // sound nothing alike, so tier 1 saw them and tier 2 never could. The result was
+  // two confusion graphs that never met, each holding half the evidence.
+  //
+  // Sharing the pool is what lets one pair be observed in both tiers, which is the
+  // difference between "got it wrong" and knowing WHICH kind of difficulty it is:
+  //   tier 1 only  — cannot tell the pictures apart
+  //   tier 2 only  — knows the pictures, the word is not attached yet
+  //   both         — the concept itself is not formed
+  //
+  // It also changes what tier 2 asks. The child sees one picture and three WORDS,
+  // so a look-alike distractor is not visible to them as a look-alike; the round
+  // stops being "tell these two words apart" and becomes "is this concept separated
+  // from the thing it resembles". That is the more useful question, and a child who
+  // believes the dog picture IS a sparrow will pick the word `sparrow` — the visual
+  // confusion confirming itself at the concept level.
+  //
+  // Phonetic is kept as the fallback, not deleted. It is the only kind available for
+  // `numbers` and `shapes` — features.py drops visual there because the icons are
+  // near-identical badges — so those two categories go from arbitrary sequential
+  // neighbours to something meaningful ("nine"/"five"), rather than losing a tier.
+  for (const kind of ['visual', 'phonetic']) {
+    const similar = CONCEPT_SIMILARITY.concepts?.[`${categoryKey}/${conceptKey}`]?.[kind];
+    if (!similar?.length) continue;
     const picked = similar
       .map((s) => s.key)
       .filter((k) => k !== conceptKey && sequence.includes(k))

@@ -89,8 +89,11 @@ function dashboardFixture() {
         conceptsAssigned: 4, conceptsMastered: 2, avgScore: 0.55, lastSessionAt: '2026-08-24T09:00:00.000Z' },
     ],
     sessions: [{ studentName: 'Nimal Perera', startedAt: '2026-08-25T09:00:00.000Z', endedAt: null, isActive: false }],
-    recentAchievements: [{ studentName: 'Kavya Fernando', conceptKey: 'apple', categoryKey: 'fruits',
-      passedAt: '2026-08-24T09:30:00.000Z' }],
+    // studentId is what the pseudonymiser joins on — teacherService carries it
+    // for exactly this reason. Keyed on studentName instead, two children sharing
+    // a name collapse into one label.
+    recentAchievements: [{ studentId: 43, studentName: 'Kavya Fernando', conceptKey: 'apple',
+      categoryKey: 'fruits', passedAt: '2026-08-24T09:30:00.000Z' }],
   };
 }
 
@@ -148,6 +151,23 @@ test('buildDigestInput drops dates of birth and counts only this week\'s session
   // One session falls inside the week, one in July.
   assert.equal(payload.this_week.sessions, 1);
   assert.equal(payload.week_starting, '2026-08-23');
+});
+
+test('two students sharing a full name stay separate', () => {
+  // The failure this guards against is silent and clinical-adjacent: collapsed to
+  // one label, rehydrate substitutes one child's name into statements about the
+  // other, in a summary a teacher reads and may act on.
+  const dash = dashboardFixture();
+  dash.proficiency[1].fullName = dash.proficiency[0].fullName;   // same name, different ids
+  dash.recentAchievements[0].studentName = dash.proficiency[0].fullName;
+
+  const { payload } = buildDigestInput(dash, '2026-08-23');
+  const labels = payload.students.map((s) => s.label);
+
+  assert.equal(new Set(labels).size, 2, 'same-named children must get distinct labels');
+  assert.deepEqual(labels, ['Student A', 'Student B']);
+  // The achievement belongs to studentId 43, which is Student B regardless of name.
+  assert.equal(payload.recent_achievements[0].student, 'Student B');
 });
 
 test('rehydrate restores names in the model output', () => {

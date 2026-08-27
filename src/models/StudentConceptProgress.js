@@ -54,6 +54,23 @@ const StudentConceptProgress = sequelize.define('StudentConceptProgress', {
     allowNull: false,
     defaultValue: 0,
   },
+  // Mirrors the tier-1 trio. Nullable rather than defaulted: a concept whose
+  // tier 2 has not been attempted has no score, and 0 would read as "scored
+  // zero" to everything that ranks weakest-first.
+  tier2_score: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+  },
+  tier2_attempts: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  // The timestamp mastery actually happens at — mastery needs tier 1 AND tier 2,
+  // so tier1_passed_at always precedes it.
+  tier2_passed_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
   tier3_status: {
     type: DataTypes.ENUM('locked', 'not_started', 'in_progress', 'passed'),
     allowNull: false,

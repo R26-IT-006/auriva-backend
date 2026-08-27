@@ -180,12 +180,35 @@ async function getActivityStatus(studentId, categoryKey, activityType = 'practic
  * set is the only part of the signature that can actually vary, since the round-type
  * sequence is fixed per level.
  */
+/**
+ * How well the child knows a concept, on 0..1. Higher is stronger.
+ *
+ * Averages whichever tier scores exist. Every ranking here used tier1_score
+ * alone, so a child who identified a picture easily but could not name it read
+ * as strong, and the concept sank down the re-test queue on the strength of the
+ * half they had already mastered. Practice activities test naming as well as
+ * identification, so both belong in the number that decides what to re-test.
+ *
+ * Defaults to 1 (strongest) when nothing is recorded, matching the previous
+ * `?? 1` convention: an unscored concept must not jump the weakest-first queue.
+ */
+function conceptStrength(row) {
+  const scores = [row?.tier1_score, row?.tier2_score].filter((s) => typeof s === 'number');
+  return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 1;
+}
+
 function selectConcepts(progressRows, uncovered, covered, sequence, level, offset = 0, count = THRESHOLD) {
   const byKey = Object.fromEntries(progressRows.map((r) => [r.concept_key, r]));
+
+  // "Oldest mastery first". Mastery is tier 1 AND tier 2 (isMastered), so the
+  // moment it happens is tier2_passed_at — tier1_passed_at always precedes it and
+  // sorting on it ordered concepts by an event that is not the one being claimed.
+  // Falls back to tier1_passed_at for rows written before tier2_passed_at existed
+  // and never backfilled, so ordering degrades rather than collapsing to 0.
   const sortKey = (k) => {
     const row = byKey[k];
-    const passedAt = row?.tier1_passed_at ? new Date(row.tier1_passed_at).getTime() : 0;
-    return [passedAt, sequence.indexOf(k)];
+    const stamp = row?.tier2_passed_at ?? row?.tier1_passed_at;
+    return [stamp ? new Date(stamp).getTime() : 0, sequence.indexOf(k)];
   };
 
   const pool = [...uncovered].sort((a, b) => {
@@ -207,7 +230,7 @@ function selectConcepts(progressRows, uncovered, covered, sequence, level, offse
   if (targets.length < count) {
     const weakestFirst = [...covered]
       .filter((k) => !targets.includes(k) && sequence.includes(k))
-      .sort((a, b) => (byKey[a]?.tier1_score ?? 1) - (byKey[b]?.tier1_score ?? 1));
+      .sort((a, b) => conceptStrength(byKey[a]) - conceptStrength(byKey[b]));
     targets.push(...weakestFirst.slice(0, count - targets.length));
   }
 
@@ -216,7 +239,7 @@ function selectConcepts(progressRows, uncovered, covered, sequence, level, offse
   if (level === 5) {
     spacedRepetitionKey = [...covered]
       .filter((k) => !targets.includes(k) && sequence.includes(k))
-      .sort((a, b) => (byKey[a]?.tier1_score ?? 1) - (byKey[b]?.tier1_score ?? 1))[0] || null;
+      .sort((a, b) => conceptStrength(byKey[a]) - conceptStrength(byKey[b]))[0] || null;
   }
 
   return { targets, spacedRepetitionKey, byKey, poolSize: pool.length };
@@ -234,7 +257,7 @@ async function buildQuestionPlan({ studentId, categoryKey, level, targets, space
   // Assign a concept to each round slot. Extra rounds beyond the 3 targets re-test
   // the weakest target; at L5 one slot goes to the spaced-repetition concept.
   const weakestTarget = [...targets].sort(
-    (a, b) => (byKey[a]?.tier1_score ?? 1) - (byKey[b]?.tier1_score ?? 1),
+    (a, b) => conceptStrength(byKey[a]) - conceptStrength(byKey[b]),
   )[0];
 
   const roundConcepts = spec.sequence.map((_, i) => {
@@ -334,7 +357,7 @@ async function startActivity(studentId, categoryKey, sessionId) {
     progressRows, status.mastered_uncovered, covered, sequence, ladderLevel(activityNumber),
   );
   const strengthOf = (keys) => {
-    const scores = keys.map((k) => provisional.byKey[k]?.tier1_score ?? 1);
+    const scores = keys.map((k) => conceptStrength(provisional.byKey[k]));
     return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 1;
   };
   const { level, meta } = difficultyFor(activityNumber, recentScores, strengthOf(provisional.targets));
@@ -572,9 +595,29 @@ async function completeGameActivity(studentId, activityId, pairResults, sessionI
   // are no-fail, so the score measures first-try accuracy rather than pass/fail:
   // every pair is found eventually, and how many were found without a miss is
   // the only thing that carries information.
-  const total        = pairResults.length;
+  //
+  // The denominator must come from the server's own plan, not from the length of
+  // the array the client posted. Scoring correctCount / pairResults.length let a
+  // client submit a single correct pair and score 1.0 — the instinct in the line
+  // above, applied to the wrong variable. `concept_keys` is what startGameActivity
+  // chose and stored, so it is the only trustworthy count of pairs in the game.
+  const planned = (activity.concept_keys || []).length;
+
+  // Reject a payload describing pairs that were never in this game rather than
+  // silently ignoring them — a mismatch means the client and server disagree
+  // about what was played, and a score computed across that disagreement is not
+  // meaningful whichever way it lands.
+  const plannedSet = new Set(activity.concept_keys || []);
+  const unknown = (pairResults || [])
+    .map((r) => r.concept_key)
+    .filter((k) => k !== undefined && k !== null && !plannedSet.has(k));
+  if (unknown.length) {
+    throw new ApiError(422, `Result contains concepts not in this activity: ${[...new Set(unknown)].join(', ')}`);
+  }
+
+  const total        = planned > 0 ? planned : pairResults.length;
   const correctCount = pairResults.filter((r) => r.was_correct_first_try).length;
-  const score        = total > 0 ? correctCount / total : 0;
+  const score        = total > 0 ? Math.min(1, correctCount / total) : 0;
   const passed       = score >= PASS_SCORE;
 
   const now = new Date();
