@@ -22,7 +22,18 @@ const MAX_REROLLS  = 5;      // signature-collision retries before we accept a r
 // Card-game activity types. They share this service's concept selection and
 // history rows but not its difficulty ladder or question plan.
 const GAME_TYPES         = ['pair_match', 'memory'];
-const MIN_GAME_CONCEPTS  = 2;   // below two pairs there is no game to play
+
+// Below three pairs the game is playable but unmeasurable, which is worse than
+// unavailable: a 4-card memory board is solved in three turns by elimination and
+// a 2-column pair match is a coin flip, so every child scores near-perfect. That
+// number is not inert — it becomes ACTIVITY_SCORE, ACTIVITY_FORMAT_CONFUSION edges
+// and a figure on the teacher's report, all of it confident-looking and empty.
+//
+// Three matches MIN_PAIRS in the frontend's conceptPairMatch.js / conceptMemoryGame.js,
+// which is the point: at 2 the two floors disagreed, so the server would happily
+// open a game the client then refused to deal from — and the client covered for it
+// by shuffling the whole category, dealing concepts the child had never been shown.
+const MIN_GAME_CONCEPTS  = 3;
 
 // Requiring both tier 1 and tier 2 guarantees every round type an activity can
 // produce tests a skill the child has actually been taught. Defined in

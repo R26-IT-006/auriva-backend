@@ -5,6 +5,26 @@ const sequelize = require('../config/database');
 const { Student, StudentConceptProgress } = require('../models');
 const { CATEGORY_SEQUENCES, PASS_SCORE, isMastered } = require('./conceptService');
 const ApiError = require('../utils/ApiError');
+const logger   = require('../utils/logger');
+
+// Same precomputed artifact getDistractors serves from. Read here so a mix-up can
+// be reported with the reason it is plausible — "these two look very alike" is a
+// measured fact about the artwork (dog/sparrow = 0.99), not a guess about the child.
+//
+// Required directly rather than imported from conceptService because that module
+// keeps it private, and a second require of the same JSON is free — node caches it.
+let SIMILARITY = { concepts: {} };
+try {
+  SIMILARITY = require('../data/concept_similarity.json');
+} catch {
+  logger.warn('concept_similarity.json not found; mix-up explanations will omit similarity');
+}
+
+function similarityFor(categoryKey, a, b) {
+  const entry = SIMILARITY.concepts?.[`${categoryKey}/${a}`];
+  const pick  = (kind) => entry?.[kind]?.find((x) => x.key === b)?.score ?? null;
+  return { visual: pick('visual'), phonetic: pick('phonetic') };
+}
 
 // Human labels for the category keys. The backend only stores sequences, and the
 // labels live in the frontend catalogue, so they are mirrored here rather than
@@ -151,7 +171,8 @@ async function getConceptReport(teacherId, studentId, days = 90) {
   const sid = Number(studentId);
   const windowDays = Number.isFinite(Number(days)) ? Math.max(1, Math.min(365, Number(days))) : 90;
 
-  const [progressRows, confusions, responseTimes, perConcept, engagement, activities, timeline] =
+  const [progressRows, confusions, responseTimes, perConcept, engagement, activities, timeline,
+         dailyConcepts, dailyArtwork, dailyTime] =
     await Promise.all([
       StudentConceptProgress.findAll({ where: { student_id: sid }, raw: true }),
 
@@ -248,6 +269,68 @@ async function getConceptReport(teacherId, studentId, days = 90) {
           ORDER BY 1 ASC`,
         { replacements: { sid, events: ATTEMPT_EVENTS }, type: QueryTypes.SELECT },
       ),
+
+      // ── Day by day ─────────────────────────────────────────────────────────
+      // A child works on fruits AND animals in one sitting, and nothing in this
+      // report could express that: `timeline` above collapses a whole day to two
+      // numbers. This keeps the day but splits it by category and concept, which
+      // is what a teacher preparing tomorrow's session actually reads.
+      //
+      // Attempts and outcomes come from one pass rather than two queries: the
+      // FILTERs separate them, and the row count here is bounded by
+      // (days x concepts touched), which is small.
+      sequelize.query(
+        `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS date,
+                category_key,
+                concept_key,
+                COUNT(*) FILTER (WHERE event_type IN (:events))::int AS attempts,
+                COUNT(*) FILTER (WHERE event_type IN (:events)
+                  AND (event_data->>'was_correct')::boolean IS TRUE)::int AS correct,
+                COUNT(*) FILTER (WHERE event_type IN ('tier1_pass','tier2_pass'))::int AS passes,
+                COUNT(*) FILTER (WHERE event_type IN ('tier1_fail','tier2_fail'))::int AS fails
+           FROM concept_interaction_logs
+          WHERE student_id = :sid
+            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')
+            AND event_type IN (:dayEvents)
+          GROUP BY 1,2,3
+         HAVING COUNT(*) > 0
+          ORDER BY 1 DESC, 2 ASC, 3 ASC`,
+        {
+          replacements: {
+            sid, windowDays,
+            events: ATTEMPT_EVENTS,
+            dayEvents: [...ATTEMPT_EVENTS, 'tier1_pass', 'tier2_pass', 'tier1_fail', 'tier2_fail'],
+          },
+          type: QueryTypes.SELECT,
+        },
+      ),
+
+      // Drawings, keyed by the day they were made so they can sit inside that
+      // day's card rather than in a detached strip with no context.
+      sequelize.query(
+        `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS date,
+                id, category_key, concept_key, image_url, created_at
+           FROM coloring_artworks
+          WHERE student_id = :sid
+            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')
+          ORDER BY created_at DESC`,
+        { replacements: { sid, windowDays }, type: QueryTypes.SELECT },
+      ),
+
+      // Roughly how long the child was on task that day. screen_exit carries the
+      // dwell time the concept screens already record; it is the only per-day time
+      // signal that is not an inference from timestamps.
+      sequelize.query(
+        `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS date,
+                COALESCE(SUM((event_data->>'total_time_ms')::numeric), 0) AS ms
+           FROM concept_interaction_logs
+          WHERE student_id = :sid
+            AND event_type = 'screen_exit'
+            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')
+            AND jsonb_typeof(event_data->'total_time_ms') = 'number'
+          GROUP BY 1`,
+        { replacements: { sid, windowDays }, type: QueryTypes.SELECT },
+      ),
     ]);
 
   const statsFor = new Map(perConcept.map((p) => [`${p.category_key}/${p.concept_key}`, p]));
@@ -277,16 +360,111 @@ async function getConceptReport(teacherId, studentId, days = 90) {
   const rt = responseTimes[0] || {};
   const eng = engagement[0] || {};
 
+  // ── Day cards ────────────────────────────────────────────────────────────────
+  // Assembled here rather than in SQL because a day is a nested shape (day →
+  // categories → concepts, plus that day's drawings) and three flat result sets
+  // stitch into it more legibly than one query with two lateral joins would.
+  const timeByDate = new Map(dailyTime.map((r) => [r.date, Math.round(Number(r.ms) || 0)]));
+  const artByDate  = new Map();
+  for (const a of dailyArtwork) {
+    if (!artByDate.has(a.date)) artByDate.set(a.date, []);
+    artByDate.get(a.date).push({
+      id:           a.id,
+      category_key: a.category_key,
+      concept_key:  a.concept_key,
+      image_url:    a.image_url,
+      created_at:   a.created_at,
+    });
+  }
+
+  const dayMap = new Map();
+  for (const row of dailyConcepts) {
+    if (!dayMap.has(row.date)) dayMap.set(row.date, new Map());
+    const cats = dayMap.get(row.date);
+    if (!cats.has(row.category_key)) cats.set(row.category_key, []);
+    cats.get(row.category_key).push({
+      concept_key: row.concept_key,
+      attempts:    row.attempts,
+      correct:     row.correct,
+      // `passed` means the child cleared a round that day, not that they are
+      // finished with the concept — tier 2 may still be ahead of them.
+      passed:      row.passes > 0,
+      struggled:   row.fails > 0,
+    });
+  }
+
+  // Every date that saw anything at all, including a day whose only event was a
+  // drawing. Dropping those would tell a teacher the child did nothing on a day
+  // they actually sat and coloured.
+  const allDates = [...new Set([...dayMap.keys(), ...artByDate.keys()])]
+    .sort((a, b) => (a < b ? 1 : -1));
+
+  // `dayCards`, not `days` — that name is taken by this function's window parameter.
+  const dayCards = allDates.map((date) => ({
+    date,
+    time_spent_ms: timeByDate.get(date) || 0,
+    categories: [...(dayMap.get(date) || new Map()).entries()].map(([key, conceptRows]) => ({
+      category_key: key,
+      label:        CATEGORY_LABELS[key] || key,
+      concepts:     conceptRows,
+    })),
+    artworks: artByDate.get(date) || [],
+  }));
+
+  // ── Mix-ups, one entry per pair ──────────────────────────────────────────────
+  // The raw rows are directional and per-round, so the same two concepts can appear
+  // as up to four rows. A teacher reads "dog and sparrow get muddled" as one fact,
+  // so they are merged on the unordered pair, and the rounds it happened in are
+  // kept as a list — that list is the whole diagnostic:
+  //   [1]    told apart by name, not by sight
+  //   [2]    pictures are fine, the word has not stuck
+  //   [1,2]  muddled whichever way it is asked
+  const pairMap = new Map();
+  for (const c of confusions) {
+    if (!c.correct_key || !c.selected_key) continue;
+    const cat = concepts.find((x) => x.concept_key === c.correct_key)?.category_key
+      || Object.keys(CATEGORY_SEQUENCES).find((k) => CATEGORY_SEQUENCES[k].includes(c.correct_key));
+    const [a, b] = [c.correct_key, c.selected_key].sort();
+    const id = `${cat || '?'}/${a}|${b}`;
+    if (!pairMap.has(id)) {
+      const sim = cat ? similarityFor(cat, a, b) : { visual: null, phonetic: null };
+      pairMap.set(id, {
+        category_key: cat || null,
+        concept_a: a,
+        concept_b: b,
+        count: 0,
+        tiers: new Set(),
+        // Rounded: the exact figure is a cosine we have no business showing, but
+        // "very alike" versus "not especially" is the part that carries meaning.
+        visual_similarity:   sim.visual   == null ? null : Math.round(sim.visual * 100) / 100,
+        phonetic_similarity: sim.phonetic == null ? null : Math.round(sim.phonetic * 100) / 100,
+      });
+    }
+    const entry = pairMap.get(id);
+    entry.count += c.count;
+    if (c.tier) entry.tiers.add(Number(c.tier));
+  }
+
+  const mixUps = [...pairMap.values()]
+    .map((p) => ({ ...p, tiers: [...p.tiers].sort() }))
+    .sort((a, b) => b.count - a.count);
+
   return {
     ...summary,
     window_days: windowDays,
     concepts,
+    // Kept as-is for anything still reading the flat directional list.
     confusions: confusions.map((c) => ({
       correct_key:  c.correct_key,
       selected_key: c.selected_key,
       tier:         c.tier,
       count:        c.count,
     })),
+    // One entry per pair, with the rounds it happened in and how alike the two
+    // concepts look and sound. This is what the report screen renders and what
+    // the model is given to explain.
+    mix_ups: mixUps,
+    days: dayCards,
     response_times: {
       overall_avg_ms:   num(rt.overall_ms),
       correct_avg_ms:   num(rt.correct_ms),

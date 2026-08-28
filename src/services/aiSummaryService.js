@@ -26,6 +26,27 @@ Rules, in order of importance:
 4. When the data is thin, say so. A summary of four attempts must read like a summary of four attempts. Never pad a weak signal into a confident claim.
 5. Plain, concrete language. No motivational filler, no praise for the teacher, no "keep up the great work".
 6. Refer to concepts by their key as given (e.g. "mango", "banana").
+7. The reader is a special-education teacher, not a technician. Never use the words
+   tier, distractor, mastery, engagement, sample size, model, confidence, or score.
+   Say "picture round" and "word round"; say "got it right 4 of 6 times".
+8. For mix-ups you may say why a pair is plausibly confusable, but ONLY from the two
+   things you are given: how alike the pictures look (visual_similarity, 0-1), how
+   alike the names sound (phonetic_similarity, 0-1), and which rounds it happened in
+   (tiers: 1 = choosing a picture, 2 = choosing the written name). Read those as:
+     tiers [1]    - tells the names apart, it is the pictures that look alike
+     tiers [2]    - tells the pictures apart, the name has not attached yet
+     tiers [1,2]  - muddled whichever way it is asked; the two things themselves
+                    may not have come apart yet
+   If neither similarity figure is high and the rounds do not explain it, say plainly
+   that the data does not show why. Never invent a reason about the child.
+9. The similarity figures are INPUTS TO YOUR JUDGEMENT, never output. Never print a
+   similarity number, never name the field, never write anything like "(visual
+   similarity 0.94)". Say "these two look very alike" or "the names sound similar".
+   A teacher cannot act on 0.94 and has no scale to judge it against.
+10. Do not narrate the mechanism. The teacher does not need to know a round was a
+   "word round showing the child tells the pictures apart" — say what it means for
+   them: "she knows the picture but the written name has not stuck yet." One
+   sentence, about the child, in words a parent would also understand.
 
 Every field must be safe for a teacher to read at a glance. Keep list items to one sentence each.`;
 
@@ -38,11 +59,29 @@ const NARRATIVE_SCHEMA = {
     strengths:       { type: 'ARRAY', items: { type: 'STRING' }, description: 'Up to 3 things the data shows going well.' },
     watch_areas:     { type: 'ARRAY', items: { type: 'STRING' }, description: 'Up to 3 areas where the data shows difficulty.' },
     mix_ups:         { type: 'ARRAY', items: { type: 'STRING' }, description: 'Plain-language narration of the confusion pairs. Empty if none were recorded.' },
+    // Keyed so the report screen can put each sentence on the right pair's card.
+    // A flat array would have to be matched back by position, which silently
+    // mis-attributes an explanation the moment the model returns them out of order
+    // or omits one — and a wrong explanation on a mix-up card is worse than none.
+    mix_up_notes: {
+      type: 'ARRAY',
+      description: 'One entry per pair in mix_ups_detail, explaining why that pair is plausibly confusable. Omit a pair entirely rather than guessing about it.',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          pair: { type: 'STRING', description: 'Exactly the `pair` value given for that entry, unchanged.' },
+          note: { type: 'STRING', description: 'One sentence, grounded in the similarity figures and the rounds it happened in.' },
+        },
+        required: ['pair', 'note'],
+      },
+    },
     suggested_focus: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Up to 3 concepts the teacher may want to revisit, phrased as options to consider.' },
     caveat:          { type: 'STRING', description: 'What this summary does not know, including the size of the sample it is based on.' },
   },
+  // mix_up_notes is deliberately NOT required: a child with no recorded mix-ups has
+  // nothing to explain, and forcing the field would invite the model to fill it.
   required: ['headline', 'strengths', 'watch_areas', 'mix_ups', 'suggested_focus', 'caveat'],
-  propertyOrdering: ['headline', 'strengths', 'watch_areas', 'mix_ups', 'suggested_focus', 'caveat'],
+  propertyOrdering: ['headline', 'strengths', 'watch_areas', 'mix_ups', 'mix_up_notes', 'suggested_focus', 'caveat'],
 };
 
 const DIGEST_SCHEMA = {
@@ -130,6 +169,19 @@ function buildNarrativeInput(report) {
       chosen:   c.selected_key,
       tier:     c.tier,
       times:    c.count,
+    })),
+    // One entry per pair, carrying the only two things the model is permitted to
+    // reason from — how alike the pictures look, how alike the names sound — plus
+    // which rounds it happened in. `pair` is the key mix_up_notes must echo back so
+    // each sentence lands on the right card.
+    mix_ups_detail: (report.mix_ups || []).map((m) => ({
+      pair:                `${m.concept_a}|${m.concept_b}`,
+      concepts:            [m.concept_a, m.concept_b],
+      category:            CATEGORY_LABELS[m.category_key] || m.category_key,
+      times:               m.count,
+      tiers:               m.tiers,
+      visual_similarity:   m.visual_similarity,
+      phonetic_similarity: m.phonetic_similarity,
     })),
     response_times: report.response_times,
     engagement:     report.engagement,
