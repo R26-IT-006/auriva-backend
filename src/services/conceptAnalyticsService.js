@@ -248,7 +248,11 @@ async function getConceptReport(teacherId, studentId, days = 90) {
       ),
 
       sequelize.query(
-        `SELECT activity_number, difficulty_level, score, correct_count,
+        // activity_type matters: practice, pair_match and memory are three
+        // different games, and without it the report drew every one of them as an
+        // identical row — same wording, same thumbnails, no way to tell a memory
+        // game from a mixed-practice round.
+        `SELECT activity_number, activity_type, difficulty_level, score, correct_count,
                 total_rounds, status, concept_keys, category_key, completed_at
            FROM student_activities
           WHERE student_id = :sid
@@ -345,6 +349,11 @@ async function getConceptReport(teacherId, studentId, days = 90) {
       tier1_status:      row.tier1_status,
       tier1_score:       row.tier1_score,
       tier1_passed_at:   row.tier1_passed_at,
+      // The moment the concept actually became learned. `isMastered` needs both
+      // rounds, so tier 2 is the later of the two and therefore the real date —
+      // only tier1_passed_at was exposed, which dates a concept to when it was
+      // half-learned and would put a weekly count several days early.
+      tier2_passed_at:   row.tier2_passed_at,
       tier2_status:      row.tier2_status,
       tier3_status:      row.tier3_status,
       tier1_retry_count: row.tier1_retry_count,
@@ -481,6 +490,7 @@ async function getConceptReport(teacherId, studentId, days = 90) {
     },
     activities: activities.map((a) => ({
       activity_number:  a.activity_number,
+      activity_type:    a.activity_type,
       category_key:     a.category_key,
       difficulty_level: a.difficulty_level,
       score:            a.score === null ? null : r3(Number(a.score)),

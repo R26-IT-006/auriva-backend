@@ -48,7 +48,16 @@ Rules, in order of importance:
    them: "she knows the picture but the written name has not stuck yet." One
    sentence, about the child, in words a parent would also understand.
 
-Every field must be safe for a teacher to read at a glance. Keep list items to one sentence each.`;
+Every field must be safe for a teacher to read at a glance. Keep list items to one sentence each.
+
+When a schema asks for a sentence split into segments with an emphasis marker:
+- Concatenating the segments in order must reproduce the sentence exactly. Do not
+  reword, reorder, or drop punctuation and spaces when splitting it.
+- Mark AT MOST TWO segments as something other than "none". Everything emphasised
+  is nothing emphasised.
+- Emphasise figures, not adjectives — "11 of 15", "83.3%", not "excellent".
+- "good" and "watch" describe the FIGURE, never the child. A lowest score is
+  "watch" because it is the number worth looking at, not a judgement on anyone.`;
 
 // Gemini's responseSchema is an OpenAPI subset. Being explicit about required
 // fields is what stops the shape drifting between calls and breaking the UI.
@@ -88,12 +97,43 @@ const DIGEST_SCHEMA = {
   type: 'OBJECT',
   properties: {
     headline:    { type: 'STRING', description: 'One sentence covering the class this week.' },
+    // The same sentence, split so the dashboard can pick the figures out in colour.
+    //
+    // Asked for as segments rather than parsed out of `headline` on the client:
+    // a regex over the prose would catch numbers that are not figures, and — the
+    // part it can never do — it cannot tell whether a percentage is good news or
+    // bad, so every one of them would wear the same colour whichever way it moved.
+    headline_parts: {
+      type: 'ARRAY',
+      description: 'The headline split into consecutive segments. Concatenating every `text` in order must reproduce `headline` exactly, including spaces and punctuation.',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          text:     { type: 'STRING', description: 'A run of the sentence.' },
+          emphasis: { type: 'STRING', description: 'none for ordinary words; good for a figure worth being pleased about; watch for a figure worth attention.' },
+        },
+        required: ['text', 'emphasis'],
+      },
+    },
     highlights:  { type: 'ARRAY', items: { type: 'STRING' }, description: 'Up to 3 notable things from this week.' },
-    watch_areas: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Up to 3 students or patterns worth attention, referred to by their given label.' },
+    watch_areas: {
+      type: 'ARRAY',
+      description: 'Up to 3 students or patterns worth attention, referred to by their given label.',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          text: { type: 'STRING' },
+          tone: { type: 'STRING', description: 'good for something notable and positive; watch for something needing attention.' },
+        },
+        required: ['text', 'tone'],
+      },
+    },
     caveat:      { type: 'STRING', description: 'What this summary does not know.' },
   },
+  // headline_parts stays optional: the client renders the plain `headline` when it
+  // is missing, which is what a digest cached before this field existed returns.
   required: ['headline', 'highlights', 'watch_areas', 'caveat'],
-  propertyOrdering: ['headline', 'highlights', 'watch_areas', 'caveat'],
+  propertyOrdering: ['headline', 'headline_parts', 'highlights', 'watch_areas', 'caveat'],
 };
 
 // ─── Pseudonymisation ─────────────────────────────────────────────────────────
@@ -225,6 +265,12 @@ function buildDigestInput(dashboard, weekStartIso) {
     .filter((d) => new Date(d) >= weekStart).length;
 
   const payload = {
+    // generateCached keys on a hash of THIS payload and only re-generates when the
+    // model name changes — a schema change does not invalidate anything. Without
+    // this line every existing digest would keep returning the old shape until its
+    // underlying numbers happened to move, so the new fields would look broken.
+    // Bump it whenever DIGEST_SCHEMA changes.
+    schema_version: 2,
     // Rotates the cache key weekly on its own — no expiry logic needed.
     week_starting: weekStartIso,
     class_size: dashboard.stats?.totalStudents,
