@@ -26,6 +26,13 @@ test('matchesTargetWord accepts spoken letter names for single-letter targets', 
   assert.equal(matchesTargetWord('en', 'm'), false);
 });
 
+test('matchesTargetWord never fuzzy-matches a different short letter name', () => {
+  assert.equal(matchesTargetWord('see', 'p'), false);
+  assert.equal(matchesTargetWord('bee', 'p'), false);
+  assert.equal(matchesTargetWord('tee', 'p'), false);
+  assert.equal(matchesTargetWord('please say pee now', 'p'), true);
+});
+
 // Mismatch policy: hard WORD_MISMATCH only when the transcript confidently
 // names a DIFFERENT vocabulary word or letter. Garbled/disordered speech —
 // which this product's population produces on genuine attempts — must score
@@ -43,4 +50,5 @@ test('isConfidentDifferentWord: a different vocabulary word is a confident misma
 test('isConfidentDifferentWord: letter targets require a clearly spoken different letter', () => {
   assert.equal(isConfidentDifferentWord('em', 'n'), true); // said "m", target "n"
   assert.equal(isConfidentDifferentWord('mmm sound', 'n'), false); // not a letter name
+  assert.equal(isConfidentDifferentWord('double you', 'q'), true);
 });

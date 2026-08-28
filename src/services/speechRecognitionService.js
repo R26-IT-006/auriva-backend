@@ -16,6 +16,11 @@ const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH ||
   path.resolve(__dirname, '../../models/ggml-base.en.bin');
 const SPEECH_VERIFICATION_ENABLED = process.env.SPEECH_VERIFICATION_ENABLED !== 'false';
 const WHISPER_TIMEOUT_MS = Number(process.env.WHISPER_TIMEOUT_MS || 30000);
+// Metal acceleration currently crashes some Homebrew whisper.cpp/ggml
+// combinations before a model is loaded (exit 139). Short pronunciation
+// clips are fast on CPU, so make that the reliable default and allow a
+// deployment with a verified GPU stack to opt back in explicitly.
+const WHISPER_USE_GPU = process.env.WHISPER_USE_GPU === 'true';
 // whisper-cli defaults to 4 threads. pronunciationAnalysisService now runs
 // this concurrently with the GOP worker's torch inference (also capped, see
 // PHONEME_GOP_TORCH_THREADS) — measured on an 8-core machine, two
@@ -66,6 +71,10 @@ const CONFUSABLE_LETTER_PAIRS = {
 };
 
 function transcriptAsLetter(transcript) {
+  const directNameMatch = Object.entries(LETTER_NAMES)
+    .find(([, names]) => names.includes(transcript));
+  if (directNameMatch) return directNameMatch[0];
+
   const tokens = transcript.split(' ').filter(Boolean);
   if (tokens.length !== 1) return null;
   const token = tokens[0];
@@ -144,16 +153,22 @@ function matchesTargetWord(transcript, targetWord) {
   if (!target) return true;
 
   const tokens = transcript.split(' ').filter(Boolean);
-  const acceptedForms = target.length === 1
-    ? [target, ...(LETTER_NAMES[target] || [])]
-    : [target];
+  if (target.length === 1) {
+    const acceptedForms = [target, ...(LETTER_NAMES[target] || [])];
+    // Letter names are short and differ by only one sound (bee/see/gee/pee/
+    // tee). Fuzzy edit-distance matching makes those distinct letters equal,
+    // so alphabet mode must use exact aliases. A multi-word transcript may
+    // still contain an exact alias among harmless surrounding words.
+    return tokens.some((token) => acceptedForms.includes(token)) ||
+      acceptedForms.some(
+        (form) => form.includes(' ') && transcript.includes(form)
+      );
+  }
 
   return tokens.some((token) =>
-    acceptedForms.some((form) => {
-      if (token === form) return true;
-      return levenshteinDistance(token, form) <= getMatchTolerance(form);
-    })
-  ) || acceptedForms.some((form) => form.includes(' ') && transcript.includes(form));
+    token === target ||
+    levenshteinDistance(token, target) <= getMatchTolerance(target)
+  );
 }
 
 async function transcribeBase64Audio(rawAudioBase64, mimeType) {
@@ -172,14 +187,21 @@ async function transcribeBase64Audio(rawAudioBase64, mimeType) {
       wavPath,
     ], { timeout: WHISPER_TIMEOUT_MS });
 
-    const { stdout } = await execFileAsync(WHISPER_CLI_PATH, [
+    const whisperArgs = [
       '-m', WHISPER_MODEL_PATH,
       '-f', wavPath,
       '-t', String(WHISPER_THREADS),
       '--no-timestamps',
       '--no-prints',
       '--language', 'en',
-    ], { timeout: WHISPER_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    ];
+    if (!WHISPER_USE_GPU) whisperArgs.push('--no-gpu');
+
+    const { stdout } = await execFileAsync(
+      WHISPER_CLI_PATH,
+      whisperArgs,
+      { timeout: WHISPER_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }
+    );
 
     return normalizeTranscript(stdout);
   } finally {

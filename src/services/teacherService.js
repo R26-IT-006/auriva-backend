@@ -12,7 +12,11 @@ const ApiError = require('../utils/ApiError');
 const {
   scorePronunciationAttemptData,
 } = require('./pronunciationScoringService');
-const { getReviewQueue } = require('./pronunciationReviewQueueService');
+const {
+  getReviewQueue,
+  invalidateReviewedCountsCache,
+} = require('./pronunciationReviewQueueService');
+const { invalidateCalibrationCache } = require('./adaptiveCalibrationService');
 
 function normalizeStudentId(studentId) {
   const numericId = Number(studentId);
@@ -179,6 +183,8 @@ function buildPronunciationResultRecord({ teacherId, studentId, data, rawAudioBu
     recognized_text: data.recognized_text || null,
     speech_verification: data.speech_verification || null,
     confidence_level: data.confidence_level || null,
+    adaptive_score: data.adaptive_score ?? null,
+    confidence_score: data.confidence_score ?? null,
     needs_teacher_review: Boolean(data.needs_teacher_review),
     heard_reference_audio: Boolean(data.heard_reference_audio),
     next_word_id: data.next_word_id || null,
@@ -250,7 +256,14 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
 
   const previousResults = await PronunciationSessionResult.findAll({
-    where: { teacher_id: teacherId, student_id: student.sid },
+    // Word and alphabet exercises use different targets (a word phoneme vs
+    // a spoken letter name). Mixing their histories can make an unrelated
+    // word attempt lower a letter's confidence/recurrence score.
+    where: {
+      teacher_id: teacherId,
+      student_id: student.sid,
+      mode: data.mode,
+    },
     attributes: { exclude: ['raw_audio_data'] },
     order: [['created_at', 'DESC'], ['id', 'DESC']],
     limit: 12,
@@ -282,7 +295,12 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
         workflow_completed: false,
       },
       rawAudioBuffer,
-    })
+    }),
+    // The default PostgreSQL RETURNING clause echoed the entire audio BLOB
+    // back across the remote DB connection even though this path only needs
+    // the new row id. That made an already expensive scoring request more
+    // vulnerable to the connection stall seen in the failing attempt.
+    { returning: ['id'] }
   );
 
   return { ...scored, result_id: saved.id };
@@ -303,6 +321,12 @@ async function submitPronunciationReview(teacherId, resultId, teacherReviewedSco
   result.teacher_reviewed_by = teacherId;
   result.needs_teacher_review = false;
   await result.save();
+
+  // This review is new evidence for the layer-3 fit and for the queue's
+  // coverage counts; drop both caches so the next scored attempt and the next
+  // queue load see it instead of waiting out their TTLs.
+  invalidateCalibrationCache();
+  invalidateReviewedCountsCache();
 
   const plain = result.get({ plain: true });
   delete plain.raw_audio_data;

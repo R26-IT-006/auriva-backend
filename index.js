@@ -144,6 +144,16 @@ app.use((err, req, res, next) => {
     });
   }
 
+  if (err.name === 'SequelizeConnectionAcquireTimeoutError') {
+    const isScoringRequest = req.path.endsWith('/pronunciation-score');
+    return res.status(503).json({
+      error: isScoringRequest
+        ? 'Scoring is busy right now. Your recording is still saved; please press Next again.'
+        : 'The service is busy right now. Please try again.',
+      code: 'DATABASE_BUSY',
+    });
+  }
+
   res.status(500).json({ error: 'Internal server error' });
 });
 

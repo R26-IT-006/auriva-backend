@@ -99,6 +99,18 @@ const PronunciationSessionResult = sequelize.define('PronunciationSessionResult'
     type: DataTypes.STRING,
     allowNull: true,
   },
+  // Layer-3 inputs, promoted out of recommendation_details JSONB for the same
+  // reason as the layer-1 columns above: adaptiveCalibrationService fits on
+  // adaptive_score, and parsing a JSONB blob for every reviewed row made the
+  // calibration corpus impossible to inspect or aggregate in SQL.
+  adaptive_score: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  confidence_score: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
   needs_teacher_review: {
     type: DataTypes.BOOLEAN,
     allowNull: false,

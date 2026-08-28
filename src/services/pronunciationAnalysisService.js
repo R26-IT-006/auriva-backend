@@ -7,7 +7,7 @@ const path = require('path');
 const { promisify } = require('util');
 const FFT = require('fft.js');
 
-const { WORD_PROFILES, LETTER_SOUNDS } = require('./wordProfiles');
+const { resolveTargetPhonemes } = require('./wordProfiles');
 const { verifySpokenWord } = require('./speechRecognitionService');
 const { assessPhonemeGop } = require('./phonemeGopService');
 
@@ -574,16 +574,6 @@ function framesToBoundary({ phoneme, frameStart, frameEnd }) {
   };
 }
 
-function resolveTargetPhonemes(wordId, data = {}) {
-  const provided = Array.isArray(data.target_phonemes)
-    ? data.target_phonemes
-      .map((sound) => (typeof sound === 'string' ? sound : sound?.text))
-      .filter(Boolean)
-    : [];
-  if (provided.length) return provided;
-  return WORD_PROFILES[wordId]?.sounds || LETTER_SOUNDS[wordId] || [];
-}
-
 function smoothValues(values, radius = 2) {
   return values.map((_, index) => {
     const start = Math.max(0, index - radius);
@@ -772,7 +762,7 @@ async function scoreWordPronunciationAttempt(data) {
   }
 
   const wordId = String(data.word_id || '').toLowerCase().trim();
-  const phonemes = resolveTargetPhonemes(wordId, data);
+  const phonemes = resolveTargetPhonemes({ ...data, word_id: wordId });
   const [referenceAnalysis, attemptSamples] = await Promise.all([
     getReferenceAnalysis(wordId),
     decodeBase64AudioToPcm(data.raw_audio_base64, data.raw_audio_mime_type),
@@ -880,7 +870,7 @@ async function scoreWordPronunciationAttemptWithoutReference(data) {
   }
 
   const wordId = String(data.word_id || '').toLowerCase().trim();
-  const phonemes = resolveTargetPhonemes(wordId, data);
+  const phonemes = resolveTargetPhonemes({ ...data, word_id: wordId });
   const attemptSamples = await decodeBase64AudioToPcm(
     data.raw_audio_base64,
     data.raw_audio_mime_type

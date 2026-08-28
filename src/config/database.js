@@ -28,6 +28,11 @@ function getRequiredEnv(name) {
 
 const dialectOptions = {
   connectionTimeoutMillis: getPositiveIntegerEnv('DB_CONNECTION_TIMEOUT_MS', 10000),
+  // Prevent a lost/locked remote connection from holding a pronunciation
+  // audio INSERT (and then the whole pool) beyond the mobile scoring timeout.
+  statement_timeout: getPositiveIntegerEnv('DB_STATEMENT_TIMEOUT_MS', 60000),
+  query_timeout: getPositiveIntegerEnv('DB_QUERY_TIMEOUT_MS', 60000),
+  keepAlive: true,
 };
 
 if (shouldUseSsl()) {
@@ -49,7 +54,7 @@ const sequelize = new Sequelize(
     pool: {
       max: 10,
       min: 2,
-      acquire: 30000,
+      acquire: getPositiveIntegerEnv('DB_POOL_ACQUIRE_TIMEOUT_MS', 15000),
       idle: 10000,
     },
     logging: (msg) => logger.debug(msg),

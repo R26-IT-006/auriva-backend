@@ -1,13 +1,18 @@
 'use strict';
 
 const { Op } = require('sequelize');
-const { normalizePopulationTag } = require('./adaptiveCalibrationService');
+const {
+  normalizePopulationTag,
+  MIN_SAMPLES_FOR_CALIBRATION,
+} = require('./adaptiveCalibrationService');
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const RECENT_WINDOW = 300;
 const LOW_CONFIDENCE_THRESHOLD = 55;
-const LOW_COVERAGE_THRESHOLD = 8; // mirrors MIN_SAMPLES_FOR_CALIBRATION
+// Imported rather than restated: a population is "under-covered" exactly while
+// it has too few labels to fit a calibration, so the two must move together.
+const LOW_COVERAGE_THRESHOLD = MIN_SAMPLES_FOR_CALIBRATION;
 
 // Reviewed rows only grow over time (never purged, they're the layer-3
 // calibration corpus), so this full-table GROUP BY gets slower on every
@@ -18,8 +23,12 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 let reviewedCountsCache = null; // { counts, computedAt }
 
 function getConfidenceScore(result) {
-  const score = result?.recommendation_details?.adaptive_model?.confidence_score;
-  return Number.isFinite(score) ? score : null;
+  // Prefer the promoted column; fall back to the JSONB blob the value used to
+  // live in, so attempts scored before the promotion still rank correctly.
+  const column = result?.confidence_score;
+  if (Number.isFinite(column)) return column;
+  const nested = result?.recommendation_details?.adaptive_model?.confidence_score;
+  return Number.isFinite(nested) ? nested : null;
 }
 
 /**
@@ -141,4 +150,13 @@ async function getReviewQueue(teacherId, { limit = DEFAULT_LIMIT } = {}) {
     .slice(0, safeLimit);
 }
 
-module.exports = { getReviewQueue, computeInformativeness };
+/**
+ * Drops the cached per-population reviewed counts. Called when a review is
+ * submitted so the coverage half of the informativeness score reflects the
+ * label that was just added rather than lagging by up to CACHE_TTL_MS.
+ */
+function invalidateReviewedCountsCache() {
+  reviewedCountsCache = null;
+}
+
+module.exports = { getReviewQueue, computeInformativeness, invalidateReviewedCountsCache };

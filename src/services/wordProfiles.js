@@ -92,4 +92,31 @@ const LETTER_SOUNDS = {
   z: ['z', 'e', 'd'],
 };
 
-module.exports = { WORD_PROFILES, LETTER_SOUNDS };
+/**
+ * Resolve the phonemes the scoring engines must use for an attempt.
+ *
+ * Alphabet activities ask the child to say the letter *name* ("C" is
+ * /s i:/), not the most common sound that letter makes in a word (/k/).
+ * Older app builds submitted those single in-word sounds in
+ * `target_phonemes`, so alphabet mode deliberately treats the server's
+ * letter-name profiles as authoritative. Word mode continues to accept the
+ * client breakdown because it also carries the UI's position/type metadata.
+ */
+function resolveTargetPhonemes(data = {}) {
+  const wordId = String(data.word_id || '').toLowerCase().trim();
+
+  if (data.mode === 'alphabet' && LETTER_SOUNDS[wordId]) {
+    return LETTER_SOUNDS[wordId];
+  }
+
+  const provided = Array.isArray(data.target_phonemes)
+    ? data.target_phonemes
+      .map((sound) => (typeof sound === 'string' ? sound : sound?.text))
+      .filter(Boolean)
+    : [];
+
+  if (provided.length) return provided;
+  return WORD_PROFILES[wordId]?.sounds || LETTER_SOUNDS[wordId] || [];
+}
+
+module.exports = { WORD_PROFILES, LETTER_SOUNDS, resolveTargetPhonemes };

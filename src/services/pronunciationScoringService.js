@@ -4,8 +4,12 @@ const {
   scoreWordPronunciationAttempt,
   scoreWordPronunciationAttemptWithoutReference,
 } = require('./pronunciationAnalysisService');
-const { WORD_PROFILES, LETTER_SOUNDS } = require('./wordProfiles');
-const { computeCalibration, applyCalibration } = require('./adaptiveCalibrationService');
+const { WORD_PROFILES, resolveTargetPhonemes } = require('./wordProfiles');
+const {
+  computeCalibration,
+  applyCalibration,
+  summarizeCalibration,
+} = require('./adaptiveCalibrationService');
 const logger = require('../utils/logger');
 
 const PHONEME_CUES = {
@@ -262,10 +266,12 @@ function getSoundPosition(index, total) {
 }
 
 function normalizeSounds(data) {
-  const profile = WORD_PROFILES[data.word_id] || {};
-  const sourceSounds = Array.isArray(data.target_phonemes) && data.target_phonemes.length
-    ? data.target_phonemes
-    : profile.sounds || LETTER_SOUNDS[data.word_id] || [];
+  const canonicalPhonemes = resolveTargetPhonemes(data);
+  const sourceSounds = data.mode === 'alphabet'
+    ? canonicalPhonemes
+    : Array.isArray(data.target_phonemes) && data.target_phonemes.length
+      ? data.target_phonemes
+      : canonicalPhonemes;
 
   return sourceSounds.map((sound, index) => {
     const text = typeof sound === 'string' ? sound : sound.text;
@@ -679,26 +685,40 @@ async function scoreAcousticPronunciationAttemptData(
   });
   // Low-confidence results suppress child-facing evaluative feedback and are
   // flagged for the teacher instead of risking an unreliable negative score.
-  // Attempts where ASR could not confirm the target word (disordered speech
-  // the transcriber can't parse, or a confusable letter pair) are scored but
-  // likewise flagged — the score stands on acoustic/GOP evidence alone there.
+  // Word attempts where ASR could not confirm the target, plus confusable
+  // letter pairs, are scored but likewise flagged — the score stands on
+  // acoustic/GOP evidence alone there. Generic unverified ASR is deliberately
+  // advisory for isolated letters (see the alphabet-specific rule below).
   const speechStatus = mfccDtwScore.speech_verification?.status || null;
   const needsTeacherReview =
     adaptiveModel.confidence_level === 'low' ||
-    speechStatus === 'unverified_speech' ||
+    // Whisper is intentionally only a mismatch gate for isolated letters:
+    // very short genuine names (A/F/H/L/Q/R/S) are often transcribed as an
+    // unrelated ordinary word. If it cannot identify a *different letter*,
+    // let the letter-specific acoustic/GOP evidence and its own confidence
+    // decide instead of automatically flagging a correct attempt.
+    (speechStatus === 'unverified_speech' && data.mode !== 'alphabet') ||
     speechStatus === 'inconclusive_confusable';
 
   // Layer 3: a small recalibration model fit on teacher-reviewed attempts,
   // grouped by student population (Student.disability) so it can adapt as
   // labeled examples arrive from new populations (e.g. autistic students)
-  // without needing separate models trained from scratch. Surfaced as
-  // evidence only for now — it does not adjust overall_score/adaptive_score
-  // until validated on more labeled data than the corpus currently holds.
+  // without needing separate models trained from scratch.
+  //
+  // Surfaced as evidence only — it does not adjust overall_score or
+  // adaptive_score. A fit is now only marked `fitted` when cross-validation
+  // shows it beats leaving the score alone on held-out reviews, so
+  // calibrated_score below is what activating this layer WOULD have done;
+  // comparing the two over time is the evidence for activating it. See
+  // scripts/layer3Report.js.
   const calibration = context.populationTag
     ? await computeCalibration(context.populationTag)
     : null;
   const layer3Calibration = calibration
-    ? { ...calibration, calibrated_score: applyCalibration(adaptiveModel.adaptive_score, calibration) }
+    ? {
+      ...summarizeCalibration(calibration),
+      calibrated_score: applyCalibration(adaptiveModel.adaptive_score, calibration),
+    }
     : null;
 
   return {
