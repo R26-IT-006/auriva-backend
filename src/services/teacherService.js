@@ -193,7 +193,9 @@ function buildPronunciationResultRecord({ teacherId, studentId, data, rawAudioBu
     recording_uri: data.recording_uri || null,
     raw_audio_data: rawAudioBuffer,
     raw_audio_mime_type: data.raw_audio_mime_type || null,
-    raw_audio_size: rawAudioBuffer?.length || data.raw_audio_size || null,
+    // Audio presence must reflect bytes actually persisted, not client
+    // metadata. Otherwise history advertises a playable clip that is absent.
+    raw_audio_size: rawAudioBuffer?.length || null,
   };
 }
 
@@ -356,7 +358,9 @@ async function getPronunciationResults(teacherId, studentId, limit = RESULTS_HIS
     limit: safeLimit,
   });
 
-  return results.map(serializePronunciationResult).reverse();
+  // Consumers select index 0 as the latest attempt and explicitly reverse a
+  // copy when chronological calculations are needed.
+  return results.map(serializePronunciationResult);
 }
 
 async function getPronunciationResultAudio(teacherId, resultId) {
