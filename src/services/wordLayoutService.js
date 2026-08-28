@@ -313,13 +313,52 @@ function computeWordLayoutMetrics({ word, strokes, canvasWidth, canvasHeight }) 
 // wording" and "do not overwhelm the child with analytics".
 const CHILD_FEEDBACK_SCORE_THRESHOLD = 55;
 
+// How far the AVERAGE gap must sit from the template's own gap before the
+// advisory is willing to name a direction. Below this the word is simply
+// irregular, and "closer"/"further" would be picking a side on noise.
+const SPACING_DIRECTION_MIN_DEVIATION = 0.15;
+
+// Which way the gaps are off  -  'tight', 'wide', or null when there is no
+// honest answer.
+//
+// spacing_consistency_score cannot answer this: it folds the average deviation
+// through Math.abs and adds the spread, so bunched-up and spread-out letters
+// score identically. The per-pair gap_ratio values in spacing_metrics DO carry
+// the sign, and this reads them directly.
+//
+// Two guards, because a wrong direction is worse for a child than a vague one:
+//   - the average gap must be clearly off, not marginally
+//   - that average error must be LARGER than the variation between gaps;
+//     otherwise the gaps are just uneven and no single direction describes them
+function resolveSpacingDirection(layout) {
+  const ratios = (layout.spacing_metrics || [])
+    .filter(m => m && m.status === 'available' && Number.isFinite(m.gap_ratio))
+    .map(m => m.gap_ratio);
+  if (ratios.length === 0) return null;
+
+  const meanRatio = mean(ratios);
+  const deviation = meanRatio - 1;
+  const spread = ratios.length >= 2 ? stddev(ratios, meanRatio) : 0;
+
+  if (Math.abs(deviation) < SPACING_DIRECTION_MIN_DEVIATION) return null;
+  if (Math.abs(deviation) <= spread) return null;
+  return deviation < 0 ? 'tight' : 'wide';
+}
+
 function resolveChildFeedbackAdvisory(layout) {
   if (layout.status !== 'available') return null;
   const sizeLow = layout.size_consistency_score != null && layout.size_consistency_score < CHILD_FEEDBACK_SCORE_THRESHOLD;
   const spacingLow = layout.spacing_consistency_score != null && layout.spacing_consistency_score < CHILD_FEEDBACK_SCORE_THRESHOLD;
   if (sizeLow && spacingLow) return 'both';
   if (sizeLow) return 'size';
-  if (spacingLow) return 'spacing';
+  if (spacingLow) {
+    // 'spacing' stays the answer whenever the direction is not trustworthy,
+    // so the client never has to guess on this side either.
+    const direction = resolveSpacingDirection(layout);
+    if (direction === 'tight') return 'spacing_tight';
+    if (direction === 'wide') return 'spacing_wide';
+    return 'spacing';
+  }
   return null;
 }
 
@@ -347,9 +386,11 @@ module.exports = {
   SIZE_CONSISTENCY_CV_SCALE,
   SPACING_CONSISTENCY_SCALE,
   CHILD_FEEDBACK_SCORE_THRESHOLD,
+  SPACING_DIRECTION_MIN_DEVIATION,
   TEACHER_SUMMARY_CONSISTENT_MIN,
   TEACHER_SUMMARY_SOME_VARIATION_MIN,
   computeWordLayoutMetrics,
   resolveChildFeedbackAdvisory,
+  resolveSpacingDirection,
   scoreToConsistencyLabel,
 };

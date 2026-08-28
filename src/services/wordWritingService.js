@@ -106,7 +106,13 @@ async function getProgress(studentId) {
   const result = {};
   rows.forEach(row => {
     const progress = row.get ? row.get({ plain: true }) : row;
-    (result[progress.source_letter] ??= []).push({ word: progress.word, status: progress.activity_status });
+    // updated_at is additive: it lets a client express a completion in the
+    // project's Asia/Colombo practice-date convention instead of inventing a
+    // UTC day boundary. Nothing here decides completion — the client applies
+    // the same all-of-A-E rule the flow already implies.
+    (result[progress.source_letter] ??= []).push({
+      word: progress.word, status: progress.activity_status, updated_at: progress.updated_at,
+    });
   });
   return result;
 }
