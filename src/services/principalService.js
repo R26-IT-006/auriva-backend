@@ -10,12 +10,12 @@ const ApiError = require('../utils/ApiError');
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
 async function getDashboardStats() {
-  const [teacherCount, studentCount, activeSessionCount] = await Promise.all([
+  const [teacherCount, studentCount, unassignedStudents] = await Promise.all([
     Teacher.count(),
     Student.count(),
-    Session.count({ where: { is_active: true } }),
+    Student.count({ where: { teacher_id: null } }),
   ]);
-  return { teacherCount, studentCount, activeSessionCount };
+  return { teacherCount, studentCount, unassignedStudents };
 }
 
 // ─── Teachers ────────────────────────────────────────────────────────────────
@@ -152,14 +152,14 @@ async function createStudent(data, file) {
 
 async function getStudents() {
   return Student.findAll({
-    include: [{ model: Teacher, as: 'teacher', attributes: ['tid', 'full_name', 'teacher_code'] }],
+    include: [{ model: Teacher, as: 'teacher', attributes: ['tid', 'full_name', 'teacher_code', 'profile_photo_url'] }],
     order: [['student_code', 'ASC']],
   });
 }
 
 async function getStudentById(id) {
   const student = await Student.findByPk(id, {
-    include: [{ model: Teacher, as: 'teacher', attributes: ['tid', 'full_name', 'teacher_code'] }],
+    include: [{ model: Teacher, as: 'teacher', attributes: ['tid', 'full_name', 'teacher_code', 'profile_photo_url'] }],
   });
   if (!student) throw new ApiError(404, 'Student not found');
   return student;
@@ -214,9 +214,9 @@ async function assignStudent(studentId, teacherId) {
         lock: t.LOCK.UPDATE,
       });
       const count = assigned.length;
-      if (count >= 3) {
+      if (count >= 5) {
         await t.rollback();
-        throw new ApiError(400, 'Teacher already has the maximum of 3 students assigned');
+        throw new ApiError(400, 'Teacher already has the maximum of 5 students assigned');
       }
       await Student.update(
         { teacher_id: teacherId },

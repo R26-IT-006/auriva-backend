@@ -3,6 +3,7 @@
 const { validationResult } = require('express-validator');
 const teacherService = require('../services/teacherService');
 const ApiError       = require('../utils/ApiError');
+const { sendAudioBufferResponse } = require('../utils/audioResponse');
 
 async function getDashboard(req, res) {
   const data = await teacherService.getDashboardStats(req.user.id);
@@ -43,4 +44,92 @@ async function setAvatar(req, res) {
   res.status(201).json(record);
 }
 
-module.exports = { getDashboard, getStudents, getStudentById, startSession, endSession, setAvatar };
+async function setSensorySettings(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const record = await teacherService.setSensorySettings(
+    req.user.id,
+    req.params.id,
+    req.body.reduce_stimulation
+  );
+  res.json(record);
+}
+
+async function savePronunciationResult(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await teacherService.savePronunciationResult(
+    req.user.id,
+    req.params.id,
+    req.body
+  );
+  res.status(201).json(result);
+}
+
+async function scorePronunciationAttempt(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await teacherService.scorePronunciationAttempt(
+    req.user.id,
+    req.params.id,
+    req.body
+  );
+  res.json(result);
+}
+
+async function getPronunciationResults(req, res) {
+  const results = await teacherService.getPronunciationResults(req.user.id, req.params.id, req.query.limit);
+  res.json(results);
+}
+
+async function getPronunciationReviewQueue(req, res) {
+  const queue = await teacherService.getPronunciationReviewQueue(req.user.id, req.query.limit);
+  res.json(queue);
+}
+
+async function submitPronunciationReview(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await teacherService.submitPronunciationReview(
+    req.user.id,
+    req.params.resultId,
+    req.body.teacher_reviewed_score
+  );
+  res.json(result);
+}
+
+async function getPronunciationResultAudio(req, res) {
+  const audio = await teacherService.getPronunciationResultAudio(
+    req.user.id,
+    req.params.resultId
+  );
+
+  if (req.query.stream === '1') {
+    const buffer = Buffer.from(audio.raw_audio_base64, 'base64');
+    const mimeType = audio.raw_audio_mime_type || 'audio/mp4';
+    sendAudioBufferResponse({ req, res, buffer, mimeType });
+    return;
+  }
+
+  res.json(audio);
+}
+
+module.exports = {
+  getDashboard,
+  getStudents,
+  getStudentById,
+  startSession,
+  endSession,
+  setAvatar,
+  setSensorySettings,
+  scorePronunciationAttempt,
+  savePronunciationResult,
+  getPronunciationResults,
+  getPronunciationResultAudio,
+  submitPronunciationReview,
+  getPronunciationReviewQueue,
+};

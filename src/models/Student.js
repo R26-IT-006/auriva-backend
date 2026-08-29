@@ -54,6 +54,14 @@ const Student = sequelize.define('Student', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  // ASD sensory sensitivity varies hugely per child — one kid's motivating
+  // reward (confetti, vibration, triumphant sound) is another's overload
+  // trigger. Teacher-set, defaults off so existing behavior is unchanged.
+  reduce_stimulation: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
   teacher_id: {
     type: DataTypes.INTEGER,
     allowNull: true,

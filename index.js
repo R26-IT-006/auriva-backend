@@ -12,9 +12,30 @@ const ApiError     = require('./src/utils/ApiError');
 const { sequelize } = require('./src/models');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./src/config/swagger');
+const phonemeGopService = require('./src/services/phonemeGopService');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// ─── Process-level safety nets ─────────────────────────────────────────────────
+// Without these, a rejection escaping request scope (e.g. inside a subprocess
+// 'exit' handler) or any uncaught exception crashes the whole server, ending
+// every teacher/student session in progress with no trace of why.
+process.on('unhandledRejection', (reason) => {
+  logger.error(`Unhandled promise rejection: ${reason?.message || reason}`, {
+    stack: reason?.stack,
+  });
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught exception: ${err.message}`, { stack: err.stack });
+  process.exit(1);
+});
+
+function getPositiveIntegerEnv(name, fallback) {
+  const value = Number.parseInt(process.env[name], 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 // ─── Security headers ─────────────────────────────────────────────────────────
 app.use(helmet());
@@ -30,18 +51,28 @@ app.use(morgan('combined', {
   stream: { write: (msg) => logger.http(msg.trim()) },
 }));
 
-// ─── Rate limiting (100 req / 15 min per IP) ──────────────────────────────────
+// ─── Rate limiting ────────────────────────────────────────────────────────────
+const rateLimitWindowMs = getPositiveIntegerEnv('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000);
+
+app.use('/api/auth', rateLimit({
+  windowMs: rateLimitWindowMs,
+  limit: getPositiveIntegerEnv('AUTH_RATE_LIMIT_MAX', 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication requests, please try again later.' },
+}));
+
 app.use('/api', rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 100,
+  windowMs: rateLimitWindowMs,
+  limit: getPositiveIntegerEnv('API_RATE_LIMIT_MAX', 1000),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
 }));
 
 // ─── Body parsing ─────────────────────────────────────────────────────────────
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '12mb' }));
+app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 
 // ─── Swagger UI ───────────────────────────────────────────────────────────────
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
@@ -74,9 +105,31 @@ app.use((err, req, res, next) => {
   }
 
   if (err instanceof ApiError) {
+    // express-validator's error array includes the raw submitted `value` per
+    // field, which for this API can be an 8MB base64 audio blob of a child's
+    // recording — never echo submitted values back in the response.
+    const details = Array.isArray(err.details)
+      ? err.details.map(({ value, ...rest }) => rest)
+      : err.details;
+
     return res.status(err.statusCode).json({
-      error:   err.message,
+      error: err.message,
+      ...(details && { details }),
+    });
+  }
+
+  if (err.code === 'AUDIO_QUALITY_FAILED' || err.code === 'WORD_MISMATCH') {
+    return res.status(422).json({
+      error: err.message,
+      code: err.code,
       ...(err.details && { details: err.details }),
+    });
+  }
+
+  if (err.code === 'ACOUSTIC_SCORING_FAILED' || err.code === 'GOP_UNAVAILABLE') {
+    return res.status(503).json({
+      error: 'Scoring is temporarily unavailable. Please try recording again.',
+      code: err.code,
     });
   }
 
@@ -91,16 +144,28 @@ app.use((err, req, res, next) => {
     });
   }
 
+  if (err.name === 'SequelizeConnectionAcquireTimeoutError') {
+    const isScoringRequest = req.path.endsWith('/pronunciation-score');
+    return res.status(503).json({
+      error: isScoringRequest
+        ? 'Scoring is busy right now. Your recording is still saved; please press Next again.'
+        : 'The service is busy right now. Please try again.',
+      code: 'DATABASE_BUSY',
+    });
+  }
+
   res.status(500).json({ error: 'Internal server error' });
 });
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 async function start() {
+  logger.info(`Connecting to database at ${process.env.DB_HOST}:${process.env.DB_PORT || 5432}`);
   await sequelize.authenticate();
   logger.info('Database connection established');
 
   if (process.env.NODE_ENV === 'development') {
-    await sequelize.sync({ alter: true });
+    logger.info('Syncing database schema');
+    await sequelize.sync({ alter: { drop: false } });
     logger.info('Database schema synced');
   }
 
@@ -108,9 +173,19 @@ async function start() {
     logger.info(`Auriva backend running on port ${PORT} [${process.env.NODE_ENV}]`);
     logger.info(`Swagger UI → http://localhost:${PORT}/api-docs`);
   });
+
+  // Fire-and-forget: warms the GOP model in the background so the first
+  // layer-1-escalated attempt doesn't pay the cold-start cost itself. On
+  // failure the worker logs its own reason and scoring falls back to
+  // layer-1-only, same as any later runtime GOP failure.
+  phonemeGopService.warmup().then((ready) => {
+    if (ready) logger.info('Phoneme GOP worker warmed up');
+  });
 }
 
 start().catch((err) => {
-  logger.error('Startup failed', { err });
+  logger.error(`Startup failed: ${err.name || 'Error'} - ${err.message}`, {
+    stack: err.stack,
+  });
   process.exit(1);
 });

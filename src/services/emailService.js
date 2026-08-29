@@ -1,20 +1,28 @@
 'use strict';
 
-const nodemailer = require('nodemailer');
+let transporter;
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_APP_PASSWORD,
-  },
-});
+function getTransporter() {
+  if (!transporter) {
+    const nodemailer = require('nodemailer');
+
+    transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.SMTP_EMAIL,
+        pass: process.env.SMTP_APP_PASSWORD,
+      },
+    });
+  }
+
+  return transporter;
+}
 
 /**
  * Send welcome email to a newly created teacher with their login credentials.
  */
 async function sendWelcomeEmail(email, fullName, teacherCode, tempPassword) {
-  await transporter.sendMail({
+  await getTransporter().sendMail({
     from: `"Auriva System" <${process.env.SMTP_EMAIL}>`,
     to: email,
     subject: 'Welcome to Auriva — Your Login Credentials',
@@ -65,7 +73,7 @@ async function sendWelcomeEmail(email, fullName, teacherCode, tempPassword) {
  * Send a password-reset OTP to the teacher's email.
  */
 async function sendOtpEmail(email, fullName, otp) {
-  await transporter.sendMail({
+  await getTransporter().sendMail({
     from: `"Auriva System" <${process.env.SMTP_EMAIL}>`,
     to: email,
     subject: 'Auriva — Password Reset OTP',
