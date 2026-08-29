@@ -32,7 +32,12 @@ const SL_PLACES = [
 ];
 
 // TASK-19 describe_friend / describe_pet constants.
-const FRIEND_PERSONALITIES = ['kind', 'funny', 'nice']; // closed set, R-16 discipline
+// Closed set, R-16 discipline. Must match FriendNameStep.js's PERSONALITY_OPTIONS
+// exactly (TASK-20 shipped 6 chips, not the original 3 — accepted deviation,
+// STATE.md 2026-08-14 — but this validator was never updated to match, so
+// every child whose personality chip wasn't in the original 3 got a 422 on
+// save. Fixed 2026-08-20, direct human bug report against a live PATCH call.
+const FRIEND_PERSONALITIES = ['kind', 'funny', 'smart', 'brave', 'caring', 'creative'];
 const PET_TYPES = ['cat', 'dog', 'cow', 'fish', 'parrot', 'rabbit']; // closed six, R-16
 const FRIEND_AGE_MIN = 5;  // same range as child_age (AgePicker.js, TASK-16)
 const FRIEND_AGE_MAX = 12;
@@ -542,6 +547,10 @@ async function startFriendPetSession(teacherId, studentId, topic, q, parentSessi
       audio_base64:  sentenceAudios[i],
     })),
     gender: q.child_gender,
+    // Frontend needs this to pick the right character asset (Anjalie_Waving
+    // vs Saman_Waving) for describe_friend's "friend's name"/"friend is a
+    // boy/girl" sentences — only meaningful when topic === 'describe_friend'.
+    friend_gender: q.friend_gender,
   };
 }
 
@@ -614,6 +623,10 @@ async function startSession(teacherId, studentId, topic = 'self_introduction', p
       index:         i + 1,
       prompt:        PROMPTS[i],
       text,
+      // TASK-18: per-word tokenisation for the Sentence Familiarisation Ladder
+      // (L2ListenWatchScreen, L2SentenceBuildScreen). Additive — no existing
+      // consumer is broken because they already ignore unknown response fields.
+      words:         text.split(' '),
       dynamic_value: [
         q.child_first_name,
         String(q.child_age),

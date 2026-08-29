@@ -5,9 +5,6 @@ const {
   DialogueWordProgress,
   DialoguePhase3Attempt,
   ActionWordAttempt,
-  CanYouGameRound,
-  ActionIdentificationRound,
-  VerbQAProductionRound,
   Student,
   Session,
 } = require('../models');
@@ -30,7 +27,11 @@ function todayString() {
 const STANDALONE_ASSET_KEYS = ['cat3_yes', 'cat3_no'];
 
 // Cat3 teaching order is independent of dialogue_words teaching_order.
-const CAT3_ASSET_ORDER = ['cat3_yes', 'cat3_no', 'clap', 'run', 'walk', 'jump', 'talk', 'dance', 'sing'];
+const CAT3_ASSET_ORDER = [
+  'cat3_yes', 'cat3_no',
+  'clap', 'run', 'walk', 'jump', 'talk', 'dance', 'sing',
+  'brush', 'wash', 'eat', 'drink', 'write', 'play', 'sleep', 'watch',
+];
 
 // Avatar animation asset is derived from the word's asset_key.
 const ANIMATION_MAP = {
@@ -89,10 +90,16 @@ async function getOrCreateProgress(studentId, wordId) {
   return progress;
 }
 
-// Fetches all Cat3 abilities words (Yes, No + Clap–Sing) with this student's progress.
+// Fetches all Cat3 abilities words (Yes, No + Clap–Sing + the 8 difficulty-2
+// action verbs, TASK-42) with this student's progress. This is the only word
+// source for every Cat3 screen (see Level1OverviewScreen.js routing
+// 'abilities' through cat3Api, not the generic dialogueApi). No difficulty
+// filter — cat3SortIndex() handles ordering, and the trajectory-conditioned
+// gate in getNextWord() controls when higher-difficulty words actually
+// become reachable candidates.
 async function fetchCat3WordsWithProgress(studentId) {
   const words = await DialogueWord.findAll({
-    where: { category: 'abilities', difficulty: 1 },
+    where: { category: 'abilities' },
     include: [{
       model: DialogueWordProgress,
       as: 'cat3Progress',
@@ -134,6 +141,34 @@ async function getCat3Overview(teacherId, studentId) {
 }
 
 /**
+ * Gate helpers for the multi-tier difficulty ladder (TASK-42).
+ * Mirror allLowerDifficultyMastered / isSessionUnlocked /
+ * anyLowerDifficultyMastered from dialogueService.js, applied to the
+ * entries array from fetchCat3WordsWithProgress.
+ */
+
+/** All words at difficulty < targetDifficulty are mastered — strict gate. */
+function allLowerDifficultyMastered(entries, targetDifficulty) {
+  return entries
+    .filter(({ word }) => word.difficulty < targetDifficulty)
+    .every(({ progress }) => progress?.status === 'mastered');
+}
+
+/** At least one word at difficulty < targetDifficulty has ≥1 session pass — relaxed gate. */
+function isSessionUnlocked(entries, targetDifficulty) {
+  return entries
+    .filter(({ word }) => word.difficulty < targetDifficulty)
+    .some(({ progress }) => (progress?.session_pass_count ?? 0) >= 1);
+}
+
+/** Any word at difficulty < targetDifficulty is mastered — fast-trajectory gate. */
+function anyLowerDifficultyMastered(entries, targetDifficulty) {
+  return entries
+    .filter(({ word }) => word.difficulty < targetDifficulty)
+    .some(({ progress }) => progress?.status === 'mastered');
+}
+
+/**
  * Returns the next word to teach in Cat3 order.
  * Yes and No (standalone) must both be mastered before any action_verb is returned.
  */
@@ -166,19 +201,37 @@ async function getNextWord(teacherId, studentId) {
     return true;
   });
 
-  // Trajectory-conditioned gate, evaluated per action-verb candidate (Scope
-  // Amendment A1: getNextWord() has no single "just passed" word to key a
-  // one-shot trajectory call off of). Standalone candidates are never
-  // subject to this gate.
+  // Trajectory-conditioned gate.
+  // Difficulty 1: binary standalone/action-verb gate unchanged from TASK-38.
+  // Difficulty 2+: three-gate ladder mirrors dialogueService.js pattern.
+  // 'typical' always resolves to today's pre-existing gate — fallback path
+  // until TRAJECTORY_ML_ENABLED=true and a trained model is loaded.
   const candidates = [];
   for (const e of basePool) {
-    if (isStandalone(e.word)) {
-      candidates.push(e);
+    const { word } = e;
+
+    if (word.difficulty === 1) {
+      // Existing standalone gate: standalones are always candidates; action
+      // verbs require all standalones mastered (typical/struggling) or at
+      // least one standalone session-passed (fast).
+      if (isStandalone(word)) {
+        candidates.push(e);
+        continue;
+      }
+      const trajectory = await getTrajectoryPrediction(studentId, word.id);
+      const gateOpen =
+        trajectory === 'fast' ? standaloneSessionUnlocked : allStandaloneMastered;
+      if (gateOpen) candidates.push(e);
       continue;
     }
-    const trajectory = await getTrajectoryPrediction(studentId, e.word.id);
-    const gateOpen = trajectory === 'fast' ? standaloneSessionUnlocked : allStandaloneMastered;
-    if (gateOpen) candidates.push(e);
+
+    // Difficulty 2+: trajectory-conditioned multi-tier gate.
+    const trajectory = await getTrajectoryPrediction(studentId, word.id);
+    const nextDiffGate =
+      trajectory === 'struggling' ? allLowerDifficultyMastered :
+      trajectory === 'fast'       ? anyLowerDifficultyMastered :
+      /* 'typical' — unchanged */   isSessionUnlocked;
+    if (nextDiffGate(entries, word.difficulty)) candidates.push(e);
   }
 
   const pick =
@@ -538,213 +591,6 @@ async function completeWordSession(teacherId, studentId, wordId, { phase3_passed
   return { session_passed: sessionPassed, mastered, status: newStatus, session_pass_count: newSessionPassCount };
 }
 
-// ── Activity 3.1 – Can You? Tap and Say ──────────────────────────────────
-
-async function getCanYouSession(teacherId, studentId) {
-  await assertStudentBelongsToTeacher(teacherId, studentId);
-
-  const entries = await fetchCat3WordsWithProgress(studentId);
-
-  const yesNoIntroduced = entries
-    .filter(({ word }) => isStandalone(word))
-    .every(({ progress }) => (progress?.status ?? 'not_started') !== 'not_started');
-
-  if (!yesNoIntroduced) {
-    throw new ApiError(422, 'Yes and No must be introduced before Activity 3.1.');
-  }
-
-  const masteredVerbs = entries.filter(
-    ({ word, progress }) => !isStandalone(word) && progress?.status === 'mastered'
-  );
-
-  if (masteredVerbs.length === 0) {
-    throw new ApiError(422, 'At least one action verb must be mastered before Activity 3.1.');
-  }
-
-  return {
-    mastered_verbs: masteredVerbs.map(({ word }) => ({
-      id:              word.id,
-      word:            word.word,
-      asset_key:       word.asset_key,
-      animation_asset: animationAsset(word),
-    })),
-    rounds_per_session: 4,
-  };
-}
-
-async function recordCanYouRound(teacherId, studentId, {
-  word_id, tap_response, voice_attempted, speech_detected, session_id, round_order,
-}) {
-  await assertStudentBelongsToTeacher(teacherId, studentId);
-  await assertCat3WordExists(word_id);
-
-  const round = await CanYouGameRound.create({
-    student_id:      studentId,
-    word_id,
-    session_id:      session_id ?? null,
-    tap_response,
-    voice_attempted: voice_attempted ?? false,
-    speech_detected: speech_detected ?? false,
-    round_order,
-  });
-
-  return { id: round.id, logged: true };
-}
-
-// ── Activity 3.2 – What Am I Doing? ──────────────────────────────────────
-
-async function getActionIdentificationSession(teacherId, studentId) {
-  await assertStudentBelongsToTeacher(teacherId, studentId);
-
-  const entries = await fetchCat3WordsWithProgress(studentId);
-  const verbEntries = entries.filter(({ word }) => !isStandalone(word));
-
-  const masteredVerbs    = verbEntries.filter(({ progress }) => progress?.status === 'mastered');
-  const introducedVerbs  = verbEntries.filter(({ progress }) => (progress?.status ?? 'not_started') !== 'not_started');
-
-  if (masteredVerbs.length < 2) {
-    throw new ApiError(422, 'At least 2 mastered action verbs are required for Activity 3.2.');
-  }
-
-  return {
-    available_verbs: masteredVerbs.map(({ word }) => ({
-      id:              word.id,
-      word:            word.word,
-      asset_key:       word.asset_key,
-      animation_asset: animationAsset(word),
-    })),
-    // Distractor pool: all introduced verbs (per Business Rule 1 — no uninstructed words)
-    distractor_pool: introducedVerbs.map(({ word }) => ({
-      id: word.id, word: word.word, asset_key: word.asset_key,
-    })),
-    rounds_per_session: 4,
-  };
-}
-
-async function recordActionIdentificationRound(teacherId, studentId, {
-  word_id, distractor_word_ids, first_attempt_correct,
-  required_hint, auto_advanced, response_given, session_id, round_order,
-}) {
-  await assertStudentBelongsToTeacher(teacherId, studentId);
-  await assertCat3WordExists(word_id);
-
-  const round = await ActionIdentificationRound.create({
-    student_id:           studentId,
-    word_id,
-    session_id:           session_id ?? null,
-    distractor_word_ids:  distractor_word_ids ?? [],
-    first_attempt_correct,
-    required_hint:        required_hint ?? false,
-    auto_advanced:        auto_advanced ?? false,
-    response_given:       response_given ?? null,
-    round_order,
-  });
-
-  return { id: round.id, logged: true };
-}
-
-// ── Activity 3.3 – Verb Q&A Production ───────────────────────────────────
-
-async function getVerbQASession(teacherId, studentId) {
-  await assertStudentBelongsToTeacher(teacherId, studentId);
-
-  const has31 = await CanYouGameRound.findOne({ where: { student_id: studentId } });
-  if (!has31) throw new ApiError(422, 'Activity 3.1 must be completed at least once first.');
-
-  const has32 = await ActionIdentificationRound.findOne({ where: { student_id: studentId } });
-  if (!has32) throw new ApiError(422, 'Activity 3.2 must be completed at least once first.');
-
-  const entries = await fetchCat3WordsWithProgress(studentId);
-  const masteredVerbs = entries.filter(
-    ({ word, progress }) => !isStandalone(word) && progress?.status === 'mastered'
-  );
-
-  if (masteredVerbs.length === 0) {
-    throw new ApiError(422, 'No mastered action verbs available for Activity 3.3.');
-  }
-
-  return {
-    mastered_verbs: masteredVerbs.map(({ word }) => ({
-      id:              word.id,
-      word:            word.word,
-      asset_key:       word.asset_key,
-      animation_asset: animationAsset(word),
-    })),
-    rounds_per_session: 4,
-  };
-}
-
-// Expected response arrays — FSD Business Rule 2
-const YES_I_CAN_TRIGGERS = {
-  score3: ['yes i can', 'yeh i can', 'ya i can', 'yes i ken'],
-  score2: ['yes can', 'i can', 'yes i'],
-  score1: ['yes', 'can'],
-};
-
-const NO_I_CANT_TRIGGERS = {
-  score3: ['no i cant', 'no i cannot', 'no i can not'],
-  score2: ['cant', 'i cannot', 'no cant'],
-  score1: ['no', 'cant', 'cannot'],
-};
-
-/**
- * POST /cat3/activity/3.3/round
- * Tap on response card selects intended phrase; only speech is scored.
- */
-async function assessVerbQARound(teacherId, studentId, {
-  word_id, intended_response, audio_base64, mime_type, session_id, round_order,
-}) {
-  await assertStudentBelongsToTeacher(teacherId, studentId);
-  await assertCat3WordExists(word_id);
-
-  const triggers = intended_response === 'yes_i_can' ? YES_I_CAN_TRIGGERS : NO_I_CANT_TRIGGERS;
-  const { score, transcript, match_type } = await speechAssessment.assessSpeech(
-    audio_base64, mime_type, triggers
-  );
-
-  const round = await VerbQAProductionRound.create({
-    student_id: studentId, word_id,
-    session_id: session_id ?? null,
-    intended_response, speech_score: score, transcript, match_type,
-    non_verbal_fallback_used: false, round_order,
-  });
-
-  return { id: round.id, score, transcript, match_type, advance: score >= 2, trigger_nonverbal: score === 0 };
-}
-
-/**
- * POST /cat3/activity/3.3/round/nonverbal
- * Score 0 → response cards remain visible; child taps the correct card.
- * Updates the existing round if one was created for this session, otherwise creates it.
- */
-async function recordVerbQANonVerbal(teacherId, studentId, {
-  word_id, intended_response, tap_response, session_id, round_order,
-}) {
-  await assertStudentBelongsToTeacher(teacherId, studentId);
-  await assertCat3WordExists(word_id);
-
-  const existing = session_id
-    ? await VerbQAProductionRound.findOne({
-        where: { student_id: studentId, word_id, session_id, speech_score: 0 },
-        order: [['played_at', 'DESC']],
-      })
-    : null;
-
-  if (existing) {
-    await existing.update({ non_verbal_fallback_used: true, tap_response, match_type: 'non_verbal' });
-    return { id: existing.id, logged: true };
-  }
-
-  const round = await VerbQAProductionRound.create({
-    student_id: studentId, word_id,
-    session_id: session_id ?? null,
-    intended_response, speech_score: 0, match_type: 'non_verbal',
-    non_verbal_fallback_used: true, tap_response, round_order,
-  });
-
-  return { id: round.id, logged: true };
-}
-
 /**
  * POST /probe-result
  * Rule 5 — mirrors dialogueService.js's recordProbeResult(), adapted to this
@@ -812,12 +658,8 @@ module.exports = {
   recordPhase2NonVerbal,
   recordPhase3Check,
   completeWordSession,
-  getCanYouSession,
-  recordCanYouRound,
-  getActionIdentificationSession,
-  recordActionIdentificationRound,
-  getVerbQASession,
-  assessVerbQARound,
-  recordVerbQANonVerbal,
   recordProbeResult,
+  // The authoritative list of abilities words currently taught. Exported so the
+  // teacher report can exclude retired rows rather than keeping its own copy.
+  CAT3_ASSET_ORDER,
 };

@@ -83,65 +83,6 @@ async function completeWordSession(req, res) {
   res.json(result);
 }
 
-async function getCanYouSession(req, res) {
-  const data = await cat3Service.getCanYouSession(req.user.id, req.params.studentId);
-  res.json(data);
-}
-
-async function recordCanYouRound(req, res) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
-  const result = await cat3Service.recordCanYouRound(
-    req.user.id,
-    req.params.studentId,
-    req.body
-  );
-  res.json(result);
-}
-
-async function getActionIdentificationSession(req, res) {
-  const data = await cat3Service.getActionIdentificationSession(req.user.id, req.params.studentId);
-  res.json(data);
-}
-
-async function recordActionIdentificationRound(req, res) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
-  const result = await cat3Service.recordActionIdentificationRound(
-    req.user.id,
-    req.params.studentId,
-    req.body
-  );
-  res.json(result);
-}
-
-async function getVerbQASession(req, res) {
-  const data = await cat3Service.getVerbQASession(req.user.id, req.params.studentId);
-  res.json(data);
-}
-
-async function assessVerbQARound(req, res) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
-  const result = await cat3Service.assessVerbQARound(
-    req.user.id,
-    req.params.studentId,
-    req.body
-  );
-  res.json(result);
-}
-
-async function recordVerbQANonVerbal(req, res) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
-  const result = await cat3Service.recordVerbQANonVerbal(
-    req.user.id,
-    req.params.studentId,
-    req.body
-  );
-  res.json(result);
-}
-
 async function recordProbeResult(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
@@ -163,12 +104,5 @@ module.exports = {
   recordPhase2NonVerbal,
   recordPhase3Check,
   completeWordSession,
-  getCanYouSession,
-  recordCanYouRound,
-  getActionIdentificationSession,
-  recordActionIdentificationRound,
-  getVerbQASession,
-  assessVerbQARound,
-  recordVerbQANonVerbal,
   recordProbeResult,
 };

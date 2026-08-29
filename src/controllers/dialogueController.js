@@ -3,6 +3,7 @@
 const { validationResult } = require('express-validator');
 const dialogueService      = require('../services/dialogueService');
 const trajectoryService    = require('../services/trajectoryService');
+const dialogueAnalyticsService = require('../services/dialogueAnalyticsService');
 const ApiError             = require('../utils/ApiError');
 
 async function getLevel1Overview(req, res) {
@@ -131,6 +132,50 @@ async function getTrajectory(req, res) {
   res.json({ trajectory });
 }
 
+// TASK-43 — XAI teacher reports. Same auth treatment as getTrajectory above
+// (verifyToken + isTeacher at router level). Read-only: neither handler changes
+// what any trajectory is, only surfaces why it is what it is.
+async function getTrajectoryExplanation(req, res) {
+  const result = await trajectoryService.getTrajectoryExplanation(
+    req.params.studentId,
+    req.params.wordId
+  );
+  res.json(result);
+}
+
+// The batch report the Trajectory Report screen calls — every in-scope dialogue
+// word for the student in one request, plus overview totals.
+async function getTrajectoryReport(req, res) {
+  const report = await trajectoryService.getTrajectoryReport(req.params.studentId);
+  res.json(report);
+}
+
+// TASK-47 — practice-trend timelines. Read-only aggregation of attempts already
+// recorded; neither handler touches mastery Rules 1-3.
+async function getDialogueTimeline(req, res) {
+  const data = await dialogueAnalyticsService.getModuleTimeline(
+    req.params.studentId,
+    req.query.days ?? 90
+  );
+  res.json(data);
+}
+
+async function getWordTimeline(req, res) {
+  const data = await dialogueAnalyticsService.getWordTimeline(
+    req.params.studentId,
+    req.params.wordId
+  );
+  res.json(data);
+}
+
+// TASK-12 — Non-Verbal Adaptive Wait-Time Escalation
+// Same auth middleware as all sibling routes (verifyToken + isTeacher applied at
+// router level). No assertStudentBelongsToTeacher here — mirrors getTrajectory pattern.
+async function getDailySpeechState(req, res) {
+  const state = await dialogueService.getDailySpeechState(req.params.studentId);
+  res.json(state);
+}
+
 module.exports = {
   getLevel1Overview,
   getNextWord,
@@ -144,4 +189,9 @@ module.exports = {
   getProbeCandidate,
   recordProbeResult,
   getTrajectory,
+  getTrajectoryExplanation,
+  getTrajectoryReport,
+  getDialogueTimeline,
+  getWordTimeline,
+  getDailySpeechState,
 };

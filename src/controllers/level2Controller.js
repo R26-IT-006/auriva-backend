@@ -1,8 +1,9 @@
 'use strict';
 
-const { validationResult } = require('express-validator');
-const level2Service        = require('../services/level2Service');
-const ApiError             = require('../utils/ApiError');
+const { validationResult }   = require('express-validator');
+const level2Service          = require('../services/level2Service');
+const level2AnalyticsService = require('../services/level2AnalyticsService');
+const ApiError               = require('../utils/ApiError');
 
 function validate(req) {
   const errors = validationResult(req);
@@ -24,6 +25,23 @@ async function saveQuestionnaire(req, res) {
 async function getQuestionnaire(req, res) {
   const q = await level2Service.getQuestionnaire(req.user.id, req.params.studentId);
   res.json({ data: q });
+}
+
+/**
+ * PATCH — partial questionnaire update for friend/pet fields (FriendNameStep.js,
+ * PetPicker.js). Reuses saveQuestionnaire's existing findOrCreate-then-update
+ * (already partial, already calls validateFriendPet) — no service change
+ * needed, only this route was missing. Unlike the PUT route, no self-
+ * introduction fields are required here.
+ */
+async function patchQuestionnaire(req, res) {
+  validate(req);
+  const q = await level2Service.saveQuestionnaire(
+    req.user.id,
+    req.params.studentId,
+    req.body
+  );
+  res.status(200).json({ message: 'Questionnaire updated', data: q });
 }
 
 async function savePortraitStrokes(req, res) {
@@ -64,6 +82,33 @@ async function getProgress(req, res) {
   validate(req);
   const topic = req.query.topic ?? 'self_introduction';
   const data = await level2Service.getProgress(req.user.id, req.params.studentId, topic);
+  res.json({ data });
+}
+
+// TASK-46 — one Level 2 report per student, all three topics in a single call.
+// Read-only: it reports the data the session flow already records and changes
+// none of it.
+async function getReport(req, res) {
+  const data = await level2AnalyticsService.getLevel2Report(req.params.studentId);
+  res.json({ data });
+}
+
+// TASK-47 — practice-trend timelines. Read-only; neither handler recomputes
+// Level2TopicProgress.status.
+async function getTimeline(req, res) {
+  const data = await level2AnalyticsService.getModuleTimeline(
+    req.params.studentId,
+    req.query.days ?? 90
+  );
+  res.json({ data });
+}
+
+async function getTopicTimeline(req, res) {
+  validate(req);
+  const data = await level2AnalyticsService.getTopicTimeline(
+    req.params.studentId,
+    req.params.topic
+  );
   res.json({ data });
 }
 
@@ -174,10 +219,14 @@ async function recordNonVerbalWordMatch(req, res) {
 module.exports = {
   saveQuestionnaire,
   getQuestionnaire,
+  patchQuestionnaire,
   savePortraitStrokes,
   startSession,
   completeSession,
   getProgress,
+  getReport,
+  getTimeline,
+  getTopicTimeline,
   recordStep3,
   assessStep4,
   recordNonVerbalTeaching,
