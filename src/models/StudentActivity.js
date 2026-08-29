@@ -17,14 +17,25 @@ const StudentActivity = sequelize.define('StudentActivity', {
     type: DataTypes.STRING(50),
     allowNull: false,
   },
-  // nth activity for this (student, category) — drives the fixed difficulty ladder
+  // Which activity this row belongs to. Coverage is tracked per type: a memory
+  // game must never consume the concepts the mixed practice activity is waiting
+  // on, or playing one would starve the other of a trigger.
+  activity_type: {
+    type: DataTypes.ENUM('practice', 'pair_match', 'memory'),
+    allowNull: false,
+    defaultValue: 'practice',
+  },
+  // nth activity for this (student, category, type) — drives the practice
+  // activity's difficulty ladder. The card games have no ladder.
   activity_number: {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
+  // Practice only — nullable because a card game has no ladder to record, and a
+  // placeholder here would be read as a real level by anything downstream.
   difficulty_level: {
     type: DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
   },
   // { ladder, delta, recent_score, concept_strength } — kept for debugging the adaptation
   difficulty_meta: {
@@ -41,19 +52,21 @@ const StudentActivity = sequelize.define('StudentActivity', {
     type: DataTypes.JSONB,
     allowNull: false,
   },
-  // "apple|banana|cherry#IIN" — used to avoid repeating a recent activity shape
+  // "apple|banana|cherry#IIN" — used to avoid repeating a recent activity shape.
+  // Practice only; a card game has no round shape to collide on.
   signature: {
     type: DataTypes.STRING(120),
-    allowNull: false,
+    allowNull: true,
   },
   // frozen blueprint: [{ round_number, question_type, concept_key, option_keys }]
+  // Practice only — null for the card games, which have no rounds.
   question_plan: {
     type: DataTypes.JSONB,
-    allowNull: false,
+    allowNull: true,
   },
   total_rounds: {
     type: DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
   },
   correct_count: {
     type: DataTypes.INTEGER,
@@ -82,6 +95,8 @@ const StudentActivity = sequelize.define('StudentActivity', {
   indexes: [
     { fields: ['student_id', 'category_key'] },
     { fields: ['student_id', 'category_key', 'activity_number'] },
+    // Coverage and activity_number are both looked up per type.
+    { fields: ['student_id', 'category_key', 'activity_type'] },
   ],
 });
 

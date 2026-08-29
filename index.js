@@ -163,34 +163,32 @@ async function start() {
   await sequelize.authenticate();
   logger.info('Database connection established');
 
-  const [[info]] = await sequelize.query(
-    `SELECT current_database() AS db, current_schema() AS schema,
-            (SELECT count(*) FROM information_schema.columns
-              WHERE table_name='students' AND column_name='personal_thresholds') AS has_col`
-  );
-  logger.info(`DB → ${info.db} schema=${info.schema} personal_thresholds=${info.has_col}`);
-
-  // Schema changes belong in migrations (see migrations/) from here on.
-  // sync({ alter: true }) is disabled by default — it runs ALTER TABLE
-  // against the live schema on every boot with no confirmation, which is
-  // unsafe once real data exists. NODE_ENV=development is not a safe proxy
-  // for "ok to auto-alter," since this backend can point at a real
-  // database even in development. Opt in explicitly and only on a
-  // disposable local/dev database — never against the school data.
+  // Schema changes belong in migrations (see migrations/), not in sync().
+  //
+  // This used to be `if (NODE_ENV === 'development') sequelize.sync({ alter: true })`,
+  // which ran ALTER TABLE against the live schema on every boot. NODE_ENV is
+  // 'development' on every developer machine, but they all point at the SHARED
+  // Azure database — and alter:true defaults to drop:true, so booting this branch
+  // dropped students.reduce_stimulation and students.personal_thresholds, which
+  // this branch's Student model does not declare. ddl_audit_log recorded six such
+  // drop/restore cycles between 2026-08-08 and 2026-08-16, from five different
+  // developer machines, each one 500-ing the app for everyone else.
+  //
+  // Now opt-in and non-destructive:
+  //   ALLOW_DB_SYNC=true   — explicit, and absent from .env by default
+  //   alter: { drop: false } — never remove a column this branch's models
+  //                            happen not to know about
+  // Only ever enable it against a disposable local database.
   const allowSync = process.env.ALLOW_DB_SYNC === 'true' && process.env.NODE_ENV !== 'production';
   if (allowSync) {
     // Clears the stale Cat3 word_id FK constraints so the sync below can
     // recreate them — it only makes sense immediately before a sync, which is
     // why it sits inside this branch rather than running on every boot.
     await fixCat3ForeignKeys();
-    // alter: { drop: false } — never let an out-of-date local model definition
-    // drop a live column. This DB is shared across dev machines, and alter:true's
-    // default (drop: true) has repeatedly dropped students.personal_thresholds
-    // out from under other developers whose Student model already had it.
     await sequelize.sync({ alter: { drop: false } });
-    logger.warn('Database schema synced via ALLOW_DB_SYNC=true (alter: true, drop: false) — should only happen on a local/dev database');
+    logger.warn('Database schema synced via ALLOW_DB_SYNC=true (alter, drop: false) — local/dev databases only');
   } else {
-    logger.info('Schema sync skipped (set ALLOW_DB_SYNC=true on a non-production, disposable database to enable) — use migrations for schema changes');
+    logger.info('Schema sync skipped — use migrations for schema changes');
   }
 
   app.listen(PORT, () => {

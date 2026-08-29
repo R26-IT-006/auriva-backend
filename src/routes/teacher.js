@@ -1,6 +1,8 @@
 'use strict';
 
 const router          = require('express').Router();
+// Named imports rather than the default export: ipKeyGenerator is only reachable
+// that way, and pronunciationScoreLimiter below needs it for its IPv6-safe fallback.
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { verifyToken } = require('../middleware/auth');
 const { isTeacher }   = require('../middleware/roleGuard');
@@ -11,9 +13,24 @@ const {
   scorePronunciationAttemptValidation,
 } = require('../validations/pronunciationValidation');
 const analyticsCtrl   = require('../controllers/conceptAnalyticsController');
+const aiCtrl          = require('../controllers/aiController');
+const archiveCtrl     = require('../controllers/conceptReportArchiveController');
 
 // All routes require JWT + teacher role + first-login gate
 router.use(verifyToken, isTeacher);
+
+// The only routes in the app that cost money per call. Cached responses are free,
+// but ?refresh=true is not, and a teacher leaning on the refresh button should
+// not be able to run up a bill. Keyed per teacher rather than per IP — a whole
+// school behind one NAT would otherwise share a budget.
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.user.id),
+  message: { message: 'Too many summary requests. Please wait a moment.' },
+});
 
 // Scoring spawns ffmpeg, whisper-cli, and a Python wav2vec2 worker per call —
 // far heavier than the rest of the API, so it gets its own tighter cap keyed
@@ -57,6 +74,34 @@ const pronunciationScoreLimiter = rateLimit({
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/dashboard', ctrl.getDashboard);
+
+/**
+ * @swagger
+ * /api/teacher/dashboard/digest:
+ *   get:
+ *     summary: LLM-generated weekly digest of the teacher's class
+ *     description: >
+ *       Narrates the same figures /dashboard returns. Always 200 — when the
+ *       feature is disabled, the model call fails, or the teacher has no
+ *       students, the response is `{ available: false }` and the client renders
+ *       nothing. Student names are never sent to the model; they are substituted
+ *       server-side and restored in the response.
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: refresh
+ *         schema:
+ *           type: boolean
+ *         description: Bypass the cache and regenerate
+ *     responses:
+ *       200:
+ *         description: "Digest, or `{ available: false }`"
+ *       429:
+ *         description: Rate limited
+ */
+router.get('/dashboard/digest', aiLimiter, aiCtrl.getClassDigest);
 
 /**
  * @swagger
@@ -121,6 +166,90 @@ router.post('/students/:id/avatar', [
 router.get('/students/:id/concepts/summary', analyticsCtrl.getConceptSummary);
 router.get('/students/:id/concepts/report',  analyticsCtrl.getConceptReport);
 
+/**
+ * @swagger
+ * /api/teacher/students/{id}/concepts/narrative:
+ *   get:
+ *     summary: LLM-generated summary of a student's concept report
+ *     description: >
+ *       Narrates the payload from /concepts/report — mastery, confusion pairs,
+ *       response times and engagement — for the teacher. Advisory only: it never
+ *       influences what the child sees. Always 200; `{ available: false }` when
+ *       the feature is off, the model call fails, or the child has no logged
+ *       activity. The student's name and id are never sent to the model.
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Student ID (sid)
+ *       - in: query
+ *         name: refresh
+ *         schema:
+ *           type: boolean
+ *         description: Bypass the cache and regenerate
+ *     responses:
+ *       200:
+ *         description: "Summary, or `{ available: false }`"
+ *       404:
+ *         description: Student not found or not assigned to this teacher
+ *       429:
+ *         description: Rate limited
+ */
+router.get('/students/:id/concepts/narrative', aiLimiter, aiCtrl.getConceptNarrative);
+
+/**
+ * @swagger
+ * /api/teacher/students/{id}/concepts/reports:
+ *   get:
+ *     summary: List a student's saved concept reports, newest period first
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *   post:
+ *     summary: Generate and store one period's concept report
+ *     description: >
+ *       Freezes the figures for a week or month so they can be revisited and
+ *       shared without moving. Regenerating a period replaces it. Returns 422
+ *       when nothing was recorded in the period — an empty report is worse than
+ *       none, because a teacher cannot tell it apart from a broken one.
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ */
+// Sorted newest first by the server. The client must not re-sort: the order is
+// part of the contract, and two screens sorting the same list differently is how
+// a teacher ends up reading the wrong week's report.
+router.get('/students/:id/concepts/periods', archiveCtrl.getPeriods);
+router.get('/students/:id/concepts/reports', archiveCtrl.listReports);
+// aiLimiter: generating makes a model call, so it is rate-limited like the other
+// two endpoints that cost money.
+router.post('/students/:id/concepts/reports', aiLimiter, [
+  body('period_type')
+    .isIn(['week', 'month'])
+    .withMessage('period_type must be week or month'),
+  body('period_start')
+    .matches(/^\d{4}-\d{2}-\d{2}$/)
+    .withMessage('period_start must be a YYYY-MM-DD date'),
+], archiveCtrl.createReport);
+// Declared after /reports so "reports" is never captured as a reportId.
+router.get('/students/:id/concepts/reports/:reportId', archiveCtrl.getReport);
+router.delete('/students/:id/concepts/reports/:reportId', archiveCtrl.deleteReport);
+
+// Notes/reminders a teacher keeps about one of their own students.
+router.get('/students/:id/notes', ctrl.getStudentNotes);
+router.post('/students/:id/notes', [
+  body('body')
+    .trim()
+    .isLength({ min: 1, max: 2000 })
+    .withMessage('body must be between 1 and 2000 characters'),
+], ctrl.addStudentNote);
+router.delete('/students/:id/notes/:noteId', ctrl.deleteStudentNote);
+
 router.patch('/students/:id/threshold', [
   body('letter')
     .isString().notEmpty()
@@ -129,7 +258,6 @@ router.patch('/students/:id/threshold', [
     .isFloat({ min: 0, max: 100 })
     .withMessage('value must be a number between 0 and 100'),
 ], ctrl.setThreshold);
-
 
 router.put('/students/:id/sensory-settings', [
   body('reduce_stimulation')

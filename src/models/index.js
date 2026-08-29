@@ -39,6 +39,10 @@ const StudentConceptProgress   = require('./StudentConceptProgress');
 const ConceptInteractionLog    = require('./ConceptInteractionLog');
 const PronunciationSessionResult = require('./PronunciationSessionResult');
 const StudentActivity          = require('./StudentActivity');
+const ColoringArtwork          = require('./ColoringArtwork');
+const StudentNote              = require('./StudentNote');
+const AiSummary                = require('./AiSummary');
+const ConceptReport            = require('./ConceptReport');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -215,6 +219,24 @@ ConceptInteractionLog.belongsTo(Student, { foreignKey: 'student_id', as: 'studen
 Student.hasMany(StudentActivity, { foreignKey: 'student_id', as: 'activities' });
 StudentActivity.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → tier 3 colouring artwork
+Student.hasMany(ColoringArtwork, { foreignKey: 'student_id', as: 'coloringArtworks' });
+ColoringArtwork.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Student → teacher notes/reminders
+Student.hasMany(StudentNote, { foreignKey: 'student_id', as: 'notes' });
+StudentNote.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Teacher.hasMany(StudentNote, { foreignKey: 'teacher_id', as: 'studentNotes' });
+StudentNote.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
+
+// Student → frozen concept reports. Cascades: a deleted child takes their saved
+// reports with them, which is what a data-protection request means in practice.
+Student.hasMany(ConceptReport, { foreignKey: 'student_id', as: 'conceptReports' });
+ConceptReport.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// AiSummary has no association on purpose — subject_id addresses either a student
+// or a teacher depending on scope, so there is no single relation to declare.
+
 // Student → HandwritingAssessment
 Student.hasMany(HandwritingAssessment, { foreignKey: 'student_id', as: 'handwritingAssessments' });
 HandwritingAssessment.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
@@ -298,6 +320,10 @@ module.exports = {
   StudentConceptProgress,
   ConceptInteractionLog,
   StudentActivity,
+  ColoringArtwork,
+  StudentNote,
+  AiSummary,
+  ConceptReport,
   HandwritingAssessment,
   LetterProgress,
   Stroke,

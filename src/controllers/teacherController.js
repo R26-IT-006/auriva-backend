@@ -28,6 +28,24 @@ async function setAvatar(req, res) {
   res.status(201).json(record);
 }
 
+async function getStudentNotes(req, res) {
+  const notes = await teacherService.getStudentNotes(req.user.id, req.params.id);
+  res.json(notes);
+}
+
+async function addStudentNote(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const note = await teacherService.addStudentNote(req.user.id, req.params.id, req.body.body);
+  res.status(201).json(note);
+}
+
+async function deleteStudentNote(req, res) {
+  await teacherService.deleteStudentNote(req.user.id, req.params.id, req.params.noteId);
+  res.status(204).send();
+}
+
 async function setThreshold(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
@@ -101,11 +119,15 @@ async function getPronunciationResultAudio(req, res) {
 // startSession/endSession are deliberately absent: session management was removed
 // from this branch (commit 7311516). The incoming branch's export list still named
 // them, which would throw a ReferenceError the moment this module is required.
+
 module.exports = {
   getDashboard,
   getStudents,
   getStudentById,
   setAvatar,
+  getStudentNotes,
+  addStudentNote,
+  deleteStudentNote,
   setThreshold,
   setSensorySettings,
   scorePronunciationAttempt,
