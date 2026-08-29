@@ -160,13 +160,18 @@ function labelFor(index) {
  * disambiguate, so the prompt refers to "the child" and nothing needs
  * rehydrating on the way out.
  */
-function buildNarrativeInput(report) {
+function buildNarrativeInput(report, period = null) {
   const attention = new Set();
   for (const c of report.categories || []) {
     for (const k of c.needs_attention || []) attention.add(k);
   }
 
   return {
+    // Only on a dated report, and load-bearing: generateCached keys on a hash of
+    // this payload, so without the period two different weeks whose figures
+    // happened to match would collide and the second would silently be served the
+    // first one's paragraph — under the wrong date, to a teacher who trusts it.
+    ...(period ? { period: { type: period.type, start: period.period_start, end: period.period_end } } : {}),
     window_days: report.window_days,
     totals: {
       catalogue_concepts: report.totals?.catalogue_concepts,
@@ -410,17 +415,33 @@ async function getConceptNarrative(teacherId, studentId, { refresh = false } = {
   if (!gemini.isEnabled()) return { available: false };
 
   const report = await conceptAnalyticsService.getConceptReport(teacherId, studentId);
+  return narrativeFor(report, { studentId, refresh });
+}
+
+/**
+ * Narrate a report the caller already holds.
+ *
+ * Split out so generating a saved report does not fetch the same aggregate twice
+ * — the archive has just spent nine queries building it, and re-running them to
+ * hand the model a copy would double the cost of the slowest thing a teacher can
+ * press.
+ *
+ * ⚠️ There is NO ownership gate here, because there is no student to gate on —
+ * this takes a report, not an id. Every caller must have obtained that report
+ * through getConceptReport, which 404s on another teacher's student. Do not call
+ * this with a payload from anywhere else.
+ */
+async function narrativeFor(report, { studentId, period = null, refresh = false } = {}) {
+  if (!gemini.isEnabled()) return { available: false };
 
   // Nothing logged yet means nothing to narrate. Asking the model to summarise an
   // empty report produces confident-sounding filler.
-  if (!report.totals?.started) return { available: false, reason: 'no_data' };
-
-  const payload = buildNarrativeInput(report);
+  if (!report?.totals?.started) return { available: false, reason: 'no_data' };
 
   return generateCached({
     scope: 'concept_report',
     subjectId: Number(studentId),
-    payload,
+    payload: buildNarrativeInput(report, period),
     schema: NARRATIVE_SCHEMA,
     refresh,
   });
@@ -450,6 +471,7 @@ async function getClassDigest(teacherId, { refresh = false } = {}) {
 
 module.exports = {
   getConceptNarrative,
+  narrativeFor,
   getClassDigest,
   // Exported for tests — the pseudonymisation guarantee is the thing most worth
   // asserting on, and it should be assertable without a network or a database.

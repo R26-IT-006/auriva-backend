@@ -8,6 +8,7 @@ const { body }        = require('express-validator');
 const ctrl            = require('../controllers/teacherController');
 const analyticsCtrl   = require('../controllers/conceptAnalyticsController');
 const aiCtrl          = require('../controllers/aiController');
+const archiveCtrl     = require('../controllers/conceptReportArchiveController');
 
 // All routes require JWT + teacher role + first-login gate
 router.use(verifyToken, isTeacher);
@@ -182,6 +183,44 @@ router.get('/students/:id/concepts/report',  analyticsCtrl.getConceptReport);
  *         description: Rate limited
  */
 router.get('/students/:id/concepts/narrative', aiLimiter, aiCtrl.getConceptNarrative);
+
+/**
+ * @swagger
+ * /api/teacher/students/{id}/concepts/reports:
+ *   get:
+ *     summary: List a student's saved concept reports, newest period first
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *   post:
+ *     summary: Generate and store one period's concept report
+ *     description: >
+ *       Freezes the figures for a week or month so they can be revisited and
+ *       shared without moving. Regenerating a period replaces it. Returns 422
+ *       when nothing was recorded in the period — an empty report is worse than
+ *       none, because a teacher cannot tell it apart from a broken one.
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ */
+// Sorted newest first by the server. The client must not re-sort: the order is
+// part of the contract, and two screens sorting the same list differently is how
+// a teacher ends up reading the wrong week's report.
+router.get('/students/:id/concepts/periods', archiveCtrl.getPeriods);
+router.get('/students/:id/concepts/reports', archiveCtrl.listReports);
+// aiLimiter: generating makes a model call, so it is rate-limited like the other
+// two endpoints that cost money.
+router.post('/students/:id/concepts/reports', aiLimiter, [
+  body('period_type')
+    .isIn(['week', 'month'])
+    .withMessage('period_type must be week or month'),
+  body('period_start')
+    .matches(/^\d{4}-\d{2}-\d{2}$/)
+    .withMessage('period_start must be a YYYY-MM-DD date'),
+], archiveCtrl.createReport);
+// Declared after /reports so "reports" is never captured as a reportId.
+router.get('/students/:id/concepts/reports/:reportId', archiveCtrl.getReport);
+router.delete('/students/:id/concepts/reports/:reportId', archiveCtrl.deleteReport);
 
 // Notes/reminders a teacher keeps about one of their own students.
 router.get('/students/:id/notes', ctrl.getStudentNotes);

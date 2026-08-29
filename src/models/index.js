@@ -13,6 +13,7 @@ const StudentActivity          = require('./StudentActivity');
 const ColoringArtwork          = require('./ColoringArtwork');
 const StudentNote              = require('./StudentNote');
 const AiSummary                = require('./AiSummary');
+const ConceptReport            = require('./ConceptReport');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -55,6 +56,11 @@ StudentNote.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 Teacher.hasMany(StudentNote, { foreignKey: 'teacher_id', as: 'studentNotes' });
 StudentNote.belongsTo(Teacher, { foreignKey: 'teacher_id', as: 'teacher' });
 
+// Student → frozen concept reports. Cascades: a deleted child takes their saved
+// reports with them, which is what a data-protection request means in practice.
+Student.hasMany(ConceptReport, { foreignKey: 'student_id', as: 'conceptReports' });
+ConceptReport.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 // AiSummary has no association on purpose — subject_id addresses either a student
 // or a teacher depending on scope, so there is no single relation to declare.
 
@@ -72,4 +78,5 @@ module.exports = {
   ColoringArtwork,
   StudentNote,
   AiSummary,
+  ConceptReport,
 };

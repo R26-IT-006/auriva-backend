@@ -5,6 +5,11 @@ const sequelize = require('../config/database');
 const { Student, StudentConceptProgress } = require('../models');
 const { CATEGORY_SEQUENCES, PASS_SCORE, isMastered } = require('./conceptService');
 const ApiError = require('../utils/ApiError');
+// The zone a "day" means. Shared with periods.js rather than redeclared: a report
+// resolves its edges there and buckets its day cards here, and if the two ever
+// disagreed a session could fall inside a report's range but onto a day card the
+// report does not contain.
+const { REPORT_TZ } = require('./../utils/periods');
 const logger   = require('../utils/logger');
 
 // Same precomputed artifact getDistractors serves from. Read here so a mix-up can
@@ -128,10 +133,27 @@ async function getConceptSummary(teacherId, studentId) {
   const catalogueConcepts = CATEGORY_KEYS.reduce((n, k) => n + CATEGORY_SEQUENCES[k].length, 0);
   const mastered = rows.filter(isMastered).length;
 
-  const passedAt = rows
-    .map((r) => r.tier1_passed_at)
-    .filter(Boolean)
-    .sort((a, b) => new Date(b) - new Date(a));
+  // Dated on tier2_passed_at, not tier1: a concept counts as learned only once
+  // both rounds are done, so dating it on tier 1 would report it as learned on
+  // the day it was half-learned — and the report's own "learned this week" uses
+  // the same rule, so the two screens would then disagree about the same child.
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const learnedLast7Days = rows.filter(
+    (r) => isMastered(r) && r.tier2_passed_at && new Date(r.tier2_passed_at).getTime() >= weekAgo,
+  ).length;
+
+  // The last time the child actually used the app, which is not the same as the
+  // last time they passed something. Derived from tier1_passed_at, this reported
+  // an older date for a child who had a session yesterday and passed nothing —
+  // exactly the child a teacher most needs surfaced.
+  //
+  // Cheap despite the extra round trip: ConceptInteractionLog declares
+  // cil_student_created on (student_id, created_at), so this is an index-only
+  // backward scan rather than a table scan.
+  const [lastLog] = await sequelize.query(
+    `SELECT MAX(created_at) AS last_at FROM concept_interaction_logs WHERE student_id = :sid`,
+    { replacements: { sid: studentId }, type: QueryTypes.SELECT },
+  );
 
   return {
     generated_at: new Date().toISOString(),
@@ -146,9 +168,10 @@ async function getConceptSummary(teacherId, studentId) {
       mastered,
       mastery_pct:        catalogueConcepts > 0 ? r3(mastered / catalogueConcepts) : null,
       orphaned:           orphanedRows,
+      learned_last_7_days: learnedLast7Days,
     },
     categories,
-    last_activity_at: passedAt[0] ? new Date(passedAt[0]).toISOString() : null,
+    last_activity_at: lastLog?.last_at ? new Date(lastLog.last_at).toISOString() : null,
   };
 }
 
@@ -159,17 +182,89 @@ async function getConceptSummary(teacherId, studentId) {
 // so T1 and T2 are not symmetric and both must be listed explicitly.
 const ATTEMPT_EVENTS = ['match_attempt', 'name_match_attempt', 'drag_drop_attempt', 'adaptive_attempt'];
 
+
+// The accuracy chart has always covered 30 days regardless of how far back the
+// totals scan. Kept as its own bound so widening the scan does not silently
+// redraw the chart with three months of points on it.
+const TIMELINE_DAYS = 30;
+
+/**
+ * Resolves either calling convention into one absolute scan.
+ *
+ *   90                 rolling  - the last 90 days, what the live screen asks for
+ *   { from, to }       absolute - one dated period, what a saved report needs
+ *
+ * The rolling form keeps `to` null on purpose. There is no upper bound on "the
+ * last 90 days", and pinning one to this process's clock could drop a row written
+ * between the app server's tick and the database's.
+ */
+function resolveScan(opts) {
+  if (opts && typeof opts === 'object' && opts.from) {
+    const from = new Date(opts.from);
+    const to   = opts.to ? new Date(opts.to) : null;
+    return {
+      absolute: true,
+      from,
+      to,
+      // Reported so the client can still say how much ground the report covers.
+      windowDays: to ? Math.max(1, Math.round((to - from) / 86400000)) : null,
+      confusionScope: opts.confusionScope === 'range' ? 'range' : 'all',
+      timelineFrom: from,
+    };
+  }
+
+  const raw  = opts && typeof opts === 'object' ? opts.days : opts;
+  const days = Number.isFinite(Number(raw)) ? Math.max(1, Math.min(365, Number(raw))) : 90;
+  const now  = Date.now();
+  return {
+    absolute: false,
+    from: new Date(now - days * 86400000),
+    to: null,
+    windowDays: days,
+    confusionScope: 'all',
+    timelineFrom: new Date(now - Math.min(days, TIMELINE_DAYS) * 86400000),
+  };
+}
+
 /**
  * Rich report — aggregates concept_interaction_logs and student_activities.
  * Lazy-loaded by the drill-down screen, never by the profile.
  *
- * `days` bounds the log scan; confusion pairs deliberately ignore it because they
- * are rare, cumulative, and the most useful signal a teacher gets.
+ * `opts` bounds the scan, in either of two shapes:
+ *
+ *   getConceptReport(t, s, 90)             rolling  — the live screen
+ *   getConceptReport(t, s, { from, to })   absolute — one dated saved report
+ *
+ * "The week of 18 August" cannot be expressed as an offset from now, and a report
+ * whose figures move every time it is opened is not a report. The range is
+ * half-open, [from, to), so a period boundary belongs to exactly one report
+ * rather than being counted in two.
+ *
+ * `confusionScope` decides whether mix-ups obey that range. They deliberately do
+ * not on the live screen — they are rare, cumulative, and the most useful signal
+ * a teacher gets, so bounding them would throw most of them away. That reasoning
+ * fails for a dated report: an August report must not contain July's mix-ups.
  */
-async function getConceptReport(teacherId, studentId, days = 90) {
+async function getConceptReport(teacherId, studentId, opts = 90) {
   const summary = await getConceptSummary(teacherId, studentId);
   const sid = Number(studentId);
-  const windowDays = Number.isFinite(Number(days)) ? Math.max(1, Math.min(365, Number(days))) : 90;
+
+  const { absolute, from, to, windowDays, confusionScope, timelineFrom } = resolveScan(opts);
+
+  // Composed once. Neither carries user input — `from` and `to` are always bound
+  // as replacements; only whether an upper bound exists at all varies.
+  const upper      = to ? 'AND created_at < :to' : '';
+  const inRange    = `AND created_at >= :from ${upper}`;
+  const inTimeline = `AND created_at >= :timelineFrom ${upper}`;
+  const localDay   = `to_char((created_at AT TIME ZONE :tz)::date, 'YYYY-MM-DD')`;
+  // An activity is placed by when it finished, not when it was handed out, so a
+  // game started on Sunday and completed on Monday belongs to Monday's report.
+  const activityRange = absolute
+    ? `AND COALESCE(completed_at, created_at) >= :from
+       ${to ? 'AND COALESCE(completed_at, created_at) < :to' : ''}`
+    : '';
+
+  const scan = { sid, from, to, timelineFrom, tz: REPORT_TZ };
 
   const [progressRows, confusions, responseTimes, perConcept, engagement, activities, timeline,
          dailyConcepts, dailyArtwork, dailyTime] =
@@ -190,10 +285,11 @@ async function getConceptReport(teacherId, studentId, days = 90) {
             AND event_type IN ('tier1_fail','tier2_fail')
             AND jsonb_typeof(event_data->'confused_with') = 'array'
             AND elem->>'selected_key' IS NOT NULL
+            ${confusionScope === 'range' ? inRange : ''}
           GROUP BY 1,2,3
           ORDER BY count DESC, correct_key ASC
           LIMIT 10`,
-        { replacements: { sid }, type: QueryTypes.SELECT },
+        { replacements: scan, type: QueryTypes.SELECT },
       ),
 
       sequelize.query(
@@ -208,10 +304,10 @@ async function getConceptReport(teacherId, studentId, days = 90) {
            FROM concept_interaction_logs
           WHERE student_id = :sid
             AND event_type IN (:events)
-            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')
+            ${inRange}
             AND event_data ? 'time_taken_ms'
             AND jsonb_typeof(event_data->'time_taken_ms') = 'number'`,
-        { replacements: { sid, events: ATTEMPT_EVENTS, windowDays }, type: QueryTypes.SELECT },
+        { replacements: { ...scan, events: ATTEMPT_EVENTS }, type: QueryTypes.SELECT },
       ),
 
       // Real attempt counts. tier1_attempts on the progress table is hard-coded
@@ -225,9 +321,9 @@ async function getConceptReport(teacherId, studentId, days = 90) {
            FROM concept_interaction_logs
           WHERE student_id = :sid
             AND event_type IN (:events)
-            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')
+            ${inRange}
           GROUP BY 1,2`,
-        { replacements: { sid, events: ATTEMPT_EVENTS, windowDays }, type: QueryTypes.SELECT },
+        { replacements: { ...scan, events: ATTEMPT_EVENTS }, type: QueryTypes.SELECT },
       ),
 
       // Filtered by event_type, never by tier: coloring_complete is logged with
@@ -243,8 +339,8 @@ async function getConceptReport(teacherId, studentId, days = 90) {
             COUNT(*) FILTER (WHERE event_type = 'relearn_start')::int      AS relearn_count
            FROM concept_interaction_logs
           WHERE student_id = :sid
-            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')`,
-        { replacements: { sid, windowDays }, type: QueryTypes.SELECT },
+            ${inRange}`,
+        { replacements: scan, type: QueryTypes.SELECT },
       ),
 
       sequelize.query(
@@ -256,22 +352,23 @@ async function getConceptReport(teacherId, studentId, days = 90) {
                 total_rounds, status, concept_keys, category_key, completed_at
            FROM student_activities
           WHERE student_id = :sid
+            ${activityRange}
           ORDER BY COALESCE(completed_at, created_at) DESC
           LIMIT 20`,
-        { replacements: { sid }, type: QueryTypes.SELECT },
+        { replacements: scan, type: QueryTypes.SELECT },
       ),
 
       sequelize.query(
-        `SELECT to_char(created_at::date, 'YYYY-MM-DD')                                    AS date,
+        `SELECT ${localDay}                                                                AS date,
                 COUNT(*)::int                                                              AS attempts,
                 COUNT(*) FILTER (WHERE (event_data->>'was_correct')::boolean IS TRUE)::int AS correct
            FROM concept_interaction_logs
           WHERE student_id = :sid
             AND event_type IN (:events)
-            AND created_at >= NOW() - INTERVAL '30 days'
+            ${inTimeline}
           GROUP BY 1
           ORDER BY 1 ASC`,
-        { replacements: { sid, events: ATTEMPT_EVENTS }, type: QueryTypes.SELECT },
+        { replacements: { ...scan, events: ATTEMPT_EVENTS }, type: QueryTypes.SELECT },
       ),
 
       // ── Day by day ─────────────────────────────────────────────────────────
@@ -284,7 +381,7 @@ async function getConceptReport(teacherId, studentId, days = 90) {
       // FILTERs separate them, and the row count here is bounded by
       // (days x concepts touched), which is small.
       sequelize.query(
-        `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS date,
+        `SELECT ${localDay} AS date,
                 category_key,
                 concept_key,
                 COUNT(*) FILTER (WHERE event_type IN (:events))::int AS attempts,
@@ -294,14 +391,14 @@ async function getConceptReport(teacherId, studentId, days = 90) {
                 COUNT(*) FILTER (WHERE event_type IN ('tier1_fail','tier2_fail'))::int AS fails
            FROM concept_interaction_logs
           WHERE student_id = :sid
-            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')
+            ${inRange}
             AND event_type IN (:dayEvents)
           GROUP BY 1,2,3
          HAVING COUNT(*) > 0
           ORDER BY 1 DESC, 2 ASC, 3 ASC`,
         {
           replacements: {
-            sid, windowDays,
+            ...scan,
             events: ATTEMPT_EVENTS,
             dayEvents: [...ATTEMPT_EVENTS, 'tier1_pass', 'tier2_pass', 'tier1_fail', 'tier2_fail'],
           },
@@ -312,28 +409,28 @@ async function getConceptReport(teacherId, studentId, days = 90) {
       // Drawings, keyed by the day they were made so they can sit inside that
       // day's card rather than in a detached strip with no context.
       sequelize.query(
-        `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS date,
+        `SELECT ${localDay} AS date,
                 id, category_key, concept_key, image_url, created_at
            FROM coloring_artworks
           WHERE student_id = :sid
-            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')
+            ${inRange}
           ORDER BY created_at DESC`,
-        { replacements: { sid, windowDays }, type: QueryTypes.SELECT },
+        { replacements: scan, type: QueryTypes.SELECT },
       ),
 
       // Roughly how long the child was on task that day. screen_exit carries the
       // dwell time the concept screens already record; it is the only per-day time
       // signal that is not an inference from timestamps.
       sequelize.query(
-        `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS date,
+        `SELECT ${localDay} AS date,
                 COALESCE(SUM((event_data->>'total_time_ms')::numeric), 0) AS ms
            FROM concept_interaction_logs
           WHERE student_id = :sid
             AND event_type = 'screen_exit'
-            AND created_at >= NOW() - (:windowDays * INTERVAL '1 day')
+            ${inRange}
             AND jsonb_typeof(event_data->'total_time_ms') = 'number'
           GROUP BY 1`,
-        { replacements: { sid, windowDays }, type: QueryTypes.SELECT },
+        { replacements: scan, type: QueryTypes.SELECT },
       ),
     ]);
 
@@ -461,6 +558,15 @@ async function getConceptReport(teacherId, studentId, days = 90) {
   return {
     ...summary,
     window_days: windowDays,
+    // What this report actually covers. A frozen snapshot has to carry its own
+    // range: read back in six months, "90 days" from an unknown generation date
+    // names no period at all.
+    scan: {
+      from:     from.toISOString(),
+      to:       to ? to.toISOString() : null,
+      timezone: REPORT_TZ,
+      confusion_scope: confusionScope,
+    },
     concepts,
     // Kept as-is for anything still reading the flat directional list.
     confusions: confusions.map((c) => ({
