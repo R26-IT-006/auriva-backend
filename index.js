@@ -198,8 +198,16 @@ async function start() {
 }
 
 start().catch((err) => {
+  // Pass message/stack as top-level fields, not nested under { err } — the
+  // console transport's printf format only reads top-level `message`/`stack`
+  // off the log info object, so { err } silently prints just "Startup failed"
+  // with no detail (confirmed: logs/error.log had the full SequelizeDatabaseError
+  // detail all along, only the console output was uninformative). The name/message
+  // prefix keeps that detail in the console line itself; `err` rides along for
+  // the structured file transport.
   logger.error(`Startup failed: ${err.name || 'Error'} - ${err.message}`, {
     stack: err.stack,
+    err,
   });
   process.exit(1);
 });

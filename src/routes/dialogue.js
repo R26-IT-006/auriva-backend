@@ -74,4 +74,18 @@ router.post('/student/:studentId/level1/word/:wordId/probe-result', [
 
 router.get('/student/:studentId/word/:wordId/trajectory', ctrl.getTrajectory);
 
+// ── TASK-43 — explainable AI for trajectory predictions (teacher reports) ──
+
+router.get('/student/:studentId/word/:wordId/trajectory/explain', ctrl.getTrajectoryExplanation);
+router.get('/student/:studentId/dialogue/trajectory-report',      ctrl.getTrajectoryReport);
+
+// ── TASK-47 — practice-trend timelines (module-level and per-word) ────────
+
+router.get('/student/:studentId/dialogue/timeline',           ctrl.getDialogueTimeline);
+router.get('/student/:studentId/word/:wordId/dialogue/timeline', ctrl.getWordTimeline);
+
+// ── TASK-12 — Non-Verbal Adaptive Wait-Time Escalation ────────────────────
+
+router.get('/student/:studentId/speech-state', ctrl.getDailySpeechState);
+
 module.exports = router;

@@ -27,6 +27,13 @@ router.put('/student/:studentId/level2/questionnaire', [
     .withMessage(`favourite_activities items must be one of: ${VALID_ACTIVITIES.join(', ')}`),
 ], ctrl.saveQuestionnaire);
 
+// Partial update for friend/pet fields (FriendNameStep.js, PetPicker.js).
+// Unlike PUT above, no self-introduction fields are required — business-rule
+// validation (pet_type closed set, friend_gender pairing, etc.) happens
+// inside saveQuestionnaire's own validateFriendPet(), not here, so this
+// route doesn't duplicate those closed-set constants from level2Service.js.
+router.patch('/student/:studentId/level2/questionnaire', ctrl.patchQuestionnaire);
+
 // ── Portrait (self-portrait drawing, TASK-17 Fix 2) ──────────────────────
 
 router.patch('/level2/questionnaire/:studentId/portrait', [
@@ -39,6 +46,18 @@ router.get('/student/:studentId/level2/progress', [
   query('topic').optional().isIn(['self_introduction', 'describe_friend', 'describe_pet'])
     .withMessage('topic must be one of: self_introduction, describe_friend, describe_pet'),
 ], ctrl.getProgress);
+
+// TASK-46 — teacher-facing Level 2 report, all three topics in one call.
+// Auth is the router-level verifyToken + isTeacher applied at the top.
+router.get('/student/:studentId/level2/report', ctrl.getReport);
+
+// TASK-47 — practice-trend timelines (module-level and per-topic).
+router.get('/student/:studentId/level2/timeline', ctrl.getTimeline);
+
+router.get('/student/:studentId/level2/topic/:topic/timeline', [
+  param('topic').isIn(['self_introduction', 'describe_friend', 'describe_pet'])
+    .withMessage('topic must be one of: self_introduction, describe_friend, describe_pet'),
+], ctrl.getTopicTimeline);
 
 router.post('/student/:studentId/level2/session/start', [
   body('session_id').optional().isInt({ min: 1 }).withMessage('session_id must be a positive integer'),
