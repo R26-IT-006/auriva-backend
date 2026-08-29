@@ -65,6 +65,7 @@ const models = require('../models');
 const letterMotorMasteryService = require('../services/letterMotorMasteryService');
 const letterCategoryCompletionService = require('../services/letterCategoryCompletionService');
 const teacherService = require('../services/teacherService');
+const letterMasteryEvidenceService = require('../services/letterMasteryEvidenceService');
 // Practice-date cycle ceiling — read only, so the client can keep enforcing
 // the same limit after an app restart on the same date.
 const letterCycleService = require('../services/letterCycleService');
@@ -1092,6 +1093,44 @@ async function recordLetterCompletion(req, res) {
     await runLetterMotorMasteryEvidence({
       studentId: student_id, letter, caseType: case_type, sessionKey,
     });
+  }
+
+  // ── Which attempt established mastery ────────────────────────────────────
+  // Runs here, not beside the mastered_at stamp above, because the attempt
+  // rows do not exist until saveLetterAttempts() returns - the id being
+  // recorded is only knowable at this point. Same ordering guarantee the
+  // Feature 11B hook directly above already relies on.
+  //
+  // Attempt 3 by policy: mastery is established by the attempt-3 score alone
+  // (checked far above), so that is the row whose writing IS the evidence.
+  // Looked up by this session's own session_key - never "the best" or "the
+  // latest" attempt for the letter, which would be a guess.
+  //
+  // Guarded on NULL so the FIRST mastery keeps its evidence permanently,
+  // matching mastered_at's own immutability. A failed save simply leaves the
+  // column NULL and the report says the evidence is unavailable.
+  if (attemptsSaved && record.mastery_letter_attempt_id == null) {
+    try {
+      const masteryAttemptRow = await LetterAttempt.findOne({
+        where: {
+          student_id, letter, case_type,
+          session_key: sessionKey,
+          attempt_number: MASTERY_ATTEMPT_NUMBER,
+        },
+        attributes: ['id'],
+      });
+      if (masteryAttemptRow) {
+        await record.update({ mastery_letter_attempt_id: masteryAttemptRow.id });
+      } else {
+        logger.warn('Mastery evidence link: attempt-3 row not found for mastering session', {
+          student_id, letter, case_type, sessionKey,
+        });
+      }
+    } catch (linkErr) {
+      // Non-fatal: mastery itself is already recorded and must not be undone
+      // by a bookkeeping failure. The letter simply has no provable evidence.
+      logger.warn('Mastery evidence link failed (non-fatal)', { student_id, letter, error: linkErr.message });
+    }
   }
 
   logger.info(`Letter complete: student=${student_id} ` +
@@ -2140,6 +2179,42 @@ const SUPPORT_DECISION_TO_STARTING_SUPPORT = {
  * spec §20/§21) — the backend does not need to disguise its own failure as
  * a fake 200.
  */
+// GET /handwriting/letter-mastery-evidence/:studentId/:letter/:caseType
+//
+// The child's actual writing from the attempt that established mastery for
+// ONE letter. Deliberately its own endpoint rather than a field on the report:
+// stroke_points is the largest column in the schema, and the report renders 52
+// letters for a panel that is opened one letter at a time. Nothing here is
+// added to any bulk payload.
+//
+// Returns a `status` rather than 404 for the honest-negative cases, because
+// "this letter was mastered before we recorded which attempt did it" is a
+// real answer the teacher UI must be able to say out loud - not an error.
+async function getLetterMasteryEvidence(req, res) {
+  const studentId = Number(req.params.studentId);
+  if (!Number.isInteger(studentId) || studentId <= 0) {
+    throw new ApiError(422, 'Invalid student ID');
+  }
+
+  const { letter, caseType } = req.params;
+  if (typeof letter !== 'string' || !/^[A-Za-z]$/.test(letter)) {
+    throw new ApiError(422, 'Invalid letter');
+  }
+  if (!['lowercase', 'uppercase'].includes(caseType)) {
+    throw new ApiError(422, 'case_type must be lowercase or uppercase');
+  }
+
+  // Ownership check BEFORE any read - same convention as every other
+  // student-scoped GET in this controller. A teacher can never read the
+  // writing of a student who is not assigned to them. Throws 404 on no-match.
+  await teacherService.getOwnStudentById(req.user.id, studentId);
+
+  const result = await letterMasteryEvidenceService.getLetterMasteryEvidence({
+    studentId, letter, caseType,
+  });
+  res.json(result);
+}
+
 async function getSupportRecommendation(req, res) {
   const studentId = Number(req.params.studentId);
   if (!Number.isInteger(studentId) || studentId <= 0) {
@@ -3065,6 +3140,7 @@ async function getCategoryCompletionStatus(req, res) {
 
 module.exports = {
   submitAssessment, submitPreWritingActivity, getProgress, recordLetterCompletion,
+  getLetterMasteryEvidence,
   explainAssessment, getLatestExplanation, finalizeAssessment, getInitialReport,
   getLetterProgressReport, getMotorBaseline, getMotorCluster, getFamilyThresholds, getThresholdDecisionTrace,
   getSupportRecommendation,

@@ -63,6 +63,21 @@ const LetterProgress = sequelize.define('LetterProgress', {
     type:      DataTypes.STRING(20),
     allowNull: true,
   },
+  // The LetterAttempt row that actually established mastery - see
+  // migrations/20260829000001-add-mastery-letter-attempt-id-to-letter-progress.js.
+  //
+  //   value -> that attempt's stroke_points ARE this letter's mastery evidence
+  //   NULL  -> mastered before this column existed, or mastery is not yet held
+  //
+  // Written once, in the same block that stamps mastered_at, and guarded on
+  // NULL so a later re-pass can never rewrite it. NEVER backfilled: nothing
+  // stored on a historical row identifies its mastering attempt, and picking
+  // one by score or recency would fabricate the very attribution this column
+  // exists to make provable.
+  mastery_letter_attempt_id: {
+    type:      DataTypes.INTEGER,
+    allowNull: true,
+  },
 }, {
   tableName: 'letter_progress',
   timestamps: false,

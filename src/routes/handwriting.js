@@ -73,6 +73,10 @@ router.get('/threshold-trace/:studentId', ctrl.getThresholdDecisionTrace);
 // Narrowly scoped to one (letter, caseType) rather than the whole student —
 // support is family-specific, and this is the exact shape the writing
 // screens need at session start (one letter at a time). No PATCH/PUT/DELETE.
+// One mastered letter's actual writing, fetched only when a teacher opens
+// Letter Details. Never part of a bulk report payload - see the controller.
+router.get('/letter-mastery-evidence/:studentId/:letter/:caseType', ctrl.getLetterMasteryEvidence);
+
 router.get('/support-recommendation/:studentId/:letter/:caseType', ctrl.getSupportRecommendation);
 
 // ── Adaptive Pre-Writing Recommendation (Feature 4 Step 5, read-only) ─────────
