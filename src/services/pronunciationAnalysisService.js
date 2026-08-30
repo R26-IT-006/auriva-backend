@@ -7,7 +7,7 @@ const path = require('path');
 const { promisify } = require('util');
 const FFT = require('fft.js');
 
-const { WORD_PROFILES, LETTER_SOUNDS } = require('../data/wordProfiles');
+const { resolveTargetPhonemes } = require('../data/wordProfiles');
 const { verifySpokenWord } = require('./speechRecognitionService');
 const { assessPhonemeGop } = require('./phonemeGopService');
 
@@ -28,10 +28,22 @@ const MIN_PEAK_AMPLITUDE = 0.015;
 const MIN_VOICED_RMS = 0.012;
 const MIN_SNR_DB = 8;
 const MAX_CLIPPING_RATIO = 0.04;
-const REFERENCE_AUDIO_DIR = path.resolve(
-  __dirname,
-  '../../../auriva-frontend/assets/pronounciation-audios'
-);
+// Reference recordings live with the backend (they are scoring inputs, not
+// UI assets); REFERENCE_AUDIO_DIR overrides for deployments. The frontend
+// assets path remains as a dev-environment fallback for checkouts that
+// predate the backend copy — note the historical folder-name typo there.
+const REFERENCE_AUDIO_DIR_CANDIDATES = [
+  process.env.REFERENCE_AUDIO_DIR,
+  path.resolve(__dirname, '../../assets/reference-audio'),
+  path.resolve(__dirname, '../../../auriva-frontend/assets/pronounciation-audios'),
+].filter(Boolean);
+const REFERENCE_AUDIO_DIR = REFERENCE_AUDIO_DIR_CANDIDATES.find((dir) => {
+  try {
+    return require('fs').statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}) || REFERENCE_AUDIO_DIR_CANDIDATES[REFERENCE_AUDIO_DIR_CANDIDATES.length - 1];
 
 const referenceAnalysisCache = new Map();
 
@@ -506,6 +518,22 @@ function calculateDtw(referenceFrames, attemptFrames) {
 const DISTANCE_SCORE_MIDPOINT = 0.85;
 const DISTANCE_SCORE_SLOPE = 0.18;
 
+// Layer-1 (MFCC-DTW) cascade gate: when the acoustic score alone is decisive
+// enough, the wav2vec2 GOP model (layer 2) is skipped entirely. The gate is
+// deliberately asymmetric — only confident ACCEPTS skip layer 2. A low DTW
+// score is never allowed to fail a child on its own: DTW against a single
+// adult reference penalizes voice mismatch (child pitch, atypical prosody —
+// this product's population) as much as wrong pronunciation, so every
+// non-accepted attempt escalates to GOP for phoneme-identity evidence.
+// Threshold is provisional, same Phase 4 calibration debt as the constants
+// above.
+const LAYER1_CONFIDENT_ACCEPT_SCORE = 85;
+
+function getLayer1Decision(segmentalAccuracy) {
+  if (segmentalAccuracy >= LAYER1_CONFIDENT_ACCEPT_SCORE) return 'dtw_only_accept';
+  return 'escalated_to_gop';
+}
+
 function distanceToScore(distance) {
   return clampScore(
     100 / (1 + Math.exp((distance - DISTANCE_SCORE_MIDPOINT) / DISTANCE_SCORE_SLOPE))
@@ -544,16 +572,6 @@ function framesToBoundary({ phoneme, frameStart, frameEnd }) {
     startTime: getFrameTime(frameStart),
     endTime: getFrameTime(Math.max(frameStart, frameEnd - 1)),
   };
-}
-
-function resolveTargetPhonemes(wordId, data = {}) {
-  const provided = Array.isArray(data.target_phonemes)
-    ? data.target_phonemes
-      .map((sound) => (typeof sound === 'string' ? sound : sound?.text))
-      .filter(Boolean)
-    : [];
-  if (provided.length) return provided;
-  return WORD_PROFILES[wordId]?.sounds || LETTER_SOUNDS[wordId] || [];
 }
 
 function smoothValues(values, radius = 2) {
@@ -744,7 +762,7 @@ async function scoreWordPronunciationAttempt(data) {
   }
 
   const wordId = String(data.word_id || '').toLowerCase().trim();
-  const phonemes = resolveTargetPhonemes(wordId, data);
+  const phonemes = resolveTargetPhonemes({ ...data, word_id: wordId });
   const [referenceAnalysis, attemptSamples] = await Promise.all([
     getReferenceAnalysis(wordId),
     decodeBase64AudioToPcm(data.raw_audio_base64, data.raw_audio_mime_type),
@@ -754,23 +772,9 @@ async function scoreWordPronunciationAttempt(data) {
     throw new AudioQualityError(getQualityFailureMessage(quality.failures), quality);
   }
 
-  // ASR gate: reject the attempt when a different word was clearly spoken,
-  // so acoustic similarity is never scored against the wrong word.
-  const speechVerification = await verifySpokenWord({
-    rawAudioBase64: data.raw_audio_base64,
-    mimeType: data.raw_audio_mime_type,
-    targetWord: wordId,
-    wordLabel: data.word_label,
-  });
-
-  // Phoneme-level GOP via wav2vec2; null when the engine is unavailable and
-  // scoring then falls back to acoustic (MFCC-DTW) evidence only.
-  const gopAssessment = await assessPhonemeGop({
-    rawAudioBase64: data.raw_audio_base64,
-    mimeType: data.raw_audio_mime_type,
-    targetSounds: phonemes,
-  });
-
+  // Layer 1: MFCC-DTW acoustic comparison runs first, unconditionally — it's
+  // cheap, in-process JS, and needs no model or subprocess. Its score then
+  // gates layer 2 (wav2vec2 GOP) below.
   const referenceFrames = referenceAnalysis.map((entry) => entry.mfcc);
   const attemptAnalysis = extractMfccAnalysis(attemptSamples);
   const attemptFrames = attemptAnalysis.map((entry) => entry.mfcc);
@@ -790,6 +794,34 @@ async function scoreWordPronunciationAttempt(data) {
   const referenceDuration = referenceFrames.length * (HOP_SIZE / SAMPLE_RATE);
   const attemptDuration = attemptFrames.length * (HOP_SIZE / SAMPLE_RATE);
   const segmentalAccuracy = distanceToScore(dtw.normalizedDistance);
+  const layer1Decision = getLayer1Decision(segmentalAccuracy);
+
+  // The ASR word-mismatch gate (whisper subprocess) and layer 2 GOP
+  // (wav2vec2 subprocess) are independent of each other — both derive from
+  // the same raw audio, neither needs the other's output — so they run
+  // concurrently instead of back-to-back. On an escalated attempt this
+  // roughly halves added latency versus awaiting them in sequence, which
+  // matters most here since escalated cases are exactly the harder ones
+  // where a child is left waiting on screen for a result. A genuine
+  // WORD_MISMATCH still aborts scoring below, same as before parallelizing;
+  // the only change is that a same-audio GOP call already in flight is
+  // discarded rather than never started (assessPhonemeGop never rejects, so
+  // this never turns into an unhandled promise rejection).
+  const [speechVerification, gopAssessment] = await Promise.all([
+    verifySpokenWord({
+      rawAudioBase64: data.raw_audio_base64,
+      mimeType: data.raw_audio_mime_type,
+      targetWord: wordId,
+      wordLabel: data.word_label,
+    }),
+    layer1Decision === 'escalated_to_gop'
+      ? assessPhonemeGop({
+        rawAudioBase64: data.raw_audio_base64,
+        mimeType: data.raw_audio_mime_type,
+        targetSounds: phonemes,
+      })
+      : Promise.resolve(null),
+  ]);
 
   return {
     overall_score: segmentalAccuracy,
@@ -810,6 +842,7 @@ async function scoreWordPronunciationAttempt(data) {
       })),
     },
     dtw_distance: Number(dtw.normalizedDistance.toFixed(4)),
+    layer1_decision: layer1Decision,
     segment_scores: segmentScores,
     phoneme_boundary_alignment: phonemeAlignment,
     audio_quality: quality,
@@ -837,7 +870,7 @@ async function scoreWordPronunciationAttemptWithoutReference(data) {
   }
 
   const wordId = String(data.word_id || '').toLowerCase().trim();
-  const phonemes = resolveTargetPhonemes(wordId, data);
+  const phonemes = resolveTargetPhonemes({ ...data, word_id: wordId });
   const attemptSamples = await decodeBase64AudioToPcm(
     data.raw_audio_base64,
     data.raw_audio_mime_type
@@ -905,6 +938,9 @@ module.exports = {
   extractMfccAnalysis,
   calculateDtw,
   analyzeAudioQuality,
+  distanceToScore,
+  getLayer1Decision,
+  LAYER1_CONFIDENT_ACCEPT_SCORE,
   AudioQualityError,
   ReferenceAudioError,
 };

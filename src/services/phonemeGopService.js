@@ -44,11 +44,25 @@ function stopWorker() {
   workerReady = null;
 }
 
+let rewarmTimer = null;
+
 function markUnavailable(reason) {
   logger.warn(`Phoneme GOP worker unavailable: ${reason}`);
   unavailableUntil = Date.now() + FAILURE_COOLDOWN_MS;
   rejectAllPending(reason);
   stopWorker();
+
+  // Re-warm in the background once the cooldown lapses. Without this, the
+  // first escalated attempt after a crash pays the full ~120s model load
+  // inside a live request — the boot-time warmup only covers server start.
+  if (rewarmTimer) clearTimeout(rewarmTimer);
+  rewarmTimer = setTimeout(() => {
+    rewarmTimer = null;
+    warmup().then((ready) => {
+      if (ready) logger.info('Phoneme GOP worker re-warmed after cooldown');
+    });
+  }, FAILURE_COOLDOWN_MS + 1000); // +1s so the cooldown gate is already open
+  if (rewarmTimer.unref) rewarmTimer.unref();
 }
 
 function startWorker() {
@@ -174,6 +188,21 @@ async function assessPhonemeGop({ rawAudioBase64, mimeType, targetSounds }) {
   }
 }
 
+/**
+ * Starts the worker at server boot instead of on first request. With the
+ * layer-1 DTW cascade gating layer 2, the first GOP call can land on any live
+ * escalated attempt rather than predictably on request one — an unwarmed
+ * worker would then make a real child's attempt eat the ~120s model-load
+ * cold start. Fire-and-forget: never throws, never blocks server startup.
+ */
+function warmup() {
+  if (!PHONEME_GOP_ENABLED) return Promise.resolve(false);
+  if (Date.now() < unavailableUntil) return Promise.resolve(false);
+  if (!worker) startWorker();
+  return workerReady.then(() => true, () => false);
+}
+
 module.exports = {
   assessPhonemeGop,
+  warmup,
 };

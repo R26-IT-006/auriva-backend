@@ -7,6 +7,7 @@ const path = require('path');
 const { promisify } = require('util');
 
 const logger = require('../utils/logger');
+const { WORD_PROFILES } = require('../data/wordProfiles');
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +16,18 @@ const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH ||
   path.resolve(__dirname, '../../models/ggml-base.en.bin');
 const SPEECH_VERIFICATION_ENABLED = process.env.SPEECH_VERIFICATION_ENABLED !== 'false';
 const WHISPER_TIMEOUT_MS = Number(process.env.WHISPER_TIMEOUT_MS || 30000);
+// Metal acceleration currently crashes some Homebrew whisper.cpp/ggml
+// combinations before a model is loaded (exit 139). Short pronunciation
+// clips are fast on CPU, so make that the reliable default and allow a
+// deployment with a verified GPU stack to opt back in explicitly.
+const WHISPER_USE_GPU = process.env.WHISPER_USE_GPU === 'true';
+// whisper-cli defaults to 4 threads. pronunciationAnalysisService now runs
+// this concurrently with the GOP worker's torch inference (also capped, see
+// PHONEME_GOP_TORCH_THREADS) — measured on an 8-core machine, two
+// full-default-thread subprocesses at once caused CPU oversubscription that
+// sometimes made the concurrent run *slower* than sequential. Capping both
+// leaves headroom instead of fighting over the same cores.
+const WHISPER_THREADS = Number(process.env.WHISPER_THREADS || 2);
 
 // Spoken names of letters for alphabet mode: saying "b" is transcribed "bee".
 const LETTER_NAMES = {
@@ -58,6 +71,10 @@ const CONFUSABLE_LETTER_PAIRS = {
 };
 
 function transcriptAsLetter(transcript) {
+  const directNameMatch = Object.entries(LETTER_NAMES)
+    .find(([, names]) => names.includes(transcript));
+  if (directNameMatch) return directNameMatch[0];
+
   const tokens = transcript.split(' ').filter(Boolean);
   if (tokens.length !== 1) return null;
   const token = tokens[0];
@@ -136,16 +153,22 @@ function matchesTargetWord(transcript, targetWord) {
   if (!target) return true;
 
   const tokens = transcript.split(' ').filter(Boolean);
-  const acceptedForms = target.length === 1
-    ? [target, ...(LETTER_NAMES[target] || [])]
-    : [target];
+  if (target.length === 1) {
+    const acceptedForms = [target, ...(LETTER_NAMES[target] || [])];
+    // Letter names are short and differ by only one sound (bee/see/gee/pee/
+    // tee). Fuzzy edit-distance matching makes those distinct letters equal,
+    // so alphabet mode must use exact aliases. A multi-word transcript may
+    // still contain an exact alias among harmless surrounding words.
+    return tokens.some((token) => acceptedForms.includes(token)) ||
+      acceptedForms.some(
+        (form) => form.includes(' ') && transcript.includes(form)
+      );
+  }
 
   return tokens.some((token) =>
-    acceptedForms.some((form) => {
-      if (token === form) return true;
-      return levenshteinDistance(token, form) <= getMatchTolerance(form);
-    })
-  ) || acceptedForms.some((form) => form.includes(' ') && transcript.includes(form));
+    token === target ||
+    levenshteinDistance(token, target) <= getMatchTolerance(target)
+  );
 }
 
 async function transcribeBase64Audio(rawAudioBase64, mimeType) {
@@ -164,13 +187,21 @@ async function transcribeBase64Audio(rawAudioBase64, mimeType) {
       wavPath,
     ], { timeout: WHISPER_TIMEOUT_MS });
 
-    const { stdout } = await execFileAsync(WHISPER_CLI_PATH, [
+    const whisperArgs = [
       '-m', WHISPER_MODEL_PATH,
       '-f', wavPath,
+      '-t', String(WHISPER_THREADS),
       '--no-timestamps',
       '--no-prints',
       '--language', 'en',
-    ], { timeout: WHISPER_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    ];
+    if (!WHISPER_USE_GPU) whisperArgs.push('--no-gpu');
+
+    const { stdout } = await execFileAsync(
+      WHISPER_CLI_PATH,
+      whisperArgs,
+      { timeout: WHISPER_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }
+    );
 
     return normalizeTranscript(stdout);
   } finally {
@@ -215,11 +246,34 @@ async function verifySpokenWord({ rawAudioBase64, mimeType, targetWord, wordLabe
     }
   }
 
-  throw new WordMismatchError({
-    targetWord,
-    wordLabel,
-    recognizedText: transcript,
-  });
+  // Hard-reject only when the transcript confidently IS a different word the
+  // app knows (a different vocabulary word or a clearly spoken different
+  // letter). Anything else — garbled, partial, or disordered speech the ASR
+  // can't parse — is exactly what this product's population produces on a
+  // genuine attempt, so scoring proceeds on acoustic/GOP evidence with the
+  // attempt flagged for teacher review instead of blocking the child.
+  if (isConfidentDifferentWord(transcript, target)) {
+    throw new WordMismatchError({
+      targetWord,
+      wordLabel,
+      recognizedText: transcript,
+    });
+  }
+
+  return { status: 'unverified_speech', recognized_text: transcript };
+}
+
+function isConfidentDifferentWord(transcript, target) {
+  const tokens = transcript.split(' ').filter(Boolean);
+
+  if (target.length === 1) {
+    // Letter target: a clearly spoken different letter name counts.
+    const spokenLetter = transcriptAsLetter(transcript);
+    return Boolean(spokenLetter && spokenLetter !== target);
+  }
+
+  // Word target: an exact match on a different word in the vocabulary counts.
+  return tokens.some((token) => token !== target && Boolean(WORD_PROFILES[token]));
 }
 
 module.exports = {
@@ -227,5 +281,6 @@ module.exports = {
   transcribeBase64Audio,
   matchesTargetWord,
   normalizeTranscript,
+  isConfidentDifferentWord,
   WordMismatchError,
 };

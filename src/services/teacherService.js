@@ -17,6 +17,11 @@ const ApiError = require('../utils/ApiError');
 const {
   scorePronunciationAttemptData,
 } = require('./pronunciationScoringService');
+const {
+  getReviewQueue,
+  invalidateReviewedCountsCache,
+} = require('./pronunciationReviewQueueService');
+const { invalidateCalibrationCache } = require('./adaptiveCalibrationService');
 
 const GNN_BASE = process.env.GNN_SERVICE_URL || 'http://localhost:8000';
 
@@ -310,23 +315,33 @@ function buildPronunciationResultRecord({ teacherId, studentId, data, rawAudioBu
     recommendation_message: data.recommendation_message || null,
     recommendation_details: data.recommendation_details || null,
     scoring_method: data.scoring_method || null,
+    segmental_accuracy: data.segmental_accuracy ?? null,
+    dtw_distance: data.dtw_distance ?? null,
+    layer1_decision: data.layer1_decision || null,
     recognized_text: data.recognized_text || null,
     speech_verification: data.speech_verification || null,
     confidence_level: data.confidence_level || null,
+    adaptive_score: data.adaptive_score ?? null,
+    confidence_score: data.confidence_score ?? null,
     needs_teacher_review: Boolean(data.needs_teacher_review),
+    heard_reference_audio: Boolean(data.heard_reference_audio),
     next_word_id: data.next_word_id || null,
     attempt_number: data.attempt_number || 1,
     workflow_completed: data.workflow_completed ?? true,
     recording_uri: data.recording_uri || null,
     raw_audio_data: rawAudioBuffer,
     raw_audio_mime_type: data.raw_audio_mime_type || null,
-    raw_audio_size: rawAudioBuffer?.length || data.raw_audio_size || null,
+    // Audio presence must reflect bytes actually persisted, not client
+    // metadata. Otherwise history advertises a playable clip that is absent.
+    raw_audio_size: rawAudioBuffer?.length || null,
   };
 }
 
 function serializePronunciationResult(result, index) {
   const plain = result.get({ plain: true });
-  const hasRawAudio = Boolean(plain.raw_audio_data);
+  const hasRawAudio = plain.raw_audio_data !== undefined
+    ? Boolean(plain.raw_audio_data)
+    : Boolean(plain.raw_audio_size);
   delete plain.raw_audio_data;
 
   return {
@@ -339,6 +354,28 @@ function serializePronunciationResult(result, index) {
 async function savePronunciationResult(teacherId, studentId, data) {
   const student = await findTeacherStudent(teacherId, studentId);
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
+
+  // Scoring already persisted the attempt server-side (see
+  // scorePronunciationAttempt); the client only finishes the workflow by
+  // attaching the fields it alone knows. Scoring output (scores, phonemes,
+  // recommendation, review flags) is never accepted back from the client on
+  // this path — the stored row is the source of truth.
+  if (data.result_id) {
+    const result = await PronunciationSessionResult.findOne({
+      where: { id: data.result_id, teacher_id: teacherId, student_id: student.sid },
+    });
+    if (!result) throw new ApiError(404, 'Pronunciation result not found');
+
+    await result.update({
+      listen_choose_data: data.listen_choose_data ?? result.listen_choose_data,
+      recording_uri: data.recording_uri || result.recording_uri,
+      workflow_completed: data.workflow_completed ?? true,
+    });
+
+    const plain = result.get({ plain: true });
+    delete plain.raw_audio_data;
+    return plain;
+  }
 
   const rawAudioBuffer = data.raw_audio_base64
     ? Buffer.from(data.raw_audio_base64, 'base64')
@@ -359,7 +396,15 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
 
   const previousResults = await PronunciationSessionResult.findAll({
-    where: { teacher_id: teacherId, student_id: student.sid },
+    // Word and alphabet exercises use different targets (a word phoneme vs
+    // a spoken letter name). Mixing their histories can make an unrelated
+    // word attempt lower a letter's confidence/recurrence score.
+    where: {
+      teacher_id: teacherId,
+      student_id: student.sid,
+      mode: data.mode,
+    },
+    attributes: { exclude: ['raw_audio_data'] },
     order: [['created_at', 'DESC'], ['id', 'DESC']],
     limit: 12,
   });
@@ -367,19 +412,93 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
     result.get({ plain: true })
   );
 
-  return scorePronunciationAttemptData(data, previousResultData);
+  const scored = await scorePronunciationAttemptData(data, previousResultData, {
+    populationTag: student.disability,
+  });
+
+  // Persist the scoring output server-side immediately: the stored row is the
+  // research record, so the client can never alter scores between scoring and
+  // saving, and an interrupted session still keeps the attempt
+  // (workflow_completed stays false until the client finishes the flow via
+  // savePronunciationResult with result_id).
+  const rawAudioBuffer = data.raw_audio_base64
+    ? Buffer.from(data.raw_audio_base64, 'base64')
+    : null;
+  const saved = await PronunciationSessionResult.create(
+    buildPronunciationResultRecord({
+      teacherId,
+      studentId: student.sid,
+      data: {
+        ...scored,
+        raw_audio_mime_type: data.raw_audio_mime_type || null,
+        raw_audio_size: data.raw_audio_size || null,
+        workflow_completed: false,
+      },
+      rawAudioBuffer,
+    }),
+    // The default PostgreSQL RETURNING clause echoed the entire audio BLOB
+    // back across the remote DB connection even though this path only needs
+    // the new row id. That made an already expensive scoring request more
+    // vulnerable to the connection stall seen in the failing attempt.
+    { returning: ['id'] }
+  );
+
+  return { ...scored, result_id: saved.id };
 }
 
-async function getPronunciationResults(teacherId, studentId) {
+async function getPronunciationReviewQueue(teacherId, limit) {
+  return getReviewQueue(teacherId, { limit });
+}
+
+async function submitPronunciationReview(teacherId, resultId, teacherReviewedScore) {
+  const result = await PronunciationSessionResult.findOne({
+    where: { id: resultId, teacher_id: teacherId },
+  });
+  if (!result) throw new ApiError(404, 'Pronunciation result not found');
+
+  result.teacher_reviewed_score = teacherReviewedScore;
+  result.teacher_reviewed_at = new Date();
+  result.teacher_reviewed_by = teacherId;
+  result.needs_teacher_review = false;
+  await result.save();
+
+  // This review is new evidence for the layer-3 fit and for the queue's
+  // coverage counts; drop both caches so the next scored attempt and the next
+  // queue load see it instead of waiting out their TTLs.
+  invalidateCalibrationCache();
+  invalidateReviewedCountsCache();
+
+  const plain = result.get({ plain: true });
+  delete plain.raw_audio_data;
+  return plain;
+}
+
+const RESULTS_HISTORY_DEFAULT_LIMIT = 4;
+const RESULTS_HISTORY_MAX_LIMIT = 50;
+
+async function getPronunciationResults(teacherId, studentId, limit = RESULTS_HISTORY_DEFAULT_LIMIT) {
   const student = await findTeacherStudent(teacherId, studentId);
   if (!student) throw new ApiError(404, 'Student not found or not assigned to you');
 
+  const safeLimit = Math.max(1, Math.min(RESULTS_HISTORY_MAX_LIMIT, Number(limit) || RESULTS_HISTORY_DEFAULT_LIMIT));
+
   const results = await PronunciationSessionResult.findAll({
     where: { teacher_id: teacherId, student_id: student.sid },
-    order: [['created_at', 'ASC'], ['id', 'ASC']],
+    // Blob column excluded: fetching every attempt's stored audio just to
+    // report has_raw_audio pulled hundreds of MB through the DB per history
+    // load. raw_audio_size stands in for presence.
+    attributes: { exclude: ['raw_audio_data'] },
+    order: [['created_at', 'DESC'], ['id', 'DESC']],
+    // Display-only cap: this only limits what the teacher's history screen
+    // shows. Rows themselves are never deleted here — teacher_reviewed_score
+    // on older rows is still the labeled corpus adaptiveCalibrationService
+    // fits Layer 3 on, so those stay in the DB regardless of this limit.
+    limit: safeLimit,
   });
 
-  return results.map(serializePronunciationResult).reverse();
+  // Consumers select index 0 as the latest attempt and explicitly reverse a
+  // copy when chronological calculations are needed.
+  return results.map(serializePronunciationResult);
 }
 
 async function getPronunciationResultAudio(teacherId, resultId) {
@@ -449,4 +568,6 @@ module.exports = {
   savePronunciationResult,
   getPronunciationResults,
   getPronunciationResultAudio,
+  submitPronunciationReview,
+  getPronunciationReviewQueue,
 };

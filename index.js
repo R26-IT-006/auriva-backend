@@ -14,6 +14,7 @@ const fixCat3ForeignKeys = require('./src/utils/fixCat3ForeignKeys');
 const { ensurePersonalThresholdsColumn } = require('./src/utils/ensurePersonalThresholdsColumn');
 const swaggerUi          = require('swagger-ui-express');
 const swaggerSpec  = require('./src/config/swagger');
+const phonemeGopService = require('./src/services/phonemeGopService');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -179,6 +180,13 @@ app.use((err, req, res, next) => {
     });
   }
 
+  if (err.code === 'ACOUSTIC_SCORING_FAILED' || err.code === 'GOP_UNAVAILABLE') {
+    return res.status(503).json({
+      error: 'Scoring is temporarily unavailable. Please try recording again.',
+      code: err.code,
+    });
+  }
+
   if (err.name === 'SequelizeUniqueConstraintError') {
     return res.status(409).json({ error: 'A record with that value already exists' });
   }
@@ -187,6 +195,16 @@ app.use((err, req, res, next) => {
     return res.status(422).json({
       error:   'Database validation error',
       details: err.errors.map((e) => ({ field: e.path, message: e.message })),
+    });
+  }
+
+  if (err.name === 'SequelizeConnectionAcquireTimeoutError') {
+    const isScoringRequest = req.path.endsWith('/pronunciation-score');
+    return res.status(503).json({
+      error: isScoringRequest
+        ? 'Scoring is busy right now. Your recording is still saved; please press Next again.'
+        : 'The service is busy right now. Please try again.',
+      code: 'DATABASE_BUSY',
     });
   }
 
@@ -250,6 +268,14 @@ async function start() {
   app.listen(PORT, () => {
     logger.info(`Auriva backend running on port ${PORT} [${process.env.NODE_ENV}]`);
     logger.info(`Swagger UI → http://localhost:${PORT}/api-docs`);
+  });
+
+  // Fire-and-forget: warms the GOP model in the background so the first
+  // layer-1-escalated attempt doesn't pay the cold-start cost itself. On
+  // failure the worker logs its own reason and scoring falls back to
+  // layer-1-only, same as any later runtime GOP failure.
+  phonemeGopService.warmup().then((ready) => {
+    if (ready) logger.info('Phoneme GOP worker warmed up');
   });
 }
 

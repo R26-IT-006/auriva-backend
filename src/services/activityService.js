@@ -338,11 +338,41 @@ async function buildQuestionPlan({ studentId, categoryKey, level, targets, space
  * is re-presented with the same one rather than a surprising new set.
  */
 async function startActivity(studentId, categoryKey, sessionId) {
+  // activity_type: 'practice' — this function only ever owns the round-based
+  // practice activity. Games (pair_match / memory) are created by
+  // startGameActivity, which scopes its own lookup to its activity_type, and
+  // they carry no question_plan by design. Without this filter an in-progress
+  // game row would be returned as the practice activity and serialize to
+  // rounds: null.
   const existing = await StudentActivity.findOne({
-    where: { student_id: studentId, category_key: categoryKey, status: ['generated', 'in_progress'] },
+    where: {
+      student_id: studentId,
+      category_key: categoryKey,
+      activity_type: 'practice',
+      status: ['generated', 'in_progress'],
+    },
     order: [['activity_number', 'DESC']],
   });
-  if (existing) return serializeActivity(existing);
+
+  // Reuse it only if it actually carries a playable plan. The client resolves
+  // each round against conceptData and gives up below two rounds, so returning
+  // a plan-less practice row bounces the child straight back to the category
+  // grid — and because the row stays 'in_progress' forever, every later attempt
+  // finds the same dead activity. Practice rows with a null question_plan exist
+  // in this database: the column was hollowed out by a sync({ alter: true })
+  // against the shared instance, the same incident that dropped
+  // student_activities.activity_type (see
+  // migrations/20260830000001-restore-dropped-columns.js).
+  if (existing && Array.isArray(existing.question_plan) && existing.question_plan.length >= 2) {
+    return serializeActivity(existing);
+  }
+  if (existing) {
+    logger.warn(
+      `student_activities id=${existing.id} (student ${studentId}, ${categoryKey}) is a practice `
+      + 'activity with no usable question_plan — generating a replacement rather than returning '
+      + 'an unplayable one',
+    );
+  }
 
   const status = await getActivityStatus(studentId, categoryKey);
   if (!status.eligible) throw new ApiError(409, 'Not enough mastered concepts yet');

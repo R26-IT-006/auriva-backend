@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "sync:word-templates": "node scripts/syncWordCanonicalAssets.js",
-    "test": "jest && node --env-file-if-exists=.env --test \"tests/aiSummaryService.test.js\"",
+    "test": "jest && node --test \"testing/**/*.test.js\" && node --env-file-if-exists=.env --test \"tests/aiSummaryService.test.js\"",
     "start": "node index.js",
     "dev": "node --watch index.js",
     "migrate": "sequelize-cli db:migrate",
@@ -13,7 +13,10 @@
     "migrate:undo": "sequelize-cli db:migrate:undo",
     "backfill:scores": "node scripts/backfillPassedScores.js",
     "seed": "node scripts/seed.js",
-    "seed:dialogue": "node scripts/dialogueSeed.js"
+    "seed:dialogue": "node scripts/dialogueSeed.js",
+    "purge-old-audio": "node scripts/purgeOldAudio.js",
+    "layer1-report": "node scripts/layer1Report.js",
+    "layer3-report": "node scripts/layer3Report.js"
   },
   "keywords": [],
   "author": "",

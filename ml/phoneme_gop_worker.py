@@ -14,14 +14,32 @@ CTC-decoded phoneme sequence actually recognized in the audio.
 
 import json
 import math
+import os
 import sys
 
 import numpy as np
 import soundfile as sf
 import torch
 
+# Defaults to 4 threads otherwise. This worker's inference now runs
+# concurrently with whisper-cli's ASR call (see pronunciationAnalysisService
+# scoreWordPronunciationAttempt) — on an 8-core machine, two independently
+# multi-threaded subprocesses at once caused CPU oversubscription that
+# sometimes made the concurrent run slower than running them sequentially.
+# Capping both (see WHISPER_THREADS) leaves headroom instead of contending
+# for the same cores.
+torch.set_num_threads(int(os.environ.get("PHONEME_GOP_TORCH_THREADS", "2")))
+
 MODEL_ID = "facebook/wav2vec2-lv-60-espeak-cv-ft"
 SAMPLE_RATE = 16000
+
+# Silence padding around the clip before inference. Word recordings are often
+# tightly cropped (reference mp3s run 0.5-1.0s with no leading silence) and
+# CTC misreads abrupt onsets/offsets; measured on the app's own reference
+# audio, padding lifted e.g. hippo 41->71 and deer 18->46 without changing
+# clean decodes. Reported per-sound times are shifted back so they stay
+# relative to the original clip.
+PAD_SECONDS = 0.3
 
 # Fallbacks for IPA symbols used in WORD_PROFILES that the model vocabulary
 # may write differently (British vs American espeak conventions).
@@ -37,21 +55,41 @@ SUBSTITUTIONS = {
 
 # Accent-equivalent realizations accepted as correct for a target sound.
 # WORD_PROFILES is British-flavored IPA while recordings and the model often
-# realize American variants; a child saying /dɑːɡ/ for "dog" is not wrong.
+# realize American or Sri Lankan English variants; a child saying /dɑːɡ/ for
+# "dog" is not wrong. Entries marked "ref-audit" were added after replaying
+# the app's own reference recordings through this engine
+# (ml/audit_reference_phonemes.py): a correct reference scoring low on its
+# own target sound exposes a missing variant here, not a pronunciation error.
 ALTERNATIVES = {
     "ɒ": ["ɑː", "ɑ", "ɔ", "ɔː"],
     "æ": ["a"],
     "e": ["ɛ"],
-    "ɜː": ["ɜ", "ɚ", "ɝ"],
+    # øː/əː: non-rhotic NURSE-vowel realizations (e.g. Sri Lankan English
+    # "bird" ≈ [bøːd]/[bəːd]) — verified live: a correct "bird" decoded as
+    # [b øː d] and scored 16/100 on the vowel before these were accepted.
+    "ɜː": ["ɜ", "ɚ", "ɝ", "øː", "əː"],
     "əʊ": ["oʊ", "o"],
     "ɔː": ["ɔ", "oː", "ɑː"],
     "iː": ["i"],
-    "uː": ["u"],
-    "ʊ": ["u"],
+    "ʊ": ["u", "o", "ɔ"],  # ref-audit: FOOT-vowel merger, "book" ≈ [bok]
     "ʌ": ["ɐ", "a"],
     "r": ["ɹ"],
-    "ə": ["ɐ"],
-    "ɪ": ["i", "ɨ"],
+    # ref-audit: unstressed schwa realized as [ɐ]/[ʌ]/[a]/[ɚ] (banana,
+    # butterfly, elephant references).
+    "ə": ["ɐ", "ʌ", "a", "ɚ"],
+    "ɪ": ["i", "ɨ", "e", "ɛ"],  # ref-audit: KIT-vowel merger, "fish" ≈ [fɛʃ]
+    # ref-audit: flap (butterfly, turtle) and aspirated realizations — the
+    # model's vocab has Mandarin-style aspirated tokens (th/ph/kh, tʰ/pʰ/kʰ)
+    # it sometimes prefers for a plainly correct aspirated English stop.
+    "t": ["ɾ", "th", "tʰ"],
+    "p": ["ph", "pʰ"],
+    "k": ["kh", "kʰ"],
+    # ref-audit: GOOSE-vowel fronting [ʉ] (letters u/w, ruler reference).
+    "uː": ["u", "ʉ", "ʉː"],
+    "ɑː": ["ɑ", "aː"],  # ref-audit: length/quality variants (banana, guava)
+    "eə": ["eː", "ɛ", "e"],  # ref-audit: SQUARE-vowel monophthong (chair)
+    "eɪ": ["eː", "e"],  # ref-audit: FACE-vowel monophthong (whale, letter a)
+    "ɪə": ["iə", "ɪɹ", "iː", "i"],  # ref-audit: NEAR-vowel as [iː] (deer)
 }
 
 
@@ -124,6 +162,8 @@ class GopEngine:
             audio = audio.mean(axis=1)
         if rate != SAMPLE_RATE:
             raise ValueError(f"expected {SAMPLE_RATE}Hz wav, got {rate}")
+        pad = np.zeros(int(SAMPLE_RATE * PAD_SECONDS), dtype=np.float32)
+        audio = np.concatenate([pad, audio, pad])
         inputs = self.processor(
             audio, sampling_rate=SAMPLE_RATE, return_tensors="pt"
         )
@@ -220,15 +260,31 @@ class GopEngine:
         # gop <= 0; 0 -> 100. Provisional curve until Phase 4 calibration.
         return max(0, min(100, round(100 * math.exp(gop * 0.55))))
 
-    def acceptance_for_sound(self, sound, primary_ids):
-        """Acceptable token ids per token position: the canonical token plus
-        single-token accent variants (variants only for single-token sounds)."""
-        sets = [{tid} for tid in primary_ids]
-        if len(primary_ids) == 1:
-            for alternative in ALTERNATIVES.get(sound, []):
+    def _variant_ids(self, symbol):
+        """Vocab ids of the accent variants for one sound symbol."""
+        ids = set()
+        # ALTERNATIVES is keyed with ASCII g; vocab tokens use IPA ɡ.
+        for key in {symbol, symbol.replace("ɡ", "g")}:
+            for alternative in ALTERNATIVES.get(key, []):
                 normalized = alternative.replace("g", "ɡ")
                 if normalized in self.vocab:
-                    sets[0].add(self.vocab[normalized])
+                    ids.add(self.vocab[normalized])
+        return ids
+
+    def acceptance_for_sound(self, sound, primary_ids):
+        """Acceptable token ids per token position: the canonical token plus
+        accent variants. Whole-sound variants apply to single-token sounds;
+        a multi-token cluster additionally accepts, at each position, the
+        variants of that position's own token — without this, the əʊ inside
+        'ləʊ' rejected its American oʊ realization even though a bare əʊ
+        accepted it (found by ml/audit_reference_phonemes.py: buffalo /ləʊ/
+        scored 13 on the app's own reference recording)."""
+        sets = [{tid} for tid in primary_ids]
+        if len(primary_ids) == 1:
+            sets[0] |= self._variant_ids(sound)
+        else:
+            for position, tid in enumerate(primary_ids):
+                sets[position] |= self._variant_ids(self.id_to_token.get(tid, ""))
         return sets
 
     def assess(self, wav_path, target_sounds):
@@ -277,14 +333,16 @@ class GopEngine:
                     entry["gop"] = round(gop, 4)
                     entry["score"] = self.gop_to_score(gop)
                     entry["realized"] = "".join(realized_tokens)
-                    entry["start"] = round(min(frames_all) * frame_seconds, 3)
-                    entry["end"] = round((max(frames_all) + 1) * frame_seconds, 3)
+                    # Times shifted back by the silence padding so they stay
+                    # relative to the original clip.
+                    entry["start"] = round(max(0.0, min(frames_all) * frame_seconds - PAD_SECONDS), 3)
+                    entry["end"] = round(max(0.0, (max(frames_all) + 1) * frame_seconds - PAD_SECONDS), 3)
             per_sound.append(entry)
 
         scored = [e["score"] for e in per_sound if e["score"] is not None]
         return {
             "model_id": MODEL_ID,
-            "duration": round(duration, 3),
+            "duration": round(max(0.0, duration - 2 * PAD_SECONDS), 3),
             "decoded_phonemes": self.decode_free(log_probs),
             "aligned": alignment is not None,
             "tokenization": tokenization,
@@ -293,8 +351,35 @@ class GopEngine:
         }
 
 
+def warm_up_inference(engine):
+    """Runs one real forward pass before announcing ready.
+
+    from_pretrained() only loads weights onto the CPU backend — the first
+    real inference afterward still separately pays a one-time cost (thread
+    pool spin-up, kernel/algorithm selection), on the order of ~1-2s. Without
+    this, that tax landed on whichever live attempt was the first real
+    escalation after boot instead of at startup, where it's free.
+
+    This duration is a rough single-word-recording midpoint, not a precisely
+    tuned value — sweeping it on a shared dev machine produced too much
+    background-noise variance to trust a more specific number (see the
+    verifyLayer1Layer2Integration.js script and its notes for what was
+    actually measured, and its limits).
+    """
+    import tempfile
+
+    silence = np.zeros(int(SAMPLE_RATE * 0.9), dtype=np.float32)
+    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+        sf.write(tmp.name, silence, SAMPLE_RATE)
+        try:
+            engine.assess(tmp.name, ["k"])
+        except Exception as error:  # noqa: BLE001 — warmup must never block startup
+            log(f"warmup inference failed (non-fatal): {error}")
+
+
 def main():
     engine = GopEngine()
+    warm_up_inference(engine)
     print(json.dumps({"ready": True}), flush=True)
     for line in sys.stdin:
         line = line.strip()

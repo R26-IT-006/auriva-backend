@@ -4,7 +4,13 @@ const {
   scoreWordPronunciationAttempt,
   scoreWordPronunciationAttemptWithoutReference,
 } = require('./pronunciationAnalysisService');
-const { WORD_PROFILES, LETTER_SOUNDS } = require('../data/wordProfiles');
+const { WORD_PROFILES, resolveTargetPhonemes } = require('../data/wordProfiles');
+const {
+  computeCalibration,
+  applyCalibration,
+  summarizeCalibration,
+} = require('./adaptiveCalibrationService');
+const logger = require('../utils/logger');
 
 const PHONEME_CUES = {
   'æ': 'Open the mouth wide for the short /a/ sound.',
@@ -34,6 +40,46 @@ const PHONEME_CUES = {
   'ʃ': 'Round the lips slightly and push quiet air.',
   'tʃ': 'Start with a tongue tap, then release air.',
   'dʒ': 'Start with a tongue tap, then release with voice.',
+  n: 'Lift the tongue tip behind the teeth and hum through the nose.',
+  j: 'Lift the tongue toward the roof of the mouth for a soft /y/ glide.',
+  e: 'Smile gently for the short /e/ sound.',
+  i: 'Smile softly for the short /i/ sound.',
+  a: 'Open the mouth for the short /a/ sound.',
+  'ə': 'Relax the mouth for the soft, unstressed "uh" sound.',
+  'ŋ': 'Lift the back of the tongue and hum through the nose.',
+  'aɪ': 'Start with an open /a/ and glide up to /i/.',
+  'aʊ': 'Start with an open /a/ and round toward /oo/.',
+  'eə': 'Start with /e/ and relax into a soft "uh".',
+  'ɪə': 'Start with a small /i/ and relax into a soft "uh".',
+  'əʊ': 'Start relaxed, then round the lips toward /oh/.',
+  'ɑː': 'Open the mouth wide for the long, deep "ah" sound.',
+  'ʊ': 'Round the lips gently for the short /oo/ sound.',
+  // The remaining keys are multi-sound blends this word bank groups as one
+  // unit rather than true single IPA phonemes — the cue walks through the
+  // blend so the teacher still has something concrete to say.
+  'gwɪn': 'Round the lips for /g w/, then finish with a small smile and a nose hum for /n/.',
+  sk: 'Blend a hissing /s/ straight into a back-of-tongue /k/.',
+  'təʊ': 'Tap the tongue for /t/, then round the lips toward /oh/.',
+  'əd': 'Relax into a soft "uh", then tap the tongue for /d/.',
+  'ŋg': 'Hum through the nose for /ng/, then lift the tongue back for /g/.',
+  'ruː': 'Curl the tongue for /r/, then round the lips and hold /oo/.',
+  'ɪʃ': 'Small smile for /i/, then round the lips softly for /sh/.',
+  ks: 'Lift the tongue back for /k/, then send air forward for /s/.',
+  'əl': 'Relax into a soft "uh", then lift the tongue tip for /l/.',
+  'flaɪ': 'Blow air for /f/, lift the tongue for /l/, then glide from /a/ to /i/.',
+  'ləʊ': 'Lift the tongue tip for /l/, then round the lips toward /oh/.',
+  'ŋgəʊ': 'Hum through the nose, lift the tongue back for /g/, then round the lips toward /oh/.',
+  'ndʒ': 'Hum through the nose, then tap and release with voice for /j/.',
+  'ən': 'Relax into a soft "uh", then hum through the nose for /n/.',
+  'ənt': 'Relax into a soft "uh", hum for /n/, then tap the tongue for /t/.',
+  gr: 'Lift the tongue back for /g/, then curl the tongue for /r/.',
+  gw: 'Lift the tongue back for /g/, then round the lips for /w/.',
+  mp: 'Hum through closed lips for /m/, then release with a soft pop for /p/.',
+  dr: 'Tap the tongue for /d/, then curl the tongue for /r/.',
+  sl: 'Send air forward for /s/, then lift the tongue tip for /l/.',
+  kl: 'Lift the tongue back for /k/, then lift the tongue tip for /l/.',
+  'ŋk': 'Hum through the nose, then lift the tongue back for /k/.',
+  'gə': 'Lift the tongue back for /g/, then relax into a soft "uh".',
 };
 
 function clampScore(value) {
@@ -220,10 +266,12 @@ function getSoundPosition(index, total) {
 }
 
 function normalizeSounds(data) {
-  const profile = WORD_PROFILES[data.word_id] || {};
-  const sourceSounds = Array.isArray(data.target_phonemes) && data.target_phonemes.length
-    ? data.target_phonemes
-    : profile.sounds || LETTER_SOUNDS[data.word_id] || [];
+  const canonicalPhonemes = resolveTargetPhonemes(data);
+  const sourceSounds = data.mode === 'alphabet'
+    ? canonicalPhonemes
+    : Array.isArray(data.target_phonemes) && data.target_phonemes.length
+      ? data.target_phonemes
+      : canonicalPhonemes;
 
   return sourceSounds.map((sound, index) => {
     const text = typeof sound === 'string' ? sound : sound.text;
@@ -261,6 +309,11 @@ function pickWeakSound({ sounds, baseScore, difficulty, attemptNumber, historyCo
 
 function buildHistoryCounts(results = []) {
   return results.reduce((counts, result) => {
+    // Prototype-fallback rows carry fabricated phoneme scores (derived from
+    // heuristics like audio size, not from the audio itself) — letting them
+    // feed weak-phoneme history would poison word selection and the adaptive
+    // features with non-acoustic evidence.
+    if (result.scoring_method === 'prototype_signal_rule_v1') return counts;
     const phonemeScores = Array.isArray(result.phoneme_scores) ? result.phoneme_scores : [];
     phonemeScores
       .filter((entry) => entry?.text && Number(entry.score) < 65)
@@ -507,6 +560,7 @@ function scorePrototypePronunciationAttemptData(data, previousResults = []) {
     word_id: data.word_id,
     word_label: data.word_label || data.word_id,
     overall_score: overallScore,
+    heard_reference_audio: Boolean(data.heard_reference_audio),
     phoneme_scores: phonemeScores,
     response_duration: responseDuration || null,
     hesitation_time: hesitationTime,
@@ -524,7 +578,8 @@ async function scoreAcousticPronunciationAttemptData(
   data,
   previousResults,
   wordId,
-  scoreEngine = scoreWordPronunciationAttempt
+  scoreEngine = scoreWordPronunciationAttempt,
+  context = {}
 ) {
   const profile = WORD_PROFILES[wordId] || {};
   const sounds = normalizeSounds({ ...data, word_id: wordId });
@@ -533,7 +588,20 @@ async function scoreAcousticPronunciationAttemptData(
   const difficulty = Number(data.difficulty || profile.difficulty || 2);
   const mfccDtwScore = await scoreEngine({ ...data, word_id: wordId });
   const gopAssessment = mfccDtwScore.gop_assessment || null;
-  const gopBySound = gopAssessment?.per_sound || [];
+  // Per-sound GOP entries are matched to `sounds` by position; both derive
+  // from the same phoneme resolver today, but a length mismatch (profile
+  // edit, client-supplied target_phonemes) would silently attribute scores
+  // to the wrong phonemes — in that case ignore the per-sound breakdown and
+  // keep only the overall GOP evidence.
+  const gopPerSound = gopAssessment?.per_sound || [];
+  const gopBySound = gopPerSound.length === sounds.length ? gopPerSound : [];
+  if (gopPerSound.length && !gopBySound.length) {
+    logger.warn('GOP per-sound count mismatch; ignoring per-sound GOP scores', {
+      word_id: wordId,
+      expected: sounds.length,
+      received: gopPerSound.length,
+    });
+  }
   const scoringMethod = gopAssessment
     ? (mfccDtwScore.dtw_distance != null ? 'wav2vec2_gop+mfcc_dtw_v1' : 'wav2vec2_gop_v1')
     : mfccDtwScore.scoring_method;
@@ -617,7 +685,41 @@ async function scoreAcousticPronunciationAttemptData(
   });
   // Low-confidence results suppress child-facing evaluative feedback and are
   // flagged for the teacher instead of risking an unreliable negative score.
-  const needsTeacherReview = adaptiveModel.confidence_level === 'low';
+  // Word attempts where ASR could not confirm the target, plus confusable
+  // letter pairs, are scored but likewise flagged — the score stands on
+  // acoustic/GOP evidence alone there. Generic unverified ASR is deliberately
+  // advisory for isolated letters (see the alphabet-specific rule below).
+  const speechStatus = mfccDtwScore.speech_verification?.status || null;
+  const needsTeacherReview =
+    adaptiveModel.confidence_level === 'low' ||
+    // Whisper is intentionally only a mismatch gate for isolated letters:
+    // very short genuine names (A/F/H/L/Q/R/S) are often transcribed as an
+    // unrelated ordinary word. If it cannot identify a *different letter*,
+    // let the letter-specific acoustic/GOP evidence and its own confidence
+    // decide instead of automatically flagging a correct attempt.
+    (speechStatus === 'unverified_speech' && data.mode !== 'alphabet') ||
+    speechStatus === 'inconclusive_confusable';
+
+  // Layer 3: a small recalibration model fit on teacher-reviewed attempts,
+  // grouped by student population (Student.disability) so it can adapt as
+  // labeled examples arrive from new populations (e.g. autistic students)
+  // without needing separate models trained from scratch.
+  //
+  // Surfaced as evidence only — it does not adjust overall_score or
+  // adaptive_score. A fit is now only marked `fitted` when cross-validation
+  // shows it beats leaving the score alone on held-out reviews, so
+  // calibrated_score below is what activating this layer WOULD have done;
+  // comparing the two over time is the evidence for activating it. See
+  // scripts/layer3Report.js.
+  const calibration = context.populationTag
+    ? await computeCalibration(context.populationTag)
+    : null;
+  const layer3Calibration = calibration
+    ? {
+      ...summarizeCalibration(calibration),
+      calibrated_score: applyCalibration(adaptiveModel.adaptive_score, calibration),
+    }
+    : null;
 
   return {
     mode: data.mode || 'word',
@@ -637,6 +739,11 @@ async function scoreAcousticPronunciationAttemptData(
     confidence_level: adaptiveModel.confidence_level,
     uncertainty_reasons: adaptiveModel.uncertainty_reasons,
     needs_teacher_review: needsTeacherReview,
+    // Metadata only — must never influence overall_score, adaptive_score, or
+    // recommendation_type. Whether the child just imitated the reference
+    // audio or spoke independently changes how a low score should be read,
+    // not what the score is.
+    heard_reference_audio: Boolean(data.heard_reference_audio),
     phoneme_scores: phonemeScores,
     response_duration: Number(data.response_duration || 0) || null,
     hesitation_time: hesitationTime,
@@ -647,6 +754,7 @@ async function scoreAcousticPronunciationAttemptData(
     attempt_number: attemptNumber,
     scoring_method: scoringMethod,
     dtw_distance: mfccDtwScore.dtw_distance,
+    layer1_decision: mfccDtwScore.layer1_decision || null,
     reference_word_id: mfccDtwScore.reference_word_id,
     mfcc_config: mfccDtwScore.mfcc_config,
     ...recommendation,
@@ -661,6 +769,8 @@ async function scoreAcousticPronunciationAttemptData(
       },
       scoring_evidence: {
         method: scoringMethod,
+        layer1_decision: mfccDtwScore.layer1_decision || null,
+        layer3_calibration: layer3Calibration,
         gop_assessment: gopAssessment,
         dtw_distance: mfccDtwScore.dtw_distance,
         segment_scores: mfccDtwScore.segment_scores,
@@ -673,11 +783,11 @@ async function scoreAcousticPronunciationAttemptData(
   };
 }
 
-async function scorePronunciationAttemptData(data, previousResults = []) {
+async function scorePronunciationAttemptData(data, previousResults = [], context = {}) {
   const wordId = String(data.word_id || '').toLowerCase();
 
   try {
-    return await scoreAcousticPronunciationAttemptData(data, previousResults, wordId);
+    return await scoreAcousticPronunciationAttemptData(data, previousResults, wordId, undefined, context);
   } catch (error) {
     if (error.code === 'AUDIO_QUALITY_FAILED' || error.code === 'WORD_MISMATCH') {
       throw error;
@@ -692,7 +802,8 @@ async function scorePronunciationAttemptData(data, previousResults = []) {
           data,
           previousResults,
           wordId,
-          scoreWordPronunciationAttemptWithoutReference
+          scoreWordPronunciationAttemptWithoutReference,
+          context
         );
       } catch (gopError) {
         if (gopError.code === 'AUDIO_QUALITY_FAILED' || gopError.code === 'WORD_MISMATCH') {
@@ -705,13 +816,26 @@ async function scorePronunciationAttemptData(data, previousResults = []) {
       }
     }
 
-    if (typeof error.code !== 'string' || !error.code) {
-      error.code = 'ACOUSTIC_SCORING_FAILED';
-    }
-    throw error;
+    // Any other failure (GOP worker crash/timeout, unexpected engine error,
+    // malformed model output, etc.) must still hand the child a usable
+    // score rather than a dead end — a transient acoustic-engine problem is
+    // not the same as a bad recording or a mismatched word (those two stay
+    // real errors above), so it falls back the same way a missing reference
+    // recording does instead of surfacing a raw 500 with no score.
+    logger.error('Acoustic scoring failed, falling back to prototype scorer', {
+      word_id: wordId,
+      error_code: error.code,
+      error_message: error.message,
+    });
+    return {
+      ...scorePrototypePronunciationAttemptData(data, previousResults),
+      scoring_fallback_reason: 'acoustic_scoring_failed',
+    };
   }
 }
 
 module.exports = {
   scorePronunciationAttemptData,
+  buildAdaptiveModel,
+  buildHistoryCounts,
 };

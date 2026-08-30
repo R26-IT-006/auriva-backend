@@ -9,6 +9,13 @@ credentials/
 # silently stop new Sequelize model files from being tracked.
 /models/
 
+# Local Python runtime for the phoneme GOP worker (torch + transformers, multi-GB
+# and platform-specific). The worker is located via PHONEME_GOP_PYTHON, so this
+# path is a convention, not a requirement — nothing here belongs in the repo.
+/ml/venv/
+
 # macOS finder metadata
 .DS_Store
 **/.DS_Store
+
+.claude/
