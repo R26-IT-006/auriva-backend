@@ -11,6 +11,7 @@ const logger       = require('./src/utils/logger');
 const ApiError     = require('./src/utils/ApiError');
 const { sequelize }      = require('./src/models');
 const fixCat3ForeignKeys = require('./src/utils/fixCat3ForeignKeys');
+const { ensurePersonalThresholdsColumn } = require('./src/utils/ensurePersonalThresholdsColumn');
 const swaggerUi          = require('swagger-ui-express');
 const swaggerSpec  = require('./src/config/swagger');
 
@@ -41,9 +42,20 @@ function getPositiveIntegerEnv(name, fallback) {
 app.use(helmet());
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
+// PATCH added (final pre-PP2 fix) — PATCH /handwriting/assessment/:id/finalize
+// and PATCH /handwriting/collection-session/:id/complete both already exist
+// as real routes; this list previously omitted the verb entirely. The React
+// Native app itself is unaffected either way (CORS preflight is a browser
+// mechanism, not enforced by native fetch/axios), but a future browser-based
+// admin tool or a CORS-aware HTTP client would otherwise be silently blocked
+// on these two routes.
+//
+// origin: CORS_ORIGIN falls back to '*' when unset — an accepted, documented
+// development/pilot-stage default (see .env.example), not tightened here to
+// avoid an unreviewed production-security change immediately before PP2.
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
 }));
 
 // ─── HTTP request logging ─────────────────────────────────────────────────────
@@ -69,9 +81,32 @@ app.use('/api/auth', rateLimit({
 // bar below is sized for auth and CRUD, not telemetry.
 const CONCEPT_PREFIX = '/api/teacher/concepts';
 
+// Live-session snapshot polling is telemetry for the same reason concepts are:
+// the teacher UI GETs every ~5s while the Student Detail screen is focused and
+// the child-side PUTs a heartbeat on the same cadence. At 5s that is 180
+// requests per client per 15-minute window (360 for a teacher/child pair) —
+// which alone exceeds the 100/15min bar below, exhausting it in ~8 minutes and
+// then 429-ing every other /api call as collateral. The budget is derived from
+// the documented poll interval in src/config/liveSessionPolicy.js so it cannot
+// drift from it.
+//
+// This does NOT widen unauthenticated surface: every route under
+// /api/handwriting sits behind `router.use(verifyToken, isTeacher)`
+// (src/routes/handwriting.js), and auth/CRUD keep the strict 100/15min budget.
+const LIVE_SESSION_PREFIX = '/api/handwriting/live-session';
+const liveSessionPolicy = require('./src/config/liveSessionPolicy');
+
 app.use(CONCEPT_PREFIX, rateLimit({
   windowMs: rateLimitWindowMs,
   limit: getPositiveIntegerEnv('CONCEPT_RATE_LIMIT_MAX', 1000),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+}));
+
+app.use(LIVE_SESSION_PREFIX, rateLimit({
+  windowMs: liveSessionPolicy.RATE_LIMIT_WINDOW_MS,
+  limit: liveSessionPolicy.RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
@@ -82,7 +117,8 @@ app.use('/api', rateLimit({
   limit: getPositiveIntegerEnv('API_RATE_LIMIT_MAX', 1000),
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.originalUrl.startsWith(CONCEPT_PREFIX),
+  skip: (req) => req.originalUrl.startsWith(CONCEPT_PREFIX)
+    || req.originalUrl.startsWith(LIVE_SESSION_PREFIX),
   message: { error: 'Too many requests, please try again later.' },
 }));
 
@@ -162,6 +198,26 @@ async function start() {
   logger.info(`Connecting to database at ${process.env.DB_HOST}:${process.env.DB_PORT || 5432}`);
   await sequelize.authenticate();
   logger.info('Database connection established');
+
+  const [[info]] = await sequelize.query(
+    `SELECT current_database() AS db, current_schema() AS schema,
+            (SELECT count(*) FROM information_schema.columns
+              WHERE table_name='students' AND column_name='personal_thresholds') AS has_col`
+  );
+  logger.info(`DB → ${info.db} schema=${info.schema} personal_thresholds=${info.has_col}`);
+
+  await ensurePersonalThresholdsColumn(sequelize);
+
+  // Re-check periodically while running, not just at boot — another dev's
+  // machine can drop the column at any point in this server's lifetime.
+  // Deliberately NOT startup-only — see ensurePersonalThresholdsColumn.js
+  // and the Reliability investigation report for why this interval is
+  // intentional, not an oversight.
+  setInterval(() => {
+    ensurePersonalThresholdsColumn(sequelize).catch((err) => {
+      logger.error('personal_thresholds self-heal check failed', { err });
+    });
+  }, 60_000).unref();
 
   // Schema changes belong in migrations (see migrations/), not in sync().
   //

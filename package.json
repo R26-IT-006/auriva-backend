@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "sync:word-templates": "node scripts/syncWordCanonicalAssets.js",
     "test": "jest && node --env-file-if-exists=.env --test \"tests/aiSummaryService.test.js\"",
     "start": "node index.js",
     "dev": "node --watch index.js",

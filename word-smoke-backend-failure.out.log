@@ -1,0 +1,253 @@
+
+> backend@1.0.0 start
+> node index.js
+
+[dotenv@17.3.1] injecting env (17) from .env -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2
+2026-08-18 21:27:03 [34mdebug[39m: Executing (default): SELECT 1+1 AS result
+2026-08-18 21:27:03 [32minfo[39m: Database connection established
+2026-08-18 21:27:03 [34mdebug[39m: Executing (default): SELECT current_database() AS db, current_schema() AS schema,
+            (SELECT count(*) FROM information_schema.columns
+              WHERE table_name='students' AND column_name='personal_thresholds') AS has_col
+2026-08-18 21:27:03 [32minfo[39m: DB → Auriva schema=public personal_thresholds=1
+2026-08-18 21:27:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:27:03 [32minfo[39m: Schema sync skipped (set ALLOW_DB_SYNC=true on a non-production, disposable database to enable) — use migrations for schema changes
+2026-08-18 21:27:03 [32minfo[39m: Auriva backend running on port 3000 [development]
+2026-08-18 21:27:03 [32minfo[39m: Swagger UI → http://localhost:3000/api-docs
+2026-08-18 21:27:20 [31merror[39m: No token provided
+Error: No token provided
+    at verifyToken (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\middleware\auth.js:13:11)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:297:9
+    at processParams (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:582:12)
+    at next (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:291:5)
+    at router.handle (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:186:3)
+    at router (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:60:12)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+2026-08-18 21:27:20 [32mhttp[39m: ::ffff:127.0.0.1 - - [18/Aug/2026:15:57:20 +0000] "GET /api/handwriting/word-progress/1 HTTP/1.1" 401 29 "-" "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-GB) WindowsPowerShell/5.1.26100.9168"
+2026-08-18 21:28:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:28:47 [31merror[39m: No token provided
+Error: No token provided
+    at verifyToken (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\middleware\auth.js:13:11)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:297:9
+    at processParams (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:582:12)
+    at next (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:291:5)
+    at router.handle (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:186:3)
+    at router (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:60:12)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+2026-08-18 21:28:47 [32mhttp[39m: ::ffff:127.0.0.1 - - [18/Aug/2026:15:58:47 +0000] "POST /api/handwriting/word-attempt HTTP/1.1" 401 29 "-" "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-GB) WindowsPowerShell/5.1.26100.9168"
+2026-08-18 21:28:47 [31merror[39m: No token provided
+Error: No token provided
+    at verifyToken (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\middleware\auth.js:13:11)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:297:9
+    at processParams (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:582:12)
+    at next (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:291:5)
+    at router.handle (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:186:3)
+    at router (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:60:12)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+2026-08-18 21:28:47 [32mhttp[39m: ::ffff:127.0.0.1 - - [18/Aug/2026:15:58:47 +0000] "POST /api/handwriting/word-activity HTTP/1.1" 401 29 "-" "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-GB) WindowsPowerShell/5.1.26100.9168"
+2026-08-18 21:28:57 [31merror[39m: No token provided
+Error: No token provided
+    at verifyToken (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\middleware\auth.js:13:11)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:297:9
+    at processParams (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:582:12)
+    at next (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:291:5)
+    at router.handle (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:186:3)
+    at router (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:60:12)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+2026-08-18 21:28:57 [32mhttp[39m: ::ffff:127.0.0.1 - - [18/Aug/2026:15:58:57 +0000] "GET /api/handwriting/word-progress/1 HTTP/1.1" 401 29 "-" "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-GB) WindowsPowerShell/5.1.26100.9168"
+2026-08-18 21:28:57 [31merror[39m: No token provided
+Error: No token provided
+    at verifyToken (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\middleware\auth.js:13:11)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:297:9
+    at processParams (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:582:12)
+    at next (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:291:5)
+    at router.handle (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:186:3)
+    at router (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:60:12)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+2026-08-18 21:28:57 [32mhttp[39m: ::ffff:127.0.0.1 - - [18/Aug/2026:15:58:57 +0000] "GET /api/handwriting/word-attempts/1 HTTP/1.1" 401 29 "-" "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-GB) WindowsPowerShell/5.1.26100.9168"
+2026-08-18 21:28:57 [31merror[39m: No token provided
+Error: No token provided
+    at verifyToken (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\middleware\auth.js:13:11)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:297:9
+    at processParams (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:582:12)
+    at next (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:291:5)
+    at router.handle (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:186:3)
+    at router (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:60:12)
+    at Layer.handleRequest (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\lib\layer.js:152:17)
+    at trimPrefix (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\router\index.js:342:13)
+2026-08-18 21:28:57 [32mhttp[39m: ::ffff:127.0.0.1 - - [18/Aug/2026:15:58:57 +0000] "GET /api/handwriting/word-report/1 HTTP/1.1" 401 29 "-" "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-GB) WindowsPowerShell/5.1.26100.9168"
+2026-08-18 21:29:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:30:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:31:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:32:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:33:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:34:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:35:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:36:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:37:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:38:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:39:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:40:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:41:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:42:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:43:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:44:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:45:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:46:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:47:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:48:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:49:03 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:50:04 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:51:04 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:52:04 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:53:04 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:54:04 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 21:55:04 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:04:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:04:18 [31merror[39m: personal_thresholds self-heal check failed
+2026-08-18 22:05:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:06:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:07:10 [34mdebug[39m: Executing (default): SELECT "Student"."sid", "Student"."student_code", "Student"."full_name", "Student"."date_of_birth", "Student"."disability", "Student"."father_name", "Student"."mother_name", "Student"."address", "Student"."marital_status", "Student"."mobile_number", "Student"."home_number", "Student"."profile_photo_url", "Student"."teacher_id", "Student"."personal_thresholds", "Student"."created_at", "avatarRecord"."id" AS "avatarRecord.id", "avatarRecord"."avatar_key" AS "avatarRecord.avatar_key" FROM "students" AS "Student" LEFT OUTER JOIN "student_avatars" AS "avatarRecord" ON "Student"."sid" = "avatarRecord"."student_id" WHERE "Student"."teacher_id" = 12 ORDER BY "Student"."student_code" ASC;
+2026-08-18 22:07:11 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:37:11 +0000] "GET /api/teacher/students HTTP/1.1" 304 - "-" "okhttp/4.12.0"
+2026-08-18 22:07:12 [34mdebug[39m: Executing (default): SELECT "Student"."sid", "Student"."student_code", "Student"."full_name", "Student"."date_of_birth", "Student"."disability", "Student"."father_name", "Student"."mother_name", "Student"."address", "Student"."marital_status", "Student"."mobile_number", "Student"."home_number", "Student"."profile_photo_url", "Student"."teacher_id", "Student"."personal_thresholds", "Student"."created_at", "avatarRecord"."id" AS "avatarRecord.id", "avatarRecord"."avatar_key" AS "avatarRecord.avatar_key" FROM "students" AS "Student" LEFT OUTER JOIN "student_avatars" AS "avatarRecord" ON "Student"."sid" = "avatarRecord"."student_id" WHERE "Student"."sid" = '9' AND "Student"."teacher_id" = 12;
+2026-08-18 22:07:12 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:37:12 +0000] "GET /api/teacher/students/9 HTTP/1.1" 304 - "-" "okhttp/4.12.0"
+2026-08-18 22:07:18 [34mdebug[39m: Executing (default): SELECT count(*) AS "count" FROM "letter_progress" AS "LetterProgress" WHERE "LetterProgress"."student_id" = 9 AND "LetterProgress"."case_type" = 'lowercase';
+2026-08-18 22:07:18 [34mdebug[39m: Executing (default): SELECT count(*) AS "count" FROM "letter_progress" AS "LetterProgress" WHERE "LetterProgress"."student_id" = 9 AND "LetterProgress"."case_type" = 'uppercase';
+2026-08-18 22:07:18 [34mdebug[39m: Executing (default): SELECT "id", "student_id", "session_start", "session_end", "shapes", "is_initial", "motor_score", "motor_profile", "collection_mode", "collection_session_id", "protocol_version", "task_order", "capture_status", "created_at" FROM "handwriting_assessments" AS "HandwritingAssessment" WHERE "HandwritingAssessment"."student_id" = 9 ORDER BY "HandwritingAssessment"."created_at" DESC LIMIT 1;
+2026-08-18 22:07:18 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:37:18 +0000] "GET /api/handwriting/progress/9 HTTP/1.1" 304 - "-" "okhttp/4.12.0"
+2026-08-18 22:07:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:07:36 [34mdebug[39m: Executing (default): SELECT "Student"."sid", "Student"."student_code", "Student"."full_name", "Student"."date_of_birth", "Student"."disability", "Student"."father_name", "Student"."mother_name", "Student"."address", "Student"."marital_status", "Student"."mobile_number", "Student"."home_number", "Student"."profile_photo_url", "Student"."teacher_id", "Student"."personal_thresholds", "Student"."created_at", "avatarRecord"."id" AS "avatarRecord.id", "avatarRecord"."avatar_key" AS "avatarRecord.avatar_key" FROM "students" AS "Student" LEFT OUTER JOIN "student_avatars" AS "avatarRecord" ON "Student"."sid" = "avatarRecord"."student_id" WHERE "Student"."sid" = 9 AND "Student"."teacher_id" = 12;
+2026-08-18 22:07:36 [34mdebug[39m: Executing (default): SELECT "id", "action_id", "student_id", "word", "source_letter", "stage", "attempt_number", "support_stage", "score", "threshold_used", "passed", "completion_passed", "expected_letter_count", "covered_letter_count", "strokes", "normalized_features", "canvas_width", "canvas_height", "capture_status", "collection_mode", "word_score_version", "created_at" FROM "handwriting_word_attempts" AS "WordWritingAttempt" WHERE "WordWritingAttempt"."action_id" = '42d105ef-2a7b-439b-8376-0f13372ad38a';
+2026-08-18 22:07:36 [34mdebug[39m: Executing (default): INSERT INTO "handwriting_word_attempts" ("id","action_id","student_id","word","source_letter","stage","attempt_number","support_stage","score","threshold_used","passed","completion_passed","expected_letter_count","covered_letter_count","strokes","normalized_features","canvas_width","canvas_height","capture_status","collection_mode","word_score_version","created_at") VALUES (DEFAULT,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING "id","action_id","student_id","word","source_letter","stage","attempt_number","support_stage","score","threshold_used","passed","completion_passed","expected_letter_count","covered_letter_count","strokes","normalized_features","canvas_width","canvas_height","capture_status","collection_mode","word_score_version","created_at";
+2026-08-18 22:07:37 [31merror[39m: invalid input syntax for type integer: "916.6470588235295"
+Error
+    at Query.run (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\dialects\postgres\query.js:50:25)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\sequelize.js:315:28
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async PostgresQueryInterface.insert (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\dialects\abstract\query-interface.js:308:21)
+    at async model.save (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\model.js:2490:35)
+    at async WordWritingAttempt.create (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\model.js:1362:12)
+    at async Object.saveAttempt (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\services\wordWritingService.js:6:588)
+    at async postWordAttempt (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\controllers\handwritingController.js:1963:252)
+2026-08-18 22:07:37 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:37:37 +0000] "POST /api/handwriting/word-attempt HTTP/1.1" 500 33 "-" "okhttp/4.12.0"
+2026-08-18 22:08:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:09:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:10:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:11:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:12:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:13:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:14:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:15:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:16:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:17:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:18:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:18:38 [34mdebug[39m: Executing (default): SELECT "Student"."sid", "Student"."student_code", "Student"."full_name", "Student"."date_of_birth", "Student"."disability", "Student"."father_name", "Student"."mother_name", "Student"."address", "Student"."marital_status", "Student"."mobile_number", "Student"."home_number", "Student"."profile_photo_url", "Student"."teacher_id", "Student"."personal_thresholds", "Student"."created_at", "avatarRecord"."id" AS "avatarRecord.id", "avatarRecord"."avatar_key" AS "avatarRecord.avatar_key" FROM "students" AS "Student" LEFT OUTER JOIN "student_avatars" AS "avatarRecord" ON "Student"."sid" = "avatarRecord"."student_id" WHERE "Student"."teacher_id" = 12 ORDER BY "Student"."student_code" ASC;
+2026-08-18 22:18:38 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:48:38 +0000] "GET /api/teacher/students HTTP/1.1" 304 - "-" "okhttp/4.12.0"
+2026-08-18 22:18:41 [34mdebug[39m: Executing (default): SELECT "Student"."sid", "Student"."student_code", "Student"."full_name", "Student"."date_of_birth", "Student"."disability", "Student"."father_name", "Student"."mother_name", "Student"."address", "Student"."marital_status", "Student"."mobile_number", "Student"."home_number", "Student"."profile_photo_url", "Student"."teacher_id", "Student"."personal_thresholds", "Student"."created_at", "avatarRecord"."id" AS "avatarRecord.id", "avatarRecord"."avatar_key" AS "avatarRecord.avatar_key" FROM "students" AS "Student" LEFT OUTER JOIN "student_avatars" AS "avatarRecord" ON "Student"."sid" = "avatarRecord"."student_id" WHERE "Student"."sid" = '40' AND "Student"."teacher_id" = 12;
+2026-08-18 22:18:41 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:48:41 +0000] "GET /api/teacher/students/40 HTTP/1.1" 304 - "-" "okhttp/4.12.0"
+2026-08-18 22:18:53 [34mdebug[39m: Executing (default): SELECT count(*) AS "count" FROM "letter_progress" AS "LetterProgress" WHERE "LetterProgress"."student_id" = 40 AND "LetterProgress"."case_type" = 'lowercase';
+2026-08-18 22:18:53 [34mdebug[39m: Executing (default): SELECT count(*) AS "count" FROM "letter_progress" AS "LetterProgress" WHERE "LetterProgress"."student_id" = 40 AND "LetterProgress"."case_type" = 'uppercase';
+2026-08-18 22:18:53 [34mdebug[39m: Executing (default): SELECT "id", "student_id", "session_start", "session_end", "shapes", "is_initial", "motor_score", "motor_profile", "collection_mode", "collection_session_id", "protocol_version", "task_order", "capture_status", "created_at" FROM "handwriting_assessments" AS "HandwritingAssessment" WHERE "HandwritingAssessment"."student_id" = 40 ORDER BY "HandwritingAssessment"."created_at" DESC LIMIT 1;
+2026-08-18 22:18:53 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:48:53 +0000] "GET /api/handwriting/progress/40 HTTP/1.1" 304 - "-" "okhttp/4.12.0"
+2026-08-18 22:19:07 [34mdebug[39m: Executing (default): SELECT "Student"."sid", "Student"."student_code", "Student"."full_name", "Student"."date_of_birth", "Student"."disability", "Student"."father_name", "Student"."mother_name", "Student"."address", "Student"."marital_status", "Student"."mobile_number", "Student"."home_number", "Student"."profile_photo_url", "Student"."teacher_id", "Student"."personal_thresholds", "Student"."created_at", "avatarRecord"."id" AS "avatarRecord.id", "avatarRecord"."avatar_key" AS "avatarRecord.avatar_key" FROM "students" AS "Student" LEFT OUTER JOIN "student_avatars" AS "avatarRecord" ON "Student"."sid" = "avatarRecord"."student_id" WHERE "Student"."sid" = 40 AND "Student"."teacher_id" = 12;
+2026-08-18 22:19:07 [34mdebug[39m: Executing (default): SELECT "id", "action_id", "student_id", "word", "source_letter", "stage", "attempt_number", "support_stage", "score", "threshold_used", "passed", "completion_passed", "expected_letter_count", "covered_letter_count", "strokes", "normalized_features", "canvas_width", "canvas_height", "capture_status", "collection_mode", "word_score_version", "created_at" FROM "handwriting_word_attempts" AS "WordWritingAttempt" WHERE "WordWritingAttempt"."action_id" = '0dc04f47-a439-4018-b6c3-de70b99422ce';
+2026-08-18 22:19:08 [34mdebug[39m: Executing (default): INSERT INTO "handwriting_word_attempts" ("id","action_id","student_id","word","source_letter","stage","attempt_number","support_stage","score","threshold_used","passed","completion_passed","expected_letter_count","covered_letter_count","strokes","normalized_features","canvas_width","canvas_height","capture_status","collection_mode","word_score_version","created_at") VALUES (DEFAULT,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING "id","action_id","student_id","word","source_letter","stage","attempt_number","support_stage","score","threshold_used","passed","completion_passed","expected_letter_count","covered_letter_count","strokes","normalized_features","canvas_width","canvas_height","capture_status","collection_mode","word_score_version","created_at";
+2026-08-18 22:19:08 [31merror[39m: invalid input syntax for type integer: "916.6470588235295"
+Error
+    at Query.run (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\dialects\postgres\query.js:50:25)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\sequelize.js:315:28
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async PostgresQueryInterface.insert (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\dialects\abstract\query-interface.js:308:21)
+    at async model.save (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\model.js:2490:35)
+    at async WordWritingAttempt.create (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\model.js:1362:12)
+    at async Object.saveAttempt (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\services\wordWritingService.js:6:588)
+    at async postWordAttempt (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\controllers\handwritingController.js:1963:252)
+2026-08-18 22:19:08 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:49:08 +0000] "POST /api/handwriting/word-attempt HTTP/1.1" 500 33 "-" "okhttp/4.12.0"
+2026-08-18 22:19:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:19:29 [34mdebug[39m: Executing (default): SELECT "Student"."sid", "Student"."student_code", "Student"."full_name", "Student"."date_of_birth", "Student"."disability", "Student"."father_name", "Student"."mother_name", "Student"."address", "Student"."marital_status", "Student"."mobile_number", "Student"."home_number", "Student"."profile_photo_url", "Student"."teacher_id", "Student"."personal_thresholds", "Student"."created_at", "avatarRecord"."id" AS "avatarRecord.id", "avatarRecord"."avatar_key" AS "avatarRecord.avatar_key" FROM "students" AS "Student" LEFT OUTER JOIN "student_avatars" AS "avatarRecord" ON "Student"."sid" = "avatarRecord"."student_id" WHERE "Student"."sid" = 40 AND "Student"."teacher_id" = 12;
+2026-08-18 22:19:29 [34mdebug[39m: Executing (default): SELECT "id", "action_id", "student_id", "word", "source_letter", "stage", "attempt_number", "support_stage", "score", "threshold_used", "passed", "completion_passed", "expected_letter_count", "covered_letter_count", "strokes", "normalized_features", "canvas_width", "canvas_height", "capture_status", "collection_mode", "word_score_version", "created_at" FROM "handwriting_word_attempts" AS "WordWritingAttempt" WHERE "WordWritingAttempt"."action_id" = '0dc04f47-a439-4018-b6c3-de70b99422ce';
+2026-08-18 22:19:29 [34mdebug[39m: Executing (default): INSERT INTO "handwriting_word_attempts" ("id","action_id","student_id","word","source_letter","stage","attempt_number","support_stage","score","threshold_used","passed","completion_passed","expected_letter_count","covered_letter_count","strokes","normalized_features","canvas_width","canvas_height","capture_status","collection_mode","word_score_version","created_at") VALUES (DEFAULT,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING "id","action_id","student_id","word","source_letter","stage","attempt_number","support_stage","score","threshold_used","passed","completion_passed","expected_letter_count","covered_letter_count","strokes","normalized_features","canvas_width","canvas_height","capture_status","collection_mode","word_score_version","created_at";
+2026-08-18 22:19:29 [31merror[39m: invalid input syntax for type integer: "916.6470588235295"
+Error
+    at Query.run (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\dialects\postgres\query.js:50:25)
+    at C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\sequelize.js:315:28
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async PostgresQueryInterface.insert (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\dialects\abstract\query-interface.js:308:21)
+    at async model.save (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\model.js:2490:35)
+    at async WordWritingAttempt.create (C:\Users\rlilu\Desktop\auriva\auriva-backend\node_modules\sequelize\lib\model.js:1362:12)
+    at async Object.saveAttempt (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\services\wordWritingService.js:6:588)
+    at async postWordAttempt (C:\Users\rlilu\Desktop\auriva\auriva-backend\src\controllers\handwritingController.js:1963:252)
+2026-08-18 22:19:29 [32mhttp[39m: ::ffff:192.168.1.9 - - [18/Aug/2026:16:49:29 +0000] "POST /api/handwriting/word-attempt HTTP/1.1" 500 33 "-" "okhttp/4.12.0"
+2026-08-18 22:20:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:21:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:22:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:23:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:24:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'
+2026-08-18 22:25:18 [34mdebug[39m: Executing (default): SELECT count(*) AS has_col FROM information_schema.columns
+      WHERE table_name='students' AND column_name='personal_thresholds'

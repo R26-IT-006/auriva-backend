@@ -40,6 +40,20 @@ const ShapeFeature               = require('./ShapeFeature');
 const LetterAttempt              = require('./LetterAttempt');
 const CollectionSession          = require('./CollectionSession');
 const TeacherValidation          = require('./TeacherValidation');
+const StudentMotorBaseline       = require('./StudentMotorBaseline');
+const ThresholdHistory           = require('./ThresholdHistory');
+const TeacherRecommendationValidation = require('./TeacherRecommendationValidation');
+const WordWritingAttempt         = require('./WordWritingAttempt');
+const WordActivityProgress       = require('./WordActivityProgress');
+const LetterMotorMasteryEvidence = require('./LetterMotorMasteryEvidence');
+const LetterMotorStateHistory    = require('./LetterMotorStateHistory');
+const LetterMotorStateEvaluation = require('./LetterMotorStateEvaluation');
+const LetterMotorPatternCheck    = require('./LetterMotorPatternCheck');
+const HandwritingWorksheet       = require('./HandwritingWorksheet');
+const HandwritingWorksheetSubmission = require('./HandwritingWorksheetSubmission');
+// Proposal FR-16, Phase 7B — current live-session snapshot (see
+// src/services/liveSessionService.js). One row per student.
+const StudentLiveHandwritingSession  = require('./StudentLiveHandwritingSession');
 
 // Principal → Teacher
 Principal.hasMany(Teacher, { foreignKey: 'created_by', as: 'teachers' });
@@ -265,6 +279,76 @@ CollectionSession.belongsTo(Student, { foreignKey: 'student_id', as: 'student' }
 Student.hasMany(TeacherValidation, { foreignKey: 'student_id', as: 'teacherValidations' });
 TeacherValidation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
 
+// Student → StudentMotorBaseline (one immutable baseline per source assessment;
+// a student could in principle have more than one over time — see Decision 7 —
+// so this is hasMany, not hasOne)
+Student.hasMany(StudentMotorBaseline, { foreignKey: 'student_id', as: 'motorBaselines' });
+StudentMotorBaseline.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// HandwritingAssessment → StudentMotorBaseline (one baseline per source assessment,
+// enforced by the UNIQUE(source_assessment_id) index)
+HandwritingAssessment.hasOne(StudentMotorBaseline, { foreignKey: 'source_assessment_id', as: 'motorBaseline' });
+StudentMotorBaseline.belongsTo(HandwritingAssessment, { foreignKey: 'source_assessment_id', as: 'sourceAssessment' });
+
+// Feature 2 Step 1: Student → ThresholdHistory (append-only threshold
+// change/provenance log — see src/models/ThresholdHistory.js)
+Student.hasMany(ThresholdHistory, { foreignKey: 'student_id', as: 'thresholdHistory' });
+ThresholdHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// StudentMotorBaseline → ThresholdHistory (conceptual link only, app-layer —
+// which baseline a given threshold event was derived from, if any)
+StudentMotorBaseline.hasMany(ThresholdHistory, { foreignKey: 'baseline_id', as: 'thresholdHistoryEntries' });
+ThresholdHistory.belongsTo(StudentMotorBaseline, { foreignKey: 'baseline_id', as: 'baseline' });
+
+// Feature 9 Step 3: Student → TeacherRecommendationValidation (append-only
+// teacher-judgement history for Feature 8 worksheet recommendations — see
+// src/models/TeacherRecommendationValidation.js). No association to Teacher
+// is declared here — teacher_id is recorded and read the same
+// application-layer-only way every other student_id/teacher_id pair in
+// this schema already is (no FK constraint convention, Step 1 audit §52).
+Student.hasMany(TeacherRecommendationValidation, { foreignKey: 'student_id', as: 'recommendationValidations' });
+TeacherRecommendationValidation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Student → word writing / word activity progress
+Student.hasMany(WordWritingAttempt, { foreignKey: 'student_id', as: 'wordWritingAttempts' });
+WordWritingAttempt.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Student.hasMany(WordActivityProgress, { foreignKey: 'student_id', as: 'wordActivityProgress' });
+WordActivityProgress.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Feature 11B Phase 5 — Student → LetterMotorMasteryEvidence (append-only,
+// immutable frozen evidence — see src/models/LetterMotorMasteryEvidence.js
+// and src/services/letterMotorMasteryService.js). No association to
+// LetterAttempt is declared (matches this schema's no-FK convention) —
+// letter_attempt_id is recorded for auditability only.
+Student.hasMany(LetterMotorMasteryEvidence, { foreignKey: 'student_id', as: 'letterMotorMasteryEvidence' });
+LetterMotorMasteryEvidence.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Feature 11B Phase 5 — Student → LetterMotorStateHistory (append-only,
+// idempotent milestone snapshots).
+Student.hasMany(LetterMotorStateHistory, { foreignKey: 'student_id', as: 'letterMotorStateHistory' });
+LetterMotorStateHistory.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Feature 11B S2 — Student -> LetterMotorStateEvaluation (append-only,
+// immutable milestone-evaluation events, including reference-range
+// rejections — see src/models/LetterMotorStateEvaluation.js).
+Student.hasMany(LetterMotorStateEvaluation, { foreignKey: 'student_id', as: 'letterMotorStateEvaluations' });
+LetterMotorStateEvaluation.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Writing Check sessions (descriptive assessment only - never mastery).
+Student.hasMany(LetterMotorPatternCheck, { foreignKey: 'student_id', as: 'letterMotorPatternChecks' });
+LetterMotorPatternCheck.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
+// Homework worksheets - teacher-directed support material, never mastery.
+Student.hasMany(HandwritingWorksheet, { foreignKey: 'student_id', as: 'handwritingWorksheets' });
+HandwritingWorksheet.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+HandwritingWorksheet.hasMany(HandwritingWorksheetSubmission, { foreignKey: 'worksheet_id', as: 'submissions' });
+HandwritingWorksheetSubmission.belongsTo(HandwritingWorksheet, { foreignKey: 'worksheet_id', as: 'worksheet' });
+
+// Proposal FR-16, Phase 7B — Student ↔ StudentLiveHandwritingSession
+// (one-to-one: student_id is the live-session table's own primary key).
+Student.hasOne(StudentLiveHandwritingSession, { foreignKey: 'student_id', as: 'liveHandwritingSession' });
+StudentLiveHandwritingSession.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+
 module.exports = {
   sequelize,
   Principal,
@@ -306,4 +390,16 @@ module.exports = {
   CollectionSession,
   TeacherValidation,
   PronunciationSessionResult,
+  StudentMotorBaseline,
+  ThresholdHistory,
+  TeacherRecommendationValidation,
+  WordWritingAttempt,
+  WordActivityProgress,
+  LetterMotorMasteryEvidence,
+  LetterMotorStateHistory,
+  LetterMotorStateEvaluation,
+  LetterMotorPatternCheck,
+  HandwritingWorksheet,
+  HandwritingWorksheetSubmission,
+  StudentLiveHandwritingSession,
 };

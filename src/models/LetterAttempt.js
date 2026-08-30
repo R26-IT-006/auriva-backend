@@ -2,6 +2,8 @@
 
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
+const { LETTER_SUPPORT_LEVELS } = require('../config/letterSupportLevels');
+const { VALID_DEMO_SPEED_LEVELS } = require('../config/demoSpeedPolicy');
 
 const LetterAttempt = sequelize.define('LetterAttempt', {
   id: {
@@ -56,6 +58,78 @@ const LetterAttempt = sequelize.define('LetterAttempt', {
     type:      DataTypes.JSONB,
     allowNull: true,
   },
+  // Feature 3 Step 3 — per-attempt support level as actually RENDERED by the
+  // frontend for this specific attempt ('high'|'medium'|'low' — see
+  // src/config/letterSupportLevels.js and the frontend's
+  // constants/handwritingSupportLevels.js, Feature 3 Step 2). Genuinely
+  // per-attempt, like `features` above — never a session-level value copied
+  // across a session's rows (see saveLetterAttempts() in
+  // handwritingController.js, which reads it from each attempt's own
+  // payload object, never from a session-level field).
+  //
+  // Nullable by design and NEVER backfilled: rows saved before this column
+  // existed, and any row whose client omitted or sent an invalid value,
+  // simply have support_level = null — never a guessed value derived from
+  // attempt_number. See the Feature 3 Step 1 audit for why attempt_number
+  // cannot safely stand in for support_level (collection-mode attempt 3's
+  // presentation does not match either 'medium' or a bare 'no support'
+  // case), and the migration's header comment for the historical-row policy.
+  //
+  // DATA CAPTURE ONLY as of Step 3 — nothing in this codebase reads this
+  // column to make an adaptive decision yet.
+  //
+  // Deliberately a plain VARCHAR + application-level `isIn` validation
+  // rather than a native PostgreSQL ENUM: matches this column's own
+  // `case_type`/`capture_status` siblings only loosely — those two DO use
+  // DataTypes.ENUM — but a native enum type is more expensive to alter later
+  // (adding a 4th support tier, should one ever be needed, requires an
+  // `ALTER TYPE ... ADD VALUE` migration outside a transaction on some PG
+  // versions) and Feature 3's own vocabulary is still young; a plain string
+  // with the SAME validation enforced at the model layer keeps rollback and
+  // future vocabulary changes simple. Revisit only if this column's shape
+  // proves genuinely stable long-term.
+  support_level: {
+    type:      DataTypes.STRING(10),
+    allowNull: true,
+    validate: {
+      isIn: [LETTER_SUPPORT_LEVELS],
+    },
+  },
+  // Feature 6 Step 5 — per-attempt demo-speed level as ACTUALLY RENDERED by
+  // the frontend for this specific attempt's animated tracer, if one was
+  // shown ('standard'|'slow' — see src/config/demoSpeedPolicy.js and the
+  // frontend's constants/demoSpeedLevels.js, Feature 6 Step 2). This is the
+  // frontend's resolveActualDemoSpeedLevel() output, NOT the raw backend
+  // recommendation — the two are deliberately different concepts (Step 3's
+  // persistence-semantics analysis): a `slow` recommendation at MEDIUM/LOW
+  // support, under reduce-motion, or in collection mode never actually
+  // rendered a tracer, so this column is `null` in every one of those cases,
+  // not a misleading 'slow'/'standard'. `null` means "no animated tracer was
+  // shown for this attempt" — it does NOT mean "no adaptation happened"; a
+  // HIGH-support attempt that genuinely rendered at the unmodified standard
+  // speed still stores 'standard' explicitly (Step 5 spec §39).
+  //
+  // Nullable by design and NEVER backfilled: rows saved before this column
+  // existed (and any row from before Feature 6 Step 4's frontend activation)
+  // simply have demo_speed_level = null — no historical proxy is derived
+  // from support_level/attempt_number/the backend recommendation, mirroring
+  // support_level's own no-backfill policy immediately above.
+  //
+  // DATA CAPTURE + RESEARCH/AUDITABILITY ONLY — nothing in this codebase
+  // reads this column to make a decision; it exists purely so a future
+  // analysis can compare standard-demo vs. slow-demo attempts (trajectory
+  // score, smoothness, attempt_duration_ms, threshold outcome) without
+  // guessing which speed was actually shown.
+  //
+  // Same STRING(10) + application-level `isIn` choice as support_level, for
+  // the same rollback-safety rationale (see that column's own comment).
+  demo_speed_level: {
+    type:      DataTypes.STRING(10),
+    allowNull: true,
+    validate: {
+      isIn: [VALID_DEMO_SPEED_LEVELS],
+    },
+  },
   // true when this row was recorded during a fixed research protocol session
   collection_mode: {
     type:         DataTypes.BOOLEAN,
@@ -107,6 +181,36 @@ const LetterAttempt = sequelize.define('LetterAttempt', {
   // computeMultiStrokeDTW in the frontend's utils/dtw.js). Null when no
   // stroke-order comparison was possible (single-stroke letter/template).
   stroke_order_matches_template: { type: DataTypes.BOOLEAN, allowNull: true },
+
+  // Feature 11B Phase 4 — see
+  // migrations/20260820000001-add-source-type-to-letter-attempts.js for the
+  // full rationale. NULL for every normal-practice row (existing rows are
+  // never backfilled; new normal rows stay NULL too — nothing about
+  // saveLetterAttempts()/recordLetterCompletion() sets this field).
+  // 'letter_motor_reassessment' for rows saved by
+  // letterMotorReassessmentService.js's saveReassessmentAttempt(). A SEPARATE
+  // concept from collection_mode — collection_mode is temporary
+  // pre-deployment research capture, unrelated to and untouched by this
+  // column. Every normal-learning query that reads letter_attempts MUST
+  // filter `source_type: null` so reassessment rows never leak into
+  // Features 1–10 (see the query-exclusion audit referenced in this
+  // feature's final report).
+  source_type: {
+    type:      DataTypes.STRING(40),
+    allowNull: true,
+  },
+
+  // Motor Score Unification (spec §24) — see
+  // src/config/motorScoreRegime.js. NULL for every row created before this
+  // phase (legacy regime: client featuresToScore()-derived attempt_scores
+  // governed pass/fail). A real value means this row's own
+  // pass/best_score/threshold_passed were decided under the new
+  // authoritative computeMotorScore()-governed regime. Never backfilled on
+  // historical rows.
+  progression_score_version: {
+    type:      DataTypes.STRING(20),
+    allowNull: true,
+  },
 
   created_at: {
     type:         DataTypes.DATE,

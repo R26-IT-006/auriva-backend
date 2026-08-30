@@ -1,13 +1,31 @@
 'use strict';
 
+/**
+ * difficultyRules.js
+ *
+ * Hand-authored motor-difficulty rules. Each rule scores a set of threshold
+ * conditions over the normalized 0-100 "problem severity" features built by
+ * explainabilityService.buildFeatureVector().
+ *
+ * The metadata below (RULES_VERSION, ruleId, conditionId) exists ONLY so the
+ * explanation layer can identify a rule/condition stably. Feature keys,
+ * thresholds, weights, hints, explanation templates and exercises are
+ * unchanged and must not be altered by explanation work — changing any of
+ * them changes the system's behaviour, not its explanation.
+ */
+
+const RULES_VERSION = 'difficulty-rules-v1';
+
 const DIFFICULTY_RULES = {
 
   WEAK_CURVE_CONTROL: {
+    ruleId: 'WEAK_CURVE_CONTROL',
     label: 'Weak Curve Control',
     description: 'Difficulty forming smooth, continuous curved strokes such as circles and arcs.',
     icon: 'ellipse-outline',
     conditions: [
       {
+        conditionId: 'WEAK_CURVE_CONTROL.curveSmoothnessNorm',
         featureKey: 'curveSmoothnessNorm',
         featureName: 'Curve Smoothness',
         threshold: 30,
@@ -15,6 +33,7 @@ const DIFFICULTY_RULES = {
         hint: 'Unsteady hand movements during curved strokes',
       },
       {
+        conditionId: 'WEAK_CURVE_CONTROL.pauseNorm',
         featureKey: 'pauseNorm',
         featureName: 'Pause Frequency',
         threshold: 40,
@@ -22,6 +41,7 @@ const DIFFICULTY_RULES = {
         hint: 'Frequent mid-stroke pauses',
       },
       {
+        conditionId: 'WEAK_CURVE_CONTROL.curveDeviationNorm',
         featureKey: 'curveDeviationNorm',
         featureName: 'Curve Accuracy',
         threshold: 30,
@@ -29,6 +49,7 @@ const DIFFICULTY_RULES = {
         hint: 'Straying from the intended curve path',
       },
       {
+        conditionId: 'WEAK_CURVE_CONTROL.speedNorm',
         featureKey: 'speedNorm',
         featureName: 'Speed Consistency',
         threshold: 20,
@@ -53,11 +74,13 @@ const DIFFICULTY_RULES = {
   },
 
   WEAK_STRAIGHT_LINE: {
+    ruleId: 'WEAK_STRAIGHT_LINE',
     label: 'Weak Straight-Line Control',
     description: 'Difficulty maintaining straight, controlled line strokes.',
     icon: 'remove-outline',
     conditions: [
       {
+        conditionId: 'WEAK_STRAIGHT_LINE.lineDeviationNorm',
         featureKey: 'lineDeviationNorm',
         featureName: 'Line Accuracy',
         threshold: 40,
@@ -65,6 +88,7 @@ const DIFFICULTY_RULES = {
         hint: 'High deviation from ideal straight-line path',
       },
       {
+        conditionId: 'WEAK_STRAIGHT_LINE.lineSmoothnessNorm',
         featureKey: 'lineSmoothnessNorm',
         featureName: 'Line Smoothness',
         threshold: 30,
@@ -72,6 +96,7 @@ const DIFFICULTY_RULES = {
         hint: 'Unsteady movements during straight-line strokes',
       },
       {
+        conditionId: 'WEAK_STRAIGHT_LINE.pauseNorm',
         featureKey: 'pauseNorm',
         featureName: 'Pause Frequency',
         threshold: 40,
@@ -79,6 +104,7 @@ const DIFFICULTY_RULES = {
         hint: 'Pauses interrupting continuous line flow',
       },
       {
+        conditionId: 'WEAK_STRAIGHT_LINE.speedNorm',
         featureKey: 'speedNorm',
         featureName: 'Speed Consistency',
         threshold: 20,
@@ -103,11 +129,13 @@ const DIFFICULTY_RULES = {
   },
 
   ZIGZAG_INSTABILITY: {
+    ruleId: 'ZIGZAG_INSTABILITY',
     label: 'Zigzag Instability',
     description: 'Difficulty with direction changes and diagonal strokes.',
     icon: 'trending-up-outline',
     conditions: [
       {
+        conditionId: 'ZIGZAG_INSTABILITY.zigzagSmoothnessNorm',
         featureKey: 'zigzagSmoothnessNorm',
         featureName: 'Direction Change Control',
         threshold: 40,
@@ -115,6 +143,7 @@ const DIFFICULTY_RULES = {
         hint: 'Unsteady direction changes in diagonal strokes',
       },
       {
+        conditionId: 'ZIGZAG_INSTABILITY.overallDeviationNorm',
         featureKey: 'overallDeviationNorm',
         featureName: 'Stroke Accuracy',
         threshold: 40,
@@ -122,6 +151,7 @@ const DIFFICULTY_RULES = {
         hint: 'High overall stroke deviation',
       },
       {
+        conditionId: 'ZIGZAG_INSTABILITY.pauseNorm',
         featureKey: 'pauseNorm',
         featureName: 'Pause Frequency',
         threshold: 40,
@@ -145,11 +175,13 @@ const DIFFICULTY_RULES = {
   },
 
   MOTOR_FATIGUE: {
+    ruleId: 'MOTOR_FATIGUE',
     label: 'Motor Fatigue',
     description: 'Signs of reduced motor control consistent with tiredness or low stamina.',
     icon: 'battery-half-outline',
     conditions: [
       {
+        conditionId: 'MOTOR_FATIGUE.pauseNorm',
         featureKey: 'pauseNorm',
         featureName: 'Pause Frequency',
         threshold: 60,
@@ -157,6 +189,7 @@ const DIFFICULTY_RULES = {
         hint: 'Very frequent pauses across all shapes',
       },
       {
+        conditionId: 'MOTOR_FATIGUE.speedNorm',
         featureKey: 'speedNorm',
         featureName: 'Speed Consistency',
         threshold: 30,
@@ -164,6 +197,7 @@ const DIFFICULTY_RULES = {
         hint: 'Slowing and inconsistent writing speed',
       },
       {
+        conditionId: 'MOTOR_FATIGUE.overallSmoothnessNorm',
         featureKey: 'overallSmoothnessNorm',
         featureName: 'Overall Smoothness',
         threshold: 50,
@@ -187,3 +221,15 @@ const DIFFICULTY_RULES = {
 };
 
 module.exports = DIFFICULTY_RULES;
+
+// Attached NON-ENUMERABLY on purpose. explainabilityService.js iterates the
+// rule set with Object.entries(DIFFICULTY_RULES) to score every rule, so a
+// plain `module.exports.RULES_VERSION = ...` would be picked up as if it were
+// a fifth rule and change scoring. defineProperty keeps Object.keys/entries
+// (and therefore the scoring loop) byte-identical while still exposing the
+// version to the explanation layer.
+Object.defineProperty(module.exports, 'RULES_VERSION', {
+  value: RULES_VERSION,
+  enumerable: false,
+  writable: false,
+});
