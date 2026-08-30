@@ -187,11 +187,31 @@ async function getPronunciationResultAudio(req, res) {
   res.json(audio);
 }
 
-// startSession/endSession are deliberately absent: session management was removed
-// from this branch (commit 7311516). The incoming branch's export list still named
-// them, which would throw a ReferenceError the moment this module is required.
+// Session management was removed from this branch in commit 7311516 and is
+// restored here because the pronunciation module's client brackets its flow
+// with these two calls (see pronunciationSessionLifecycle.js). Without them
+// both requests 404 and no `sessions` row is ever written for a pronunciation
+// session, so the dashboard's session counts and Recent Activity silently omit
+// the entire module.
+async function startSession(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const session = await teacherService.startSession(req.user.id, req.body.student_id);
+  res.status(201).json(session);
+}
+
+async function endSession(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const session = await teacherService.endSession(req.user.id, req.body.student_id);
+  res.json(session);
+}
 
 module.exports = {
+  startSession,
+  endSession,
   getDashboard,
   getStudents,
   getStudentById,

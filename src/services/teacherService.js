@@ -553,7 +553,40 @@ async function deleteStudentNote(teacherId, studentId, noteId) {
   await note.destroy();
 }
 
+// Opens and closes the `sessions` row that spans a teaching session. Other
+// modules (category3, dialogue) create their own session rows inside their
+// flows; the pronunciation module has no such natural anchor, so it brackets
+// the flow with these instead. Without them the dashboard's session counts and
+// Recent Activity never see a pronunciation session at all.
+async function startSession(teacherId, studentId) {
+  const id = normalizeStudentId(studentId);
+  await assertOwnStudent(teacherId, id);
+
+  // 409 rather than a second row: the caller treats it as "reuse the open one"
+  // (an earlier session the app never closed after a crash), and endSession
+  // below will close it.
+  const existing = await Session.findOne({
+    where: { teacher_id: teacherId, student_id: id, is_active: true },
+  });
+  if (existing) throw new ApiError(409, 'A session is already active for this student');
+
+  return Session.create({ teacher_id: teacherId, student_id: id });
+}
+
+async function endSession(teacherId, studentId) {
+  const id = normalizeStudentId(studentId);
+  const session = await Session.findOne({
+    where: { teacher_id: teacherId, student_id: id, is_active: true },
+  });
+  if (!session) throw new ApiError(404, 'No active session found for this student');
+
+  await session.update({ ended_at: new Date(), is_active: false });
+  return session;
+}
+
 module.exports = {
+  startSession,
+  endSession,
   startOfWeek,
   getDashboardStats,
   getOwnStudents,

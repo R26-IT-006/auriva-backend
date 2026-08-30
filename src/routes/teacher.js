@@ -155,6 +155,62 @@ router.get('/students', ctrl.getStudents);
  */
 router.get('/students/:id', ctrl.getStudentById);
 
+/**
+ * @swagger
+ * /api/teacher/session/start:
+ *   post:
+ *     summary: Open a teaching session for a student
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [student_id]
+ *             properties:
+ *               student_id:
+ *                 type: integer
+ *     responses:
+ *       201:
+ *         description: Session opened
+ *       409:
+ *         description: A session is already active for this student
+ */
+router.post('/session/start', [
+  body('student_id').isInt({ min: 1 }).withMessage('student_id must be a positive integer'),
+], ctrl.startSession);
+
+/**
+ * @swagger
+ * /api/teacher/session/end:
+ *   post:
+ *     summary: End the active session for a student
+ *     tags: [Teacher]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [student_id]
+ *             properties:
+ *               student_id:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Session ended
+ *       404:
+ *         description: No active session found for this student
+ */
+router.post('/session/end', [
+  body('student_id').isInt({ min: 1 }).withMessage('student_id must be a positive integer'),
+], ctrl.endSession);
+
 router.post('/students/:id/avatar', [
   body('avatar_key')
     .isIn(['boba', 'glitter', 'lily', 'megatron'])
