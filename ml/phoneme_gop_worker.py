@@ -369,12 +369,25 @@ def warm_up_inference(engine):
     import tempfile
 
     silence = np.zeros(int(SAMPLE_RATE * 0.9), dtype=np.float32)
-    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+    # delete=False plus an explicit close, rather than holding the context
+    # manager open: on Windows NamedTemporaryFile keeps an exclusive handle on
+    # the path, so soundfile cannot reopen it by name and the write fails with
+    # a bare "System error". Writing once the handle is closed behaves the same
+    # on POSIX. sf.write is inside the guard too — it sat outside, so a warmup
+    # failure killed the worker at startup, which is exactly what the comment
+    # below says must never happen.
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    try:
         sf.write(tmp.name, silence, SAMPLE_RATE)
+        engine.assess(tmp.name, ["k"])
+    except Exception as error:  # noqa: BLE001 — warmup must never block startup
+        log(f"warmup inference failed (non-fatal): {error}")
+    finally:
         try:
-            engine.assess(tmp.name, ["k"])
-        except Exception as error:  # noqa: BLE001 — warmup must never block startup
-            log(f"warmup inference failed (non-fatal): {error}")
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
 
 def main():
