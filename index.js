@@ -152,7 +152,25 @@ app.use((req, res) => {
 // Express 5 automatically catches async errors and routes them here.
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  logger.error(err.message, { stack: err.stack, path: req.path });
+  // A Sequelize database error's own message is only the Postgres headline
+  // ("invalid input syntax for type json"), which does not say which column or
+  // value was rejected — the useful part lives on err.parent. Surface it, plus
+  // the statement, so a failing write can be diagnosed from the log instead of
+  // by guesswork. Bind parameters are deliberately NOT logged: for this API
+  // they include the child's raw audio blob (see the note on err.details below).
+  const dbDetail = err.parent || err.original;
+  logger.error(err.message, {
+    stack: err.stack,
+    path: req.path,
+    ...(dbDetail && {
+      db_detail: dbDetail.detail || null,
+      db_column: dbDetail.column || null,
+      db_table: dbDetail.table || null,
+      db_code: dbDetail.code || null,
+      db_routine: dbDetail.routine || null,
+      sql: typeof err.sql === 'string' ? err.sql.slice(0, 2000) : null,
+    }),
+  });
 
   if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
     return res.status(401).json({ error: 'Invalid or expired token' });
