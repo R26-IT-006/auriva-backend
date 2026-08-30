@@ -38,9 +38,21 @@ describe('Test 1 — schema-check detects a missing column', () => {
 
     await ensurePersonalThresholdsColumn(sequelize);
 
-    expect(sequelize.query).toHaveBeenCalledWith(expect.stringContaining("information_schema.columns"));
-    expect(sequelize.query).toHaveBeenCalledWith(expect.stringContaining("table_name='students'"));
-    expect(sequelize.query).toHaveBeenCalledWith(expect.stringContaining("column_name='personal_thresholds'"));
+    // Second argument is { logging: false }: the probe runs on a 60s interval,
+    // so logging it would print the same SELECT once a minute forever. Asserted
+    // rather than ignored — re-enabling it is a regression, not a tidy-up.
+    expect(sequelize.query).toHaveBeenCalledWith(
+      expect.stringContaining('information_schema.columns'),
+      expect.objectContaining({ logging: false }),
+    );
+    expect(sequelize.query).toHaveBeenCalledWith(
+      expect.stringContaining("table_name='students'"),
+      expect.objectContaining({ logging: false }),
+    );
+    expect(sequelize.query).toHaveBeenCalledWith(
+      expect.stringContaining("column_name='personal_thresholds'"),
+      expect.objectContaining({ logging: false }),
+    );
   });
 });
 

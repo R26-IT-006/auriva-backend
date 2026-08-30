@@ -18,7 +18,7 @@ const {
 } = require('../src/config/preWritingFamilyMapping');
 
 const { getBaselineFamily } = require('../src/config/letterBaselineFamilies');
-const { LETTER_TO_PRIMITIVE } = require('../src/config/letterMotorPrimitives');
+const { LETTER_TO_PRIMITIVE } = require('../src/data/letterMotorPrimitives');
 
 // NOTE: letterMotorPrimitives.js's own `PRIMITIVE_GROUPS` export maps
 // group-name -> array-of-letters (not group-name -> group-name string), so

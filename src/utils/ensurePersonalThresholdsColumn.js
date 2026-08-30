@@ -32,9 +32,16 @@ const logger = require('./logger');
 // (`.catch(err => logger.error(...))`), not this function silently
 // swallowing it.
 async function ensurePersonalThresholdsColumn(sequelize) {
+  // logging: false — this probe runs on a 60s interval (see index.js), and
+  // config/database.js sends every query to logger.debug, so leaving it on
+  // prints this same SELECT once a minute for the life of the process and
+  // buries everything else in the log. Only the REPAIR below is news, and it
+  // logs at warn level either side of the addColumn. A failure still surfaces:
+  // this function does not catch, so index.js's own .catch logs it.
   const [[info]] = await sequelize.query(
     `SELECT count(*) AS has_col FROM information_schema.columns
-      WHERE table_name='students' AND column_name='personal_thresholds'`
+      WHERE table_name='students' AND column_name='personal_thresholds'`,
+    { logging: false },
   );
   if (Number(info.has_col) === 0) {
     logger.warn('students.personal_thresholds missing — re-adding it (likely dropped by another dev\'s sync against this shared DB)');

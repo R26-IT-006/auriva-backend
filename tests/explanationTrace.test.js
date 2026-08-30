@@ -13,7 +13,7 @@ const {
   buildThresholdDecisionTrace, buildExplanation, BASIS,
 } = require('../src/services/explanationTrace');
 const { analyzeMotorDifficulty, buildConditionTraces } = require('../src/services/explainabilityService');
-const DIFFICULTY_RULES = require('../src/services/difficultyRules');
+const DIFFICULTY_RULES = require('../src/data/difficultyRules');
 const { REQUIRED_MET_COUNT, RECENT_FAMILY_WINDOW_SIZE, THRESHOLD_INCREASE_STEP } =
   require('../src/services/dynamicThresholdService');
 
