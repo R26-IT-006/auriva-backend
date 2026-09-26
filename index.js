@@ -19,6 +19,11 @@ const phonemeGopService = require('./src/services/phonemeGopService');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// Behind nginx in deployment, every request arrives from the proxy's IP. Trust
+// exactly one hop so req.ip is the real client from X-Forwarded-For — otherwise
+// express-rate-limit below would put every tablet in a single shared bucket.
+app.set('trust proxy', 1);
+
 // ─── Process-level safety nets ─────────────────────────────────────────────────
 // Without these, a rejection escaping request scope (e.g. inside a subprocess
 // 'exit' handler) or any uncaught exception crashes the whole server, ending
