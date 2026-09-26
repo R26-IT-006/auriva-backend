@@ -1,10 +1,18 @@
 'use strict';
 
-const blobServiceClient = require('../config/azureBlob');
 const path = require('path');
 
 const CONTAINER = process.env.AZURE_BLOB_CONTAINER;
 const ACCOUNT   = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+let blobServiceClient;
+
+function getBlobServiceClient() {
+  if (!blobServiceClient) {
+    blobServiceClient = require('../config/azureBlob');
+  }
+
+  return blobServiceClient;
+}
 
 /**
  * Upload a buffer to Azure Blob Storage.
@@ -14,7 +22,7 @@ const ACCOUNT   = process.env.AZURE_STORAGE_ACCOUNT_NAME;
  * @returns {Promise<string>} Public URL of the uploaded blob
  */
 async function uploadBuffer(buffer, blobPath, mimeType) {
-  const containerClient = blobServiceClient.getContainerClient(CONTAINER);
+  const containerClient = getBlobServiceClient().getContainerClient(CONTAINER);
   const blockBlobClient = containerClient.getBlockBlobClient(blobPath);
 
   await blockBlobClient.uploadData(buffer, {
@@ -30,7 +38,7 @@ async function uploadBuffer(buffer, blobPath, mimeType) {
  */
 async function deleteBlob(blobPath) {
   if (!blobPath) return;
-  const containerClient = blobServiceClient.getContainerClient(CONTAINER);
+  const containerClient = getBlobServiceClient().getContainerClient(CONTAINER);
   const blockBlobClient = containerClient.getBlockBlobClient(blobPath);
   await blockBlobClient.deleteIfExists();
 }

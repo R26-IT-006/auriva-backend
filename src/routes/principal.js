@@ -417,7 +417,7 @@ router.delete('/students/:id', ctrl.deleteStudent);
  *     summary: Assign or unassign a student to a teacher
  *     description: >
  *       Pass `teacher_id` as an integer to assign, or `null` to unassign.
- *       A teacher can have at most 3 students — the request is rejected if
+ *       A teacher can have at most 5 students — the request is rejected if
  *       the target teacher is already at capacity.
  *     tags: [Principal]
  *     security:
@@ -443,7 +443,7 @@ router.delete('/students/:id', ctrl.deleteStudent);
  *             schema:
  *               $ref: '#/components/schemas/Student'
  *       400:
- *         description: Teacher already has 3 students
+ *         description: Teacher already has 5 students
  *         content:
  *           application/json:
  *             schema:

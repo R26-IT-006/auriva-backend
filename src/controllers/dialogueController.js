@@ -1,0 +1,197 @@
+'use strict';
+
+const { validationResult } = require('express-validator');
+const dialogueService      = require('../services/dialogueService');
+const trajectoryService    = require('../services/trajectoryService');
+const dialogueAnalyticsService = require('../services/dialogueAnalyticsService');
+const ApiError             = require('../utils/ApiError');
+
+async function getLevel1Overview(req, res) {
+  const data = await dialogueService.getLevel1Overview(req.user.id, req.params.studentId);
+  res.json(data);
+}
+
+async function getNextWord(req, res) {
+  const { category, exclude_word_id, session_passed, status } = req.query;
+  const word = await dialogueService.getNextWord(req.user.id, req.params.studentId, {
+    category:        category        ?? null,
+    exclude_word_id: exclude_word_id ?? null,
+    session_passed:  session_passed === 'true' ? true : session_passed === 'false' ? false : null,
+    status:          status          ?? null,
+  });
+  res.json(word ?? { done: true });
+}
+
+async function getWordById(req, res) {
+  const word = await dialogueService.getWordById(req.params.wordId);
+  res.json(word);
+}
+
+async function recordPhase1Exposure(req, res) {
+  const result = await dialogueService.recordPhase1Exposure(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId
+  );
+  res.json(result);
+}
+
+async function recordPhase1Gate(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await dialogueService.recordPhase1Gate(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId,
+    req.body.gate_passed
+  );
+  res.json(result);
+}
+
+async function assessPhase2Speech(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await dialogueService.assessPhase2Speech(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId,
+    req.body
+  );
+  res.json(result);
+}
+
+async function recordNonVerbalResult(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await dialogueService.recordNonVerbalResult(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId,
+    req.body
+  );
+  res.json(result);
+}
+
+async function recordPhase3Scenario(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await dialogueService.recordPhase3Scenario(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId,
+    req.body
+  );
+  res.json(result);
+}
+
+async function recordPhase3Result(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await dialogueService.recordPhase3Result(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId,
+    req.body
+  );
+  res.json(result);
+}
+
+async function getProbeCandidate(req, res) {
+  const { category } = req.query;
+  const word = await dialogueService.getProbeCandidate(
+    req.user.id,
+    req.params.studentId,
+    category ?? null
+  );
+  res.json(word ?? { done: true });
+}
+
+async function recordProbeResult(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw new ApiError(422, 'Validation failed', errors.array());
+
+  const result = await dialogueService.recordProbeResult(
+    req.user.id,
+    req.params.studentId,
+    req.params.wordId,
+    req.body
+  );
+  res.json(result);
+}
+
+async function getTrajectory(req, res) {
+  const trajectory = await trajectoryService.getTrajectoryPrediction(
+    req.params.studentId,
+    req.params.wordId
+  );
+  res.json({ trajectory });
+}
+
+// TASK-43 — XAI teacher reports. Same auth treatment as getTrajectory above
+// (verifyToken + isTeacher at router level). Read-only: neither handler changes
+// what any trajectory is, only surfaces why it is what it is.
+async function getTrajectoryExplanation(req, res) {
+  const result = await trajectoryService.getTrajectoryExplanation(
+    req.params.studentId,
+    req.params.wordId
+  );
+  res.json(result);
+}
+
+// The batch report the Trajectory Report screen calls — every in-scope dialogue
+// word for the student in one request, plus overview totals.
+async function getTrajectoryReport(req, res) {
+  const report = await trajectoryService.getTrajectoryReport(req.params.studentId);
+  res.json(report);
+}
+
+// TASK-47 — practice-trend timelines. Read-only aggregation of attempts already
+// recorded; neither handler touches mastery Rules 1-3.
+async function getDialogueTimeline(req, res) {
+  const data = await dialogueAnalyticsService.getModuleTimeline(
+    req.params.studentId,
+    req.query.days ?? 90
+  );
+  res.json(data);
+}
+
+async function getWordTimeline(req, res) {
+  const data = await dialogueAnalyticsService.getWordTimeline(
+    req.params.studentId,
+    req.params.wordId
+  );
+  res.json(data);
+}
+
+// TASK-12 — Non-Verbal Adaptive Wait-Time Escalation
+// Same auth middleware as all sibling routes (verifyToken + isTeacher applied at
+// router level). No assertStudentBelongsToTeacher here — mirrors getTrajectory pattern.
+async function getDailySpeechState(req, res) {
+  const state = await dialogueService.getDailySpeechState(req.params.studentId);
+  res.json(state);
+}
+
+module.exports = {
+  getLevel1Overview,
+  getNextWord,
+  getWordById,
+  recordPhase1Exposure,
+  recordPhase1Gate,
+  assessPhase2Speech,
+  recordNonVerbalResult,
+  recordPhase3Scenario,
+  recordPhase3Result,
+  getProbeCandidate,
+  recordProbeResult,
+  getTrajectory,
+  getTrajectoryExplanation,
+  getTrajectoryReport,
+  getDialogueTimeline,
+  getWordTimeline,
+  getDailySpeechState,
+};

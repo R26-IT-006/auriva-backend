@@ -1,0 +1,57 @@
+{
+  "_comment": "TASK-19 §PET-SENTENCES — verbatim curriculum content per closed six-animal set (R-16). Sentence index 2 (1-based) is the only entry with a {pet_name} placeholder; sentences 1/3/4/5 are fixed per-animal content, never derived by template rule.",
+  "cat": {
+    "sentences": [
+      "My pet is a cat.",
+      "My cat's name is {pet_name}.",
+      "My cat says meow.",
+      "My cat is orange.",
+      "I like my cat because it is soft."
+    ]
+  },
+  "dog": {
+    "sentences": [
+      "My pet is a dog.",
+      "My dog's name is {pet_name}.",
+      "My dog says woof.",
+      "My dog is brown.",
+      "I like my dog because it is fun."
+    ]
+  },
+  "cow": {
+    "sentences": [
+      "My pet is a cow.",
+      "My cow's name is {pet_name}.",
+      "My cow says moo.",
+      "My cow is white.",
+      "I like my cow because it is gentle."
+    ]
+  },
+  "fish": {
+    "sentences": [
+      "My pet is a fish.",
+      "My fish's name is {pet_name}.",
+      "My fish swims.",
+      "My fish is orange.",
+      "I like my fish because it is pretty."
+    ]
+  },
+  "parrot": {
+    "sentences": [
+      "My pet is a parrot.",
+      "My parrot's name is {pet_name}.",
+      "My parrot says hello.",
+      "My parrot is green.",
+      "I like my parrot because it is clever."
+    ]
+  },
+  "rabbit": {
+    "sentences": [
+      "My pet is a rabbit.",
+      "My rabbit's name is {pet_name}.",
+      "My rabbit hops.",
+      "My rabbit is white.",
+      "I like my rabbit because it is cute."
+    ]
+  }
+}

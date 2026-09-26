@@ -1,0 +1,30 @@
+{
+  "_comment": "Per-district TTS voice routing for Level 2 hometown sentences. null = Bucket A (internationally established anglicized name, stay on en-GB-SoniaNeural, speak English text as-is). A string value = Bucket B (everyday local name, no separate anglicized form — switch to si-LK-ThiliniNeural/SameeraNeural and speak this Sinhala-script spelling instead of the English text). This is a first-pass classification from general knowledge, not native-speaker-verified — correct entries directly here after listening tests, no code change needed for data corrections. CAUTION: Kandy and Batticaloa have DIFFERENT traditional Sinhala names (Maha Nuwara / Madakalapuwa) that must never be used as their entries here — that would substitute a different word, not fix pronunciation. Keys must exactly match auriva-frontend/src/constants/sriLankaDistricts.js (TASK-16).",
+
+  "Colombo":       null,
+  "Kandy":         null,
+  "Galle":         null,
+  "Jaffna":        null,
+  "Trincomalee":   null,
+  "Nuwara Eliya":  null,
+  "Anuradhapura":  null,
+  "Polonnaruwa":   null,
+
+  "Gampaha":       "ගම්පහ",
+  "Kalutara":      "කළුතර",
+  "Matale":        "මාතලේ",
+  "Matara":        "මාතර",
+  "Hambantota":    "හම්බන්තොට",
+  "Kilinochchi":   "කිලිනොච්චිය",
+  "Mannar":        "මන්නාරම",
+  "Vavuniya":      "වවුනියාව",
+  "Mullaitivu":    "මුලතිව්",
+  "Batticaloa":    "බැටිකලෝවා",
+  "Ampara":        "අම්පාර",
+  "Kurunegala":    "කුරුණෑගල",
+  "Puttalam":      "පුත්තලම",
+  "Badulla":       "බදුල්ල",
+  "Monaragala":    "මොණරාගල",
+  "Ratnapura":     "රත්නපුර",
+  "Kegalle":       "කෑගල්ල"
+}

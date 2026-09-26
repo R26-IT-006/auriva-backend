@@ -1,0 +1,21 @@
+-- Adds 'describe_friend' and 'describe_pet' to the Level 2 SESSION topic
+-- enum (TASK-31). This is a DIFFERENT enum from FSD-L2-TOPICS-001's
+-- enum_level2_topic_progress_topic (that one backs Level2TopicProgress's
+-- mastery-tracking rows; this one backs Level2Session's per-session topic
+-- column) — confirmed as two independent enums by reading Level2Session.js
+-- (tableName 'level2_sessions', column 'topic') separately from
+-- Level2TopicProgress.js, per this task's explicit instruction not to
+-- assume this name from TASK-19's secondhand observation of the other enum.
+--
+-- Enum type name: enum_level2_sessions_topic. NOT verified live in this
+-- session (no DB connection available in this sandbox, per hard rule 12) —
+-- this is Sequelize's documented default naming convention
+-- (enum_<tableName>_<columnName>) applied to Level2Session.js's
+-- tableName: 'level2_sessions' + column 'topic', which produces exactly
+-- this name. No migration in this repo created this table's enum (predates
+-- the migration-discipline convention, built via sync()), so there is no
+-- other migration to cross-check the name against. Flagged in STATE.md for
+-- the human to confirm via a live query before running (see suggested query
+-- there), same discipline TASK-19 used for the sibling enum.
+ALTER TYPE "enum_level2_sessions_topic" ADD VALUE IF NOT EXISTS 'describe_friend';
+ALTER TYPE "enum_level2_sessions_topic" ADD VALUE IF NOT EXISTS 'describe_pet';

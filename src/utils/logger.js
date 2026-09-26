@@ -31,6 +31,10 @@ if (process.env.NODE_ENV !== 'production') {
       ),
     })
   );
+} else {
+  // In a container, stdout is what `docker logs` collects and rotates — without
+  // this, production output only ever reaches the files above.
+  logger.add(new transports.Console());
 }
 
 module.exports = logger;

@@ -1,0 +1,4542 @@
+{
+ "version": 1,
+ "size": 93,
+ "informative": {
+  "visual": [
+   "animals",
+   "classroom",
+   "colors",
+   "fruits",
+   "house",
+   "household",
+   "professionals"
+  ],
+  "phonetic": [
+   "animals",
+   "classroom",
+   "colors",
+   "fruits",
+   "house",
+   "household",
+   "numbers",
+   "professionals",
+   "shapes"
+  ]
+ },
+ "concepts": {
+  "fruits/apple": {
+   "visual": [
+    {
+     "key": "cherry",
+     "score": 0.8769
+    },
+    {
+     "key": "mango",
+     "score": 0.8671
+    },
+    {
+     "key": "grapes",
+     "score": 0.8457
+    },
+    {
+     "key": "papaya",
+     "score": 0.7715
+    },
+    {
+     "key": "pineapple",
+     "score": 0.7516
+    },
+    {
+     "key": "banana",
+     "score": 0.7426
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "papaya",
+     "score": 0.2922
+    },
+    {
+     "key": "pineapple",
+     "score": 0.1945
+    },
+    {
+     "key": "banana",
+     "score": 0.1759
+    },
+    {
+     "key": "orange",
+     "score": 0.0848
+    },
+    {
+     "key": "guava",
+     "score": 0.0704
+    },
+    {
+     "key": "grapes",
+     "score": 0.0621
+    }
+   ]
+  },
+  "fruits/banana": {
+   "visual": [
+    {
+     "key": "passion",
+     "score": 0.9881
+    },
+    {
+     "key": "orange",
+     "score": 0.94
+    },
+    {
+     "key": "pineapple",
+     "score": 0.9258
+    },
+    {
+     "key": "papaya",
+     "score": 0.9111
+    },
+    {
+     "key": "mango",
+     "score": 0.8206
+    },
+    {
+     "key": "apple",
+     "score": 0.7426
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "papaya",
+     "score": 0.2428
+    },
+    {
+     "key": "apple",
+     "score": 0.1759
+    },
+    {
+     "key": "orange",
+     "score": 0.1317
+    },
+    {
+     "key": "mango",
+     "score": 0.0792
+    },
+    {
+     "key": "pineapple",
+     "score": 0.0773
+    },
+    {
+     "key": "cherry",
+     "score": 0.0647
+    }
+   ]
+  },
+  "fruits/cherry": {
+   "visual": [
+    {
+     "key": "apple",
+     "score": 0.8769
+    },
+    {
+     "key": "grapes",
+     "score": 0.8132
+    },
+    {
+     "key": "guava",
+     "score": 0.7497
+    },
+    {
+     "key": "mango",
+     "score": 0.7278
+    },
+    {
+     "key": "banana",
+     "score": 0.6912
+    },
+    {
+     "key": "watermelon",
+     "score": 0.6894
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "grapes",
+     "score": 0.1633
+    },
+    {
+     "key": "guava",
+     "score": 0.0704
+    },
+    {
+     "key": "banana",
+     "score": 0.0647
+    },
+    {
+     "key": "watermelon",
+     "score": 0.0509
+    },
+    {
+     "key": "passion",
+     "score": 0.0262
+    },
+    {
+     "key": "orange",
+     "score": 0.0189
+    }
+   ]
+  },
+  "fruits/grapes": {
+   "visual": [
+    {
+     "key": "mango",
+     "score": 0.8591
+    },
+    {
+     "key": "apple",
+     "score": 0.8457
+    },
+    {
+     "key": "cherry",
+     "score": 0.8132
+    },
+    {
+     "key": "orange",
+     "score": 0.7777
+    },
+    {
+     "key": "papaya",
+     "score": 0.7644
+    },
+    {
+     "key": "watermelon",
+     "score": 0.7527
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "cherry",
+     "score": 0.1633
+    },
+    {
+     "key": "orange",
+     "score": 0.0933
+    },
+    {
+     "key": "papaya",
+     "score": 0.0681
+    },
+    {
+     "key": "apple",
+     "score": 0.0621
+    },
+    {
+     "key": "pineapple",
+     "score": 0.0537
+    },
+    {
+     "key": "guava",
+     "score": 0.0533
+    }
+   ]
+  },
+  "fruits/guava": {
+   "visual": [
+    {
+     "key": "cherry",
+     "score": 0.7497
+    },
+    {
+     "key": "watermelon",
+     "score": 0.7093
+    },
+    {
+     "key": "banana",
+     "score": 0.7046
+    },
+    {
+     "key": "pineapple",
+     "score": 0.7014
+    },
+    {
+     "key": "apple",
+     "score": 0.6939
+    },
+    {
+     "key": "papaya",
+     "score": 0.6937
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "papaya",
+     "score": 0.0916
+    },
+    {
+     "key": "cherry",
+     "score": 0.0704
+    },
+    {
+     "key": "apple",
+     "score": 0.0704
+    },
+    {
+     "key": "grapes",
+     "score": 0.0533
+    },
+    {
+     "key": "banana",
+     "score": 0.0423
+    },
+    {
+     "key": "passion",
+     "score": 0.0271
+    }
+   ]
+  },
+  "fruits/mango": {
+   "visual": [
+    {
+     "key": "papaya",
+     "score": 0.9209
+    },
+    {
+     "key": "orange",
+     "score": 0.8989
+    },
+    {
+     "key": "apple",
+     "score": 0.8671
+    },
+    {
+     "key": "grapes",
+     "score": 0.8591
+    },
+    {
+     "key": "pineapple",
+     "score": 0.8587
+    },
+    {
+     "key": "banana",
+     "score": 0.8206
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "orange",
+     "score": 0.1509
+    },
+    {
+     "key": "banana",
+     "score": 0.0792
+    },
+    {
+     "key": "pineapple",
+     "score": 0.0393
+    },
+    {
+     "key": "grapes",
+     "score": 0.0266
+    },
+    {
+     "key": "papaya",
+     "score": 0.0266
+    },
+    {
+     "key": "watermelon",
+     "score": 0.0247
+    }
+   ]
+  },
+  "fruits/orange": {
+   "visual": [
+    {
+     "key": "papaya",
+     "score": 0.9519
+    },
+    {
+     "key": "banana",
+     "score": 0.94
+    },
+    {
+     "key": "passion",
+     "score": 0.9243
+    },
+    {
+     "key": "pineapple",
+     "score": 0.9141
+    },
+    {
+     "key": "mango",
+     "score": 0.8989
+    },
+    {
+     "key": "grapes",
+     "score": 0.7777
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "mango",
+     "score": 0.1509
+    },
+    {
+     "key": "banana",
+     "score": 0.1317
+    },
+    {
+     "key": "grapes",
+     "score": 0.0933
+    },
+    {
+     "key": "apple",
+     "score": 0.0848
+    },
+    {
+     "key": "watermelon",
+     "score": 0.0786
+    },
+    {
+     "key": "pineapple",
+     "score": 0.071
+    }
+   ]
+  },
+  "fruits/papaya": {
+   "visual": [
+    {
+     "key": "orange",
+     "score": 0.9519
+    },
+    {
+     "key": "pineapple",
+     "score": 0.9464
+    },
+    {
+     "key": "mango",
+     "score": 0.9209
+    },
+    {
+     "key": "banana",
+     "score": 0.9111
+    },
+    {
+     "key": "passion",
+     "score": 0.8905
+    },
+    {
+     "key": "apple",
+     "score": 0.7715
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "apple",
+     "score": 0.2922
+    },
+    {
+     "key": "banana",
+     "score": 0.2428
+    },
+    {
+     "key": "passion",
+     "score": 0.1193
+    },
+    {
+     "key": "pineapple",
+     "score": 0.1144
+    },
+    {
+     "key": "guava",
+     "score": 0.0916
+    },
+    {
+     "key": "grapes",
+     "score": 0.0681
+    }
+   ]
+  },
+  "fruits/passion": {
+   "visual": [
+    {
+     "key": "banana",
+     "score": 0.9881
+    },
+    {
+     "key": "orange",
+     "score": 0.9243
+    },
+    {
+     "key": "pineapple",
+     "score": 0.8937
+    },
+    {
+     "key": "papaya",
+     "score": 0.8905
+    },
+    {
+     "key": "mango",
+     "score": 0.8195
+    },
+    {
+     "key": "apple",
+     "score": 0.7289
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "pineapple",
+     "score": 0.1249
+    },
+    {
+     "key": "papaya",
+     "score": 0.1193
+    },
+    {
+     "key": "banana",
+     "score": 0.055
+    },
+    {
+     "key": "guava",
+     "score": 0.0271
+    },
+    {
+     "key": "orange",
+     "score": 0.0266
+    },
+    {
+     "key": "watermelon",
+     "score": 0.0264
+    }
+   ]
+  },
+  "fruits/pineapple": {
+   "visual": [
+    {
+     "key": "papaya",
+     "score": 0.9464
+    },
+    {
+     "key": "banana",
+     "score": 0.9258
+    },
+    {
+     "key": "orange",
+     "score": 0.9141
+    },
+    {
+     "key": "passion",
+     "score": 0.8937
+    },
+    {
+     "key": "mango",
+     "score": 0.8587
+    },
+    {
+     "key": "watermelon",
+     "score": 0.7807
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "apple",
+     "score": 0.1945
+    },
+    {
+     "key": "passion",
+     "score": 0.1249
+    },
+    {
+     "key": "papaya",
+     "score": 0.1144
+    },
+    {
+     "key": "banana",
+     "score": 0.0773
+    },
+    {
+     "key": "orange",
+     "score": 0.071
+    },
+    {
+     "key": "grapes",
+     "score": 0.0537
+    }
+   ]
+  },
+  "fruits/watermelon": {
+   "visual": [
+    {
+     "key": "mango",
+     "score": 0.7813
+    },
+    {
+     "key": "pineapple",
+     "score": 0.7807
+    },
+    {
+     "key": "grapes",
+     "score": 0.7527
+    },
+    {
+     "key": "orange",
+     "score": 0.7294
+    },
+    {
+     "key": "banana",
+     "score": 0.7286
+    },
+    {
+     "key": "apple",
+     "score": 0.7262
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "orange",
+     "score": 0.0786
+    },
+    {
+     "key": "banana",
+     "score": 0.0641
+    },
+    {
+     "key": "cherry",
+     "score": 0.0509
+    },
+    {
+     "key": "pineapple",
+     "score": 0.0332
+    },
+    {
+     "key": "passion",
+     "score": 0.0264
+    },
+    {
+     "key": "mango",
+     "score": 0.0247
+    }
+   ]
+  },
+  "professionals/baker": {
+   "visual": [
+    {
+     "key": "carpenter",
+     "score": 0.9313
+    },
+    {
+     "key": "teacher",
+     "score": 0.9264
+    },
+    {
+     "key": "principal",
+     "score": 0.9202
+    },
+    {
+     "key": "farmer",
+     "score": 0.8935
+    },
+    {
+     "key": "cashier",
+     "score": 0.8819
+    },
+    {
+     "key": "nurse",
+     "score": 0.8507
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "cashier",
+     "score": 0.1559
+    },
+    {
+     "key": "teacher",
+     "score": 0.1251
+    },
+    {
+     "key": "farmer",
+     "score": 0.1154
+    },
+    {
+     "key": "carpenter",
+     "score": 0.0652
+    },
+    {
+     "key": "doctor",
+     "score": 0.0535
+    },
+    {
+     "key": "principal",
+     "score": 0.023
+    }
+   ]
+  },
+  "professionals/carpenter": {
+   "visual": [
+    {
+     "key": "farmer",
+     "score": 0.9321
+    },
+    {
+     "key": "baker",
+     "score": 0.9313
+    },
+    {
+     "key": "cashier",
+     "score": 0.9275
+    },
+    {
+     "key": "teacher",
+     "score": 0.9149
+    },
+    {
+     "key": "principal",
+     "score": 0.8767
+    },
+    {
+     "key": "doctor",
+     "score": 0.8434
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "teacher",
+     "score": 0.2215
+    },
+    {
+     "key": "farmer",
+     "score": 0.1569
+    },
+    {
+     "key": "cashier",
+     "score": 0.1302
+    },
+    {
+     "key": "doctor",
+     "score": 0.1125
+    },
+    {
+     "key": "baker",
+     "score": 0.0652
+    },
+    {
+     "key": "principal",
+     "score": 0.046
+    }
+   ]
+  },
+  "professionals/cashier": {
+   "visual": [
+    {
+     "key": "teacher",
+     "score": 0.9449
+    },
+    {
+     "key": "principal",
+     "score": 0.9432
+    },
+    {
+     "key": "carpenter",
+     "score": 0.9275
+    },
+    {
+     "key": "farmer",
+     "score": 0.9156
+    },
+    {
+     "key": "baker",
+     "score": 0.8819
+    },
+    {
+     "key": "nurse",
+     "score": 0.8009
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "teacher",
+     "score": 0.1779
+    },
+    {
+     "key": "baker",
+     "score": 0.1559
+    },
+    {
+     "key": "carpenter",
+     "score": 0.1302
+    },
+    {
+     "key": "farmer",
+     "score": 0.118
+    },
+    {
+     "key": "doctor",
+     "score": 0.0935
+    },
+    {
+     "key": "principal",
+     "score": 0.0715
+    }
+   ]
+  },
+  "professionals/doctor": {
+   "visual": [
+    {
+     "key": "farmer",
+     "score": 0.8489
+    },
+    {
+     "key": "carpenter",
+     "score": 0.8434
+    },
+    {
+     "key": "baker",
+     "score": 0.8214
+    },
+    {
+     "key": "nurse",
+     "score": 0.8185
+    },
+    {
+     "key": "principal",
+     "score": 0.7668
+    },
+    {
+     "key": "cashier",
+     "score": 0.7616
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "teacher",
+     "score": 0.305
+    },
+    {
+     "key": "farmer",
+     "score": 0.1584
+    },
+    {
+     "key": "carpenter",
+     "score": 0.1125
+    },
+    {
+     "key": "cashier",
+     "score": 0.0935
+    },
+    {
+     "key": "principal",
+     "score": 0.0775
+    },
+    {
+     "key": "nurse",
+     "score": 0.0538
+    }
+   ]
+  },
+  "professionals/farmer": {
+   "visual": [
+    {
+     "key": "carpenter",
+     "score": 0.9321
+    },
+    {
+     "key": "teacher",
+     "score": 0.9207
+    },
+    {
+     "key": "cashier",
+     "score": 0.9156
+    },
+    {
+     "key": "baker",
+     "score": 0.8935
+    },
+    {
+     "key": "principal",
+     "score": 0.8526
+    },
+    {
+     "key": "doctor",
+     "score": 0.8489
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "teacher",
+     "score": 0.2865
+    },
+    {
+     "key": "nurse",
+     "score": 0.2181
+    },
+    {
+     "key": "doctor",
+     "score": 0.1584
+    },
+    {
+     "key": "carpenter",
+     "score": 0.1569
+    },
+    {
+     "key": "cashier",
+     "score": 0.118
+    },
+    {
+     "key": "baker",
+     "score": 0.1154
+    }
+   ]
+  },
+  "professionals/nurse": {
+   "visual": [
+    {
+     "key": "baker",
+     "score": 0.8507
+    },
+    {
+     "key": "carpenter",
+     "score": 0.8397
+    },
+    {
+     "key": "principal",
+     "score": 0.8349
+    },
+    {
+     "key": "teacher",
+     "score": 0.8211
+    },
+    {
+     "key": "doctor",
+     "score": 0.8185
+    },
+    {
+     "key": "cashier",
+     "score": 0.8009
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "farmer",
+     "score": 0.2181
+    },
+    {
+     "key": "doctor",
+     "score": 0.0538
+    },
+    {
+     "key": "teacher",
+     "score": 0.0532
+    },
+    {
+     "key": "cashier",
+     "score": 0.0386
+    },
+    {
+     "key": "principal",
+     "score": 0.0375
+    },
+    {
+     "key": "carpenter",
+     "score": 0.029
+    }
+   ]
+  },
+  "professionals/principal": {
+   "visual": [
+    {
+     "key": "teacher",
+     "score": 0.9486
+    },
+    {
+     "key": "cashier",
+     "score": 0.9432
+    },
+    {
+     "key": "baker",
+     "score": 0.9202
+    },
+    {
+     "key": "carpenter",
+     "score": 0.8767
+    },
+    {
+     "key": "farmer",
+     "score": 0.8526
+    },
+    {
+     "key": "nurse",
+     "score": 0.8349
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "doctor",
+     "score": 0.0775
+    },
+    {
+     "key": "cashier",
+     "score": 0.0715
+    },
+    {
+     "key": "teacher",
+     "score": 0.0462
+    },
+    {
+     "key": "carpenter",
+     "score": 0.046
+    },
+    {
+     "key": "nurse",
+     "score": 0.0375
+    },
+    {
+     "key": "farmer",
+     "score": 0.036
+    }
+   ]
+  },
+  "professionals/teacher": {
+   "visual": [
+    {
+     "key": "principal",
+     "score": 0.9486
+    },
+    {
+     "key": "cashier",
+     "score": 0.9449
+    },
+    {
+     "key": "baker",
+     "score": 0.9264
+    },
+    {
+     "key": "farmer",
+     "score": 0.9207
+    },
+    {
+     "key": "carpenter",
+     "score": 0.9149
+    },
+    {
+     "key": "nurse",
+     "score": 0.8211
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "doctor",
+     "score": 0.305
+    },
+    {
+     "key": "farmer",
+     "score": 0.2865
+    },
+    {
+     "key": "carpenter",
+     "score": 0.2215
+    },
+    {
+     "key": "cashier",
+     "score": 0.1779
+    },
+    {
+     "key": "baker",
+     "score": 0.1251
+    },
+    {
+     "key": "nurse",
+     "score": 0.0532
+    }
+   ]
+  },
+  "animals/ant": {
+   "visual": [
+    {
+     "key": "sparrow",
+     "score": 0.9291
+    },
+    {
+     "key": "dog",
+     "score": 0.9242
+    },
+    {
+     "key": "cat",
+     "score": 0.919
+    },
+    {
+     "key": "snake",
+     "score": 0.88
+    },
+    {
+     "key": "rabbit",
+     "score": 0.8787
+    },
+    {
+     "key": "cock",
+     "score": 0.8666
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "elephant",
+     "score": 0.368
+    },
+    {
+     "key": "tiger",
+     "score": 0.3467
+    },
+    {
+     "key": "snake",
+     "score": 0.2004
+    },
+    {
+     "key": "butterfly",
+     "score": 0.1846
+    },
+    {
+     "key": "lion",
+     "score": 0.1733
+    },
+    {
+     "key": "horse",
+     "score": 0.1733
+    }
+   ]
+  },
+  "animals/bull": {
+   "visual": [
+    {
+     "key": "horse",
+     "score": 0.9759
+    },
+    {
+     "key": "lion",
+     "score": 0.9635
+    },
+    {
+     "key": "sparrow",
+     "score": 0.9488
+    },
+    {
+     "key": "dog",
+     "score": 0.9371
+    },
+    {
+     "key": "snake",
+     "score": 0.9358
+    },
+    {
+     "key": "goat",
+     "score": 0.9312
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "owl",
+     "score": 0.1927
+    },
+    {
+     "key": "cow",
+     "score": 0.1625
+    },
+    {
+     "key": "butterfly",
+     "score": 0.1486
+    },
+    {
+     "key": "parrot",
+     "score": 0.1163
+    },
+    {
+     "key": "peacock",
+     "score": 0.1163
+    },
+    {
+     "key": "rabbit",
+     "score": 0.1051
+    }
+   ]
+  },
+  "animals/butterfly": {
+   "visual": [
+    {
+     "key": "cock",
+     "score": 0.872
+    },
+    {
+     "key": "goat",
+     "score": 0.8543
+    },
+    {
+     "key": "horse",
+     "score": 0.8462
+    },
+    {
+     "key": "bull",
+     "score": 0.8314
+    },
+    {
+     "key": "sparrow",
+     "score": 0.8064
+    },
+    {
+     "key": "crow",
+     "score": 0.7926
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "snake",
+     "score": 0.242
+    },
+    {
+     "key": "lion",
+     "score": 0.2275
+    },
+    {
+     "key": "tiger",
+     "score": 0.2241
+    },
+    {
+     "key": "horse",
+     "score": 0.1878
+    },
+    {
+     "key": "ant",
+     "score": 0.1846
+    },
+    {
+     "key": "elephant",
+     "score": 0.1648
+    }
+   ]
+  },
+  "animals/cat": {
+   "visual": [
+    {
+     "key": "dog",
+     "score": 0.9739
+    },
+    {
+     "key": "sparrow",
+     "score": 0.9582
+    },
+    {
+     "key": "snake",
+     "score": 0.9499
+    },
+    {
+     "key": "bull",
+     "score": 0.9246
+    },
+    {
+     "key": "ant",
+     "score": 0.919
+    },
+    {
+     "key": "rabbit",
+     "score": 0.9183
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "dog",
+     "score": 0.2575
+    },
+    {
+     "key": "goat",
+     "score": 0.2527
+    },
+    {
+     "key": "cow",
+     "score": 0.1396
+    },
+    {
+     "key": "rabbit",
+     "score": 0.1225
+    },
+    {
+     "key": "ant",
+     "score": 0.1026
+    },
+    {
+     "key": "butterfly",
+     "score": 0.0997
+    }
+   ]
+  },
+  "animals/caterpillar": {
+   "visual": [
+    {
+     "key": "parrot",
+     "score": 0.8583
+    },
+    {
+     "key": "horse",
+     "score": 0.7286
+    },
+    {
+     "key": "bull",
+     "score": 0.7282
+    },
+    {
+     "key": "snake",
+     "score": 0.7225
+    },
+    {
+     "key": "lion",
+     "score": 0.7193
+    },
+    {
+     "key": "peacock",
+     "score": 0.7171
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "goat",
+     "score": 0.306
+    },
+    {
+     "key": "parrot",
+     "score": 0.2056
+    },
+    {
+     "key": "rabbit",
+     "score": 0.1783
+    },
+    {
+     "key": "butterfly",
+     "score": 0.1325
+    },
+    {
+     "key": "elephant",
+     "score": 0.126
+    },
+    {
+     "key": "crow",
+     "score": 0.1181
+    }
+   ]
+  },
+  "animals/cock": {
+   "visual": [
+    {
+     "key": "goat",
+     "score": 0.9138
+    },
+    {
+     "key": "horse",
+     "score": 0.9075
+    },
+    {
+     "key": "sparrow",
+     "score": 0.8788
+    },
+    {
+     "key": "bull",
+     "score": 0.8771
+    },
+    {
+     "key": "butterfly",
+     "score": 0.872
+    },
+    {
+     "key": "ant",
+     "score": 0.8666
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "peacock",
+     "score": 0.2132
+    },
+    {
+     "key": "crow",
+     "score": 0.1921
+    },
+    {
+     "key": "cow",
+     "score": 0.1806
+    },
+    {
+     "key": "goat",
+     "score": 0.1426
+    },
+    {
+     "key": "hen",
+     "score": 0.129
+    },
+    {
+     "key": "caterpillar",
+     "score": 0.1179
+    }
+   ]
+  },
+  "animals/cow": {
+   "visual": [
+    {
+     "key": "rabbit",
+     "score": 0.94
+    },
+    {
+     "key": "hen",
+     "score": 0.9325
+    },
+    {
+     "key": "owl",
+     "score": 0.9113
+    },
+    {
+     "key": "crow",
+     "score": 0.8884
+    },
+    {
+     "key": "elephant",
+     "score": 0.8587
+    },
+    {
+     "key": "cock",
+     "score": 0.8341
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "horse",
+     "score": 0.2925
+    },
+    {
+     "key": "crow",
+     "score": 0.2324
+    },
+    {
+     "key": "elephant",
+     "score": 0.1993
+    },
+    {
+     "key": "lion",
+     "score": 0.1927
+    },
+    {
+     "key": "owl",
+     "score": 0.1901
+    },
+    {
+     "key": "cock",
+     "score": 0.1806
+    }
+   ]
+  },
+  "animals/crow": {
+   "visual": [
+    {
+     "key": "owl",
+     "score": 0.9125
+    },
+    {
+     "key": "rabbit",
+     "score": 0.903
+    },
+    {
+     "key": "elephant",
+     "score": 0.8913
+    },
+    {
+     "key": "cow",
+     "score": 0.8884
+    },
+    {
+     "key": "ant",
+     "score": 0.8657
+    },
+    {
+     "key": "cat",
+     "score": 0.8419
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "cow",
+     "score": 0.2324
+    },
+    {
+     "key": "owl",
+     "score": 0.1974
+    },
+    {
+     "key": "cock",
+     "score": 0.1921
+    },
+    {
+     "key": "parrot",
+     "score": 0.1484
+    },
+    {
+     "key": "goat",
+     "score": 0.13
+    },
+    {
+     "key": "caterpillar",
+     "score": 0.1181
+    }
+   ]
+  },
+  "animals/dog": {
+   "visual": [
+    {
+     "key": "sparrow",
+     "score": 0.9899
+    },
+    {
+     "key": "cat",
+     "score": 0.9739
+    },
+    {
+     "key": "bull",
+     "score": 0.9371
+    },
+    {
+     "key": "snake",
+     "score": 0.9369
+    },
+    {
+     "key": "lion",
+     "score": 0.9287
+    },
+    {
+     "key": "ant",
+     "score": 0.9242
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "cat",
+     "score": 0.2575
+    },
+    {
+     "key": "elephant",
+     "score": 0.13
+    },
+    {
+     "key": "horse",
+     "score": 0.126
+    },
+    {
+     "key": "cow",
+     "score": 0.1165
+    },
+    {
+     "key": "crow",
+     "score": 0.1029
+    },
+    {
+     "key": "goat",
+     "score": 0.1029
+    }
+   ]
+  },
+  "animals/elephant": {
+   "visual": [
+    {
+     "key": "crow",
+     "score": 0.8913
+    },
+    {
+     "key": "owl",
+     "score": 0.864
+    },
+    {
+     "key": "cow",
+     "score": 0.8587
+    },
+    {
+     "key": "rabbit",
+     "score": 0.8467
+    },
+    {
+     "key": "hen",
+     "score": 0.8153
+    },
+    {
+     "key": "butterfly",
+     "score": 0.7826
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "ant",
+     "score": 0.368
+    },
+    {
+     "key": "tiger",
+     "score": 0.2802
+    },
+    {
+     "key": "horse",
+     "score": 0.2143
+    },
+    {
+     "key": "cow",
+     "score": 0.1993
+    },
+    {
+     "key": "lion",
+     "score": 0.1958
+    },
+    {
+     "key": "snake",
+     "score": 0.1821
+    }
+   ]
+  },
+  "animals/goat": {
+   "visual": [
+    {
+     "key": "horse",
+     "score": 0.9817
+    },
+    {
+     "key": "bull",
+     "score": 0.9312
+    },
+    {
+     "key": "cock",
+     "score": 0.9138
+    },
+    {
+     "key": "sparrow",
+     "score": 0.878
+    },
+    {
+     "key": "butterfly",
+     "score": 0.8543
+    },
+    {
+     "key": "dog",
+     "score": 0.8374
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "caterpillar",
+     "score": 0.306
+    },
+    {
+     "key": "cat",
+     "score": 0.2527
+    },
+    {
+     "key": "parrot",
+     "score": 0.2351
+    },
+    {
+     "key": "rabbit",
+     "score": 0.2231
+    },
+    {
+     "key": "cock",
+     "score": 0.1426
+    },
+    {
+     "key": "horse",
+     "score": 0.1302
+    }
+   ]
+  },
+  "animals/hen": {
+   "visual": [
+    {
+     "key": "cow",
+     "score": 0.9325
+    },
+    {
+     "key": "rabbit",
+     "score": 0.8833
+    },
+    {
+     "key": "tiger",
+     "score": 0.8713
+    },
+    {
+     "key": "owl",
+     "score": 0.828
+    },
+    {
+     "key": "elephant",
+     "score": 0.8153
+    },
+    {
+     "key": "snake",
+     "score": 0.8073
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "sparrow",
+     "score": 0.2493
+    },
+    {
+     "key": "tiger",
+     "score": 0.1733
+    },
+    {
+     "key": "ant",
+     "score": 0.1461
+    },
+    {
+     "key": "cock",
+     "score": 0.129
+    },
+    {
+     "key": "elephant",
+     "score": 0.1271
+    },
+    {
+     "key": "lion",
+     "score": 0.0809
+    }
+   ]
+  },
+  "animals/horse": {
+   "visual": [
+    {
+     "key": "goat",
+     "score": 0.9817
+    },
+    {
+     "key": "bull",
+     "score": 0.9759
+    },
+    {
+     "key": "sparrow",
+     "score": 0.9274
+    },
+    {
+     "key": "cock",
+     "score": 0.9075
+    },
+    {
+     "key": "lion",
+     "score": 0.9034
+    },
+    {
+     "key": "dog",
+     "score": 0.8953
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "cow",
+     "score": 0.2925
+    },
+    {
+     "key": "snake",
+     "score": 0.2625
+    },
+    {
+     "key": "elephant",
+     "score": 0.2143
+    },
+    {
+     "key": "butterfly",
+     "score": 0.1878
+    },
+    {
+     "key": "ant",
+     "score": 0.1733
+    },
+    {
+     "key": "lion",
+     "score": 0.1733
+    }
+   ]
+  },
+  "animals/lion": {
+   "visual": [
+    {
+     "key": "bull",
+     "score": 0.9635
+    },
+    {
+     "key": "snake",
+     "score": 0.946
+    },
+    {
+     "key": "sparrow",
+     "score": 0.9311
+    },
+    {
+     "key": "dog",
+     "score": 0.9287
+    },
+    {
+     "key": "cat",
+     "score": 0.9106
+    },
+    {
+     "key": "horse",
+     "score": 0.9034
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "butterfly",
+     "score": 0.2275
+    },
+    {
+     "key": "snake",
+     "score": 0.2275
+    },
+    {
+     "key": "tiger",
+     "score": 0.2046
+    },
+    {
+     "key": "elephant",
+     "score": 0.1958
+    },
+    {
+     "key": "cow",
+     "score": 0.1927
+    },
+    {
+     "key": "ant",
+     "score": 0.1733
+    }
+   ]
+  },
+  "animals/owl": {
+   "visual": [
+    {
+     "key": "rabbit",
+     "score": 0.9493
+    },
+    {
+     "key": "crow",
+     "score": 0.9125
+    },
+    {
+     "key": "cow",
+     "score": 0.9113
+    },
+    {
+     "key": "cat",
+     "score": 0.9003
+    },
+    {
+     "key": "snake",
+     "score": 0.8676
+    },
+    {
+     "key": "elephant",
+     "score": 0.864
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "crow",
+     "score": 0.1974
+    },
+    {
+     "key": "bull",
+     "score": 0.1927
+    },
+    {
+     "key": "cow",
+     "score": 0.1901
+    },
+    {
+     "key": "dog",
+     "score": 0.0989
+    },
+    {
+     "key": "cock",
+     "score": 0.0921
+    },
+    {
+     "key": "cat",
+     "score": 0.0885
+    }
+   ]
+  },
+  "animals/parrot": {
+   "visual": [
+    {
+     "key": "caterpillar",
+     "score": 0.8583
+    },
+    {
+     "key": "snake",
+     "score": 0.7672
+    },
+    {
+     "key": "horse",
+     "score": 0.7613
+    },
+    {
+     "key": "owl",
+     "score": 0.7598
+    },
+    {
+     "key": "bull",
+     "score": 0.759
+    },
+    {
+     "key": "cock",
+     "score": 0.7537
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "rabbit",
+     "score": 0.2577
+    },
+    {
+     "key": "goat",
+     "score": 0.2351
+    },
+    {
+     "key": "sparrow",
+     "score": 0.2336
+    },
+    {
+     "key": "caterpillar",
+     "score": 0.2056
+    },
+    {
+     "key": "crow",
+     "score": 0.1484
+    },
+    {
+     "key": "cow",
+     "score": 0.1369
+    }
+   ]
+  },
+  "animals/peacock": {
+   "visual": [
+    {
+     "key": "tiger",
+     "score": 0.8518
+    },
+    {
+     "key": "hen",
+     "score": 0.7933
+    },
+    {
+     "key": "cow",
+     "score": 0.7464
+    },
+    {
+     "key": "bull",
+     "score": 0.7421
+    },
+    {
+     "key": "snake",
+     "score": 0.7415
+    },
+    {
+     "key": "parrot",
+     "score": 0.7414
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "cock",
+     "score": 0.2132
+    },
+    {
+     "key": "cow",
+     "score": 0.1195
+    },
+    {
+     "key": "bull",
+     "score": 0.1163
+    },
+    {
+     "key": "parrot",
+     "score": 0.1113
+    },
+    {
+     "key": "tiger",
+     "score": 0.0989
+    },
+    {
+     "key": "butterfly",
+     "score": 0.0989
+    }
+   ]
+  },
+  "animals/rabbit": {
+   "visual": [
+    {
+     "key": "owl",
+     "score": 0.9493
+    },
+    {
+     "key": "cow",
+     "score": 0.94
+    },
+    {
+     "key": "cat",
+     "score": 0.9183
+    },
+    {
+     "key": "crow",
+     "score": 0.903
+    },
+    {
+     "key": "snake",
+     "score": 0.8887
+    },
+    {
+     "key": "hen",
+     "score": 0.8833
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "parrot",
+     "score": 0.2577
+    },
+    {
+     "key": "goat",
+     "score": 0.2231
+    },
+    {
+     "key": "caterpillar",
+     "score": 0.1783
+    },
+    {
+     "key": "cat",
+     "score": 0.1225
+    },
+    {
+     "key": "bull",
+     "score": 0.1051
+    },
+    {
+     "key": "horse",
+     "score": 0.0885
+    }
+   ]
+  },
+  "animals/snake": {
+   "visual": [
+    {
+     "key": "cat",
+     "score": 0.9499
+    },
+    {
+     "key": "lion",
+     "score": 0.946
+    },
+    {
+     "key": "dog",
+     "score": 0.9369
+    },
+    {
+     "key": "bull",
+     "score": 0.9358
+    },
+    {
+     "key": "sparrow",
+     "score": 0.9267
+    },
+    {
+     "key": "rabbit",
+     "score": 0.8887
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "horse",
+     "score": 0.2625
+    },
+    {
+     "key": "butterfly",
+     "score": 0.242
+    },
+    {
+     "key": "lion",
+     "score": 0.2275
+    },
+    {
+     "key": "ant",
+     "score": 0.2004
+    },
+    {
+     "key": "elephant",
+     "score": 0.1821
+    },
+    {
+     "key": "tiger",
+     "score": 0.1733
+    }
+   ]
+  },
+  "animals/sparrow": {
+   "visual": [
+    {
+     "key": "dog",
+     "score": 0.9899
+    },
+    {
+     "key": "cat",
+     "score": 0.9582
+    },
+    {
+     "key": "bull",
+     "score": 0.9488
+    },
+    {
+     "key": "lion",
+     "score": 0.9311
+    },
+    {
+     "key": "ant",
+     "score": 0.9291
+    },
+    {
+     "key": "horse",
+     "score": 0.9274
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "hen",
+     "score": 0.2493
+    },
+    {
+     "key": "parrot",
+     "score": 0.2336
+    },
+    {
+     "key": "tiger",
+     "score": 0.1403
+    },
+    {
+     "key": "ant",
+     "score": 0.1355
+    },
+    {
+     "key": "crow",
+     "score": 0.1155
+    },
+    {
+     "key": "elephant",
+     "score": 0.1154
+    }
+   ]
+  },
+  "animals/tiger": {
+   "visual": [
+    {
+     "key": "hen",
+     "score": 0.8713
+    },
+    {
+     "key": "peacock",
+     "score": 0.8518
+    },
+    {
+     "key": "snake",
+     "score": 0.8316
+    },
+    {
+     "key": "cow",
+     "score": 0.8052
+    },
+    {
+     "key": "lion",
+     "score": 0.8022
+    },
+    {
+     "key": "bull",
+     "score": 0.7968
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "ant",
+     "score": 0.3467
+    },
+    {
+     "key": "elephant",
+     "score": 0.2802
+    },
+    {
+     "key": "butterfly",
+     "score": 0.2241
+    },
+    {
+     "key": "lion",
+     "score": 0.2046
+    },
+    {
+     "key": "snake",
+     "score": 0.1733
+    },
+    {
+     "key": "horse",
+     "score": 0.1733
+    }
+   ]
+  },
+  "house/door": {
+   "visual": [
+    {
+     "key": "roof",
+     "score": 0.9206
+    },
+    {
+     "key": "wall",
+     "score": 0.8246
+    },
+    {
+     "key": "windows",
+     "score": 0.7566
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "roof",
+     "score": 0.1458
+    },
+    {
+     "key": "windows",
+     "score": 0.0672
+    },
+    {
+     "key": "wall",
+     "score": 0.0
+    }
+   ]
+  },
+  "house/roof": {
+   "visual": [
+    {
+     "key": "door",
+     "score": 0.9206
+    },
+    {
+     "key": "windows",
+     "score": 0.6915
+    },
+    {
+     "key": "wall",
+     "score": 0.6597
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "door",
+     "score": 0.1458
+    },
+    {
+     "key": "windows",
+     "score": 0.0631
+    },
+    {
+     "key": "wall",
+     "score": 0.0351
+    }
+   ]
+  },
+  "house/wall": {
+   "visual": [
+    {
+     "key": "door",
+     "score": 0.8246
+    },
+    {
+     "key": "windows",
+     "score": 0.7367
+    },
+    {
+     "key": "roof",
+     "score": 0.6597
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "roof",
+     "score": 0.0351
+    },
+    {
+     "key": "windows",
+     "score": 0.0189
+    },
+    {
+     "key": "door",
+     "score": 0.0
+    }
+   ]
+  },
+  "house/windows": {
+   "visual": [
+    {
+     "key": "door",
+     "score": 0.7566
+    },
+    {
+     "key": "wall",
+     "score": 0.7367
+    },
+    {
+     "key": "roof",
+     "score": 0.6915
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "door",
+     "score": 0.0672
+    },
+    {
+     "key": "roof",
+     "score": 0.0631
+    },
+    {
+     "key": "wall",
+     "score": 0.0189
+    }
+   ]
+  },
+  "numbers/one": {
+   "phonetic": [
+    {
+     "key": "nine",
+     "score": 0.1364
+    },
+    {
+     "key": "two",
+     "score": 0.0885
+    },
+    {
+     "key": "four",
+     "score": 0.0379
+    },
+    {
+     "key": "five",
+     "score": 0.0379
+    },
+    {
+     "key": "seven",
+     "score": 0.0271
+    },
+    {
+     "key": "three",
+     "score": 0.0271
+    }
+   ]
+  },
+  "numbers/two": {
+   "phonetic": [
+    {
+     "key": "ten",
+     "score": 0.1667
+    },
+    {
+     "key": "one",
+     "score": 0.0885
+    },
+    {
+     "key": "three",
+     "score": 0.0271
+    },
+    {
+     "key": "four",
+     "score": 0.0
+    },
+    {
+     "key": "nine",
+     "score": 0.0
+    },
+    {
+     "key": "six",
+     "score": 0.0
+    }
+   ]
+  },
+  "numbers/three": {
+   "phonetic": [
+    {
+     "key": "ten",
+     "score": 0.0542
+    },
+    {
+     "key": "seven",
+     "score": 0.035
+    },
+    {
+     "key": "five",
+     "score": 0.0313
+    },
+    {
+     "key": "nine",
+     "score": 0.0313
+    },
+    {
+     "key": "two",
+     "score": 0.0271
+    },
+    {
+     "key": "one",
+     "score": 0.0271
+    }
+   ]
+  },
+  "numbers/four": {
+   "phonetic": [
+    {
+     "key": "seven",
+     "score": 0.3538
+    },
+    {
+     "key": "six",
+     "score": 0.0885
+    },
+    {
+     "key": "five",
+     "score": 0.0437
+    },
+    {
+     "key": "one",
+     "score": 0.0379
+    },
+    {
+     "key": "eight",
+     "score": 0.0
+    },
+    {
+     "key": "nine",
+     "score": 0.0
+    }
+   ]
+  },
+  "numbers/five": {
+   "phonetic": [
+    {
+     "key": "seven",
+     "score": 0.1073
+    },
+    {
+     "key": "ten",
+     "score": 0.0885
+    },
+    {
+     "key": "nine",
+     "score": 0.0875
+    },
+    {
+     "key": "four",
+     "score": 0.0437
+    },
+    {
+     "key": "six",
+     "score": 0.0379
+    },
+    {
+     "key": "one",
+     "score": 0.0379
+    }
+   ]
+  },
+  "numbers/six": {
+   "phonetic": [
+    {
+     "key": "ten",
+     "score": 0.3538
+    },
+    {
+     "key": "seven",
+     "score": 0.1896
+    },
+    {
+     "key": "nine",
+     "score": 0.1263
+    },
+    {
+     "key": "four",
+     "score": 0.0885
+    },
+    {
+     "key": "five",
+     "score": 0.0379
+    },
+    {
+     "key": "eight",
+     "score": 0.0271
+    }
+   ]
+  },
+  "numbers/seven": {
+   "phonetic": [
+    {
+     "key": "four",
+     "score": 0.3538
+    },
+    {
+     "key": "six",
+     "score": 0.1896
+    },
+    {
+     "key": "ten",
+     "score": 0.1879
+    },
+    {
+     "key": "five",
+     "score": 0.1073
+    },
+    {
+     "key": "three",
+     "score": 0.035
+    },
+    {
+     "key": "nine",
+     "score": 0.0313
+    }
+   ]
+  },
+  "numbers/eight": {
+   "phonetic": [
+    {
+     "key": "five",
+     "score": 0.0313
+    },
+    {
+     "key": "nine",
+     "score": 0.0313
+    },
+    {
+     "key": "six",
+     "score": 0.0271
+    },
+    {
+     "key": "four",
+     "score": 0.0
+    },
+    {
+     "key": "three",
+     "score": 0.0
+    },
+    {
+     "key": "two",
+     "score": 0.0
+    }
+   ]
+  },
+  "numbers/nine": {
+   "phonetic": [
+    {
+     "key": "ten",
+     "score": 0.1462
+    },
+    {
+     "key": "one",
+     "score": 0.1364
+    },
+    {
+     "key": "six",
+     "score": 0.1263
+    },
+    {
+     "key": "five",
+     "score": 0.0875
+    },
+    {
+     "key": "seven",
+     "score": 0.0313
+    },
+    {
+     "key": "three",
+     "score": 0.0313
+    }
+   ]
+  },
+  "numbers/ten": {
+   "phonetic": [
+    {
+     "key": "six",
+     "score": 0.3538
+    },
+    {
+     "key": "seven",
+     "score": 0.1879
+    },
+    {
+     "key": "two",
+     "score": 0.1667
+    },
+    {
+     "key": "nine",
+     "score": 0.1462
+    },
+    {
+     "key": "five",
+     "score": 0.0885
+    },
+    {
+     "key": "three",
+     "score": 0.0542
+    }
+   ]
+  },
+  "shapes/circle": {
+   "phonetic": [
+    {
+     "key": "triangle",
+     "score": 0.1318
+    },
+    {
+     "key": "rectangle",
+     "score": 0.0967
+    },
+    {
+     "key": "square",
+     "score": 0.054
+    }
+   ]
+  },
+  "shapes/square": {
+   "phonetic": [
+    {
+     "key": "rectangle",
+     "score": 0.2012
+    },
+    {
+     "key": "triangle",
+     "score": 0.1656
+    },
+    {
+     "key": "circle",
+     "score": 0.054
+    }
+   ]
+  },
+  "shapes/rectangle": {
+   "phonetic": [
+    {
+     "key": "triangle",
+     "score": 0.3566
+    },
+    {
+     "key": "square",
+     "score": 0.2012
+    },
+    {
+     "key": "circle",
+     "score": 0.0967
+    }
+   ]
+  },
+  "shapes/triangle": {
+   "phonetic": [
+    {
+     "key": "rectangle",
+     "score": 0.3566
+    },
+    {
+     "key": "square",
+     "score": 0.1656
+    },
+    {
+     "key": "circle",
+     "score": 0.1318
+    }
+   ]
+  },
+  "colors/red": {
+   "visual": [
+    {
+     "key": "orange",
+     "score": 0.9954
+    },
+    {
+     "key": "brown",
+     "score": 0.9787
+    },
+    {
+     "key": "black",
+     "score": 0.8995
+    },
+    {
+     "key": "yellow",
+     "score": 0.7497
+    },
+    {
+     "key": "pink",
+     "score": 0.7481
+    },
+    {
+     "key": "blue",
+     "score": 0.7447
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "black",
+     "score": 0.1083
+    },
+    {
+     "key": "pink",
+     "score": 0.1083
+    },
+    {
+     "key": "green",
+     "score": 0.0994
+    },
+    {
+     "key": "white",
+     "score": 0.0704
+    },
+    {
+     "key": "brown",
+     "score": 0.0654
+    },
+    {
+     "key": "orange",
+     "score": 0.0206
+    }
+   ]
+  },
+  "colors/blue": {
+   "visual": [
+    {
+     "key": "purple",
+     "score": 0.7498
+    },
+    {
+     "key": "orange",
+     "score": 0.7481
+    },
+    {
+     "key": "brown",
+     "score": 0.7463
+    },
+    {
+     "key": "green",
+     "score": 0.7463
+    },
+    {
+     "key": "red",
+     "score": 0.7447
+    },
+    {
+     "key": "yellow",
+     "score": 0.7433
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "orange",
+     "score": 0.1786
+    },
+    {
+     "key": "black",
+     "score": 0.1073
+    },
+    {
+     "key": "purple",
+     "score": 0.0942
+    },
+    {
+     "key": "green",
+     "score": 0.0313
+    },
+    {
+     "key": "brown",
+     "score": 0.0313
+    },
+    {
+     "key": "white",
+     "score": 0.0313
+    }
+   ]
+  },
+  "colors/green": {
+   "visual": [
+    {
+     "key": "brown",
+     "score": 0.75
+    },
+    {
+     "key": "purple",
+     "score": 0.7476
+    },
+    {
+     "key": "blue",
+     "score": 0.7463
+    },
+    {
+     "key": "orange",
+     "score": 0.7392
+    },
+    {
+     "key": "red",
+     "score": 0.7324
+    },
+    {
+     "key": "yellow",
+     "score": 0.7299
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "black",
+     "score": 0.1083
+    },
+    {
+     "key": "red",
+     "score": 0.0994
+    },
+    {
+     "key": "yellow",
+     "score": 0.0885
+    },
+    {
+     "key": "brown",
+     "score": 0.07
+    },
+    {
+     "key": "blue",
+     "score": 0.0313
+    },
+    {
+     "key": "orange",
+     "score": 0.0266
+    }
+   ]
+  },
+  "colors/yellow": {
+   "visual": [
+    {
+     "key": "red",
+     "score": 0.7497
+    },
+    {
+     "key": "pink",
+     "score": 0.749
+    },
+    {
+     "key": "orange",
+     "score": 0.7486
+    },
+    {
+     "key": "blue",
+     "score": 0.7433
+    },
+    {
+     "key": "purple",
+     "score": 0.7412
+    },
+    {
+     "key": "brown",
+     "score": 0.7299
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "black",
+     "score": 0.1151
+    },
+    {
+     "key": "green",
+     "score": 0.0885
+    },
+    {
+     "key": "brown",
+     "score": 0.0621
+    },
+    {
+     "key": "blue",
+     "score": 0.0238
+    },
+    {
+     "key": "red",
+     "score": 0.0206
+    },
+    {
+     "key": "pink",
+     "score": 0.0
+    }
+   ]
+  },
+  "colors/orange": {
+   "visual": [
+    {
+     "key": "red",
+     "score": 0.9954
+    },
+    {
+     "key": "brown",
+     "score": 0.9892
+    },
+    {
+     "key": "black",
+     "score": 0.9186
+    },
+    {
+     "key": "yellow",
+     "score": 0.7486
+    },
+    {
+     "key": "blue",
+     "score": 0.7481
+    },
+    {
+     "key": "purple",
+     "score": 0.7469
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "blue",
+     "score": 0.1786
+    },
+    {
+     "key": "brown",
+     "score": 0.0808
+    },
+    {
+     "key": "purple",
+     "score": 0.0292
+    },
+    {
+     "key": "white",
+     "score": 0.0266
+    },
+    {
+     "key": "black",
+     "score": 0.0266
+    },
+    {
+     "key": "green",
+     "score": 0.0266
+    }
+   ]
+  },
+  "colors/pink": {
+   "visual": [
+    {
+     "key": "yellow",
+     "score": 0.749
+    },
+    {
+     "key": "red",
+     "score": 0.7481
+    },
+    {
+     "key": "orange",
+     "score": 0.7451
+    },
+    {
+     "key": "blue",
+     "score": 0.7371
+    },
+    {
+     "key": "purple",
+     "score": 0.7343
+    },
+    {
+     "key": "brown",
+     "score": 0.7201
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "red",
+     "score": 0.1083
+    },
+    {
+     "key": "black",
+     "score": 0.0313
+    },
+    {
+     "key": "white",
+     "score": 0.0313
+    },
+    {
+     "key": "purple",
+     "score": 0.0238
+    },
+    {
+     "key": "orange",
+     "score": 0.0238
+    },
+    {
+     "key": "green",
+     "score": 0.0
+    }
+   ]
+  },
+  "colors/purple": {
+   "visual": [
+    {
+     "key": "blue",
+     "score": 0.7498
+    },
+    {
+     "key": "brown",
+     "score": 0.7476
+    },
+    {
+     "key": "green",
+     "score": 0.7476
+    },
+    {
+     "key": "orange",
+     "score": 0.7469
+    },
+    {
+     "key": "red",
+     "score": 0.7428
+    },
+    {
+     "key": "yellow",
+     "score": 0.7412
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "blue",
+     "score": 0.0942
+    },
+    {
+     "key": "brown",
+     "score": 0.0649
+    },
+    {
+     "key": "orange",
+     "score": 0.0292
+    },
+    {
+     "key": "green",
+     "score": 0.0266
+    },
+    {
+     "key": "white",
+     "score": 0.0266
+    },
+    {
+     "key": "pink",
+     "score": 0.0238
+    }
+   ]
+  },
+  "colors/brown": {
+   "visual": [
+    {
+     "key": "orange",
+     "score": 0.9892
+    },
+    {
+     "key": "red",
+     "score": 0.9787
+    },
+    {
+     "key": "black",
+     "score": 0.9649
+    },
+    {
+     "key": "green",
+     "score": 0.75
+    },
+    {
+     "key": "purple",
+     "score": 0.7476
+    },
+    {
+     "key": "blue",
+     "score": 0.7463
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "white",
+     "score": 0.1548
+    },
+    {
+     "key": "orange",
+     "score": 0.0808
+    },
+    {
+     "key": "black",
+     "score": 0.0733
+    },
+    {
+     "key": "green",
+     "score": 0.07
+    },
+    {
+     "key": "red",
+     "score": 0.0654
+    },
+    {
+     "key": "purple",
+     "score": 0.0649
+    }
+   ]
+  },
+  "colors/black": {
+   "visual": [
+    {
+     "key": "brown",
+     "score": 0.9649
+    },
+    {
+     "key": "orange",
+     "score": 0.9186
+    },
+    {
+     "key": "red",
+     "score": 0.8995
+    },
+    {
+     "key": "green",
+     "score": 0.7151
+    },
+    {
+     "key": "purple",
+     "score": 0.6955
+    },
+    {
+     "key": "blue",
+     "score": 0.6902
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "yellow",
+     "score": 0.1151
+    },
+    {
+     "key": "red",
+     "score": 0.1083
+    },
+    {
+     "key": "green",
+     "score": 0.1083
+    },
+    {
+     "key": "blue",
+     "score": 0.1073
+    },
+    {
+     "key": "brown",
+     "score": 0.0733
+    },
+    {
+     "key": "white",
+     "score": 0.0704
+    }
+   ]
+  },
+  "colors/white": {
+   "visual": [
+    {
+     "key": "pink",
+     "score": 0.7151
+    },
+    {
+     "key": "yellow",
+     "score": 0.7027
+    },
+    {
+     "key": "red",
+     "score": 0.6984
+    },
+    {
+     "key": "orange",
+     "score": 0.6856
+    },
+    {
+     "key": "blue",
+     "score": 0.6636
+    },
+    {
+     "key": "purple",
+     "score": 0.6572
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "brown",
+     "score": 0.1548
+    },
+    {
+     "key": "red",
+     "score": 0.0704
+    },
+    {
+     "key": "black",
+     "score": 0.0704
+    },
+    {
+     "key": "pink",
+     "score": 0.0313
+    },
+    {
+     "key": "blue",
+     "score": 0.0313
+    },
+    {
+     "key": "orange",
+     "score": 0.0266
+    }
+   ]
+  },
+  "household/bed": {
+   "visual": [
+    {
+     "key": "pillows",
+     "score": 0.9102
+    },
+    {
+     "key": "glass",
+     "score": 0.816
+    },
+    {
+     "key": "fork",
+     "score": 0.7928
+    },
+    {
+     "key": "spoon",
+     "score": 0.7916
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.7456
+    },
+    {
+     "key": "soap",
+     "score": 0.7446
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "brush",
+     "score": 0.0271
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.0096
+    },
+    {
+     "key": "spoon",
+     "score": 0.0
+    },
+    {
+     "key": "soap",
+     "score": 0.0
+    },
+    {
+     "key": "plate",
+     "score": 0.0
+    },
+    {
+     "key": "pillows",
+     "score": 0.0
+    }
+   ]
+  },
+  "household/brush": {
+   "visual": [
+    {
+     "key": "cup",
+     "score": 0.8207
+    },
+    {
+     "key": "comb",
+     "score": 0.7986
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.7929
+    },
+    {
+     "key": "knife",
+     "score": 0.7419
+    },
+    {
+     "key": "mug",
+     "score": 0.7369
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.7269
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "toothbrush",
+     "score": 0.4975
+    },
+    {
+     "key": "glass",
+     "score": 0.3368
+    },
+    {
+     "key": "fork",
+     "score": 0.1608
+    },
+    {
+     "key": "mug",
+     "score": 0.1605
+    },
+    {
+     "key": "comb",
+     "score": 0.0351
+    },
+    {
+     "key": "cup",
+     "score": 0.0271
+    }
+   ]
+  },
+  "household/comb": {
+   "visual": [
+    {
+     "key": "toothbrush",
+     "score": 0.9715
+    },
+    {
+     "key": "cup",
+     "score": 0.9255
+    },
+    {
+     "key": "knife",
+     "score": 0.8302
+    },
+    {
+     "key": "brush",
+     "score": 0.7986
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.7296
+    },
+    {
+     "key": "fork",
+     "score": 0.7253
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "plate",
+     "score": 0.1163
+    },
+    {
+     "key": "fork",
+     "score": 0.1012
+    },
+    {
+     "key": "spoon",
+     "score": 0.0894
+    },
+    {
+     "key": "cup",
+     "score": 0.0821
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.0685
+    },
+    {
+     "key": "knife",
+     "score": 0.0581
+    }
+   ]
+  },
+  "household/cup": {
+   "visual": [
+    {
+     "key": "comb",
+     "score": 0.9255
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.915
+    },
+    {
+     "key": "brush",
+     "score": 0.8207
+    },
+    {
+     "key": "knife",
+     "score": 0.7617
+    },
+    {
+     "key": "mug",
+     "score": 0.7412
+    },
+    {
+     "key": "glass",
+     "score": 0.7359
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "fork",
+     "score": 0.1994
+    },
+    {
+     "key": "pillows",
+     "score": 0.1625
+    },
+    {
+     "key": "mug",
+     "score": 0.1078
+    },
+    {
+     "key": "soap",
+     "score": 0.0821
+    },
+    {
+     "key": "comb",
+     "score": 0.0821
+    },
+    {
+     "key": "spoon",
+     "score": 0.0494
+    }
+   ]
+  },
+  "household/fork": {
+   "visual": [
+    {
+     "key": "spoon",
+     "score": 0.9813
+    },
+    {
+     "key": "bed",
+     "score": 0.7928
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.7682
+    },
+    {
+     "key": "knife",
+     "score": 0.7529
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.7351
+    },
+    {
+     "key": "pillows",
+     "score": 0.7302
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "cup",
+     "score": 0.1994
+    },
+    {
+     "key": "brush",
+     "score": 0.1608
+    },
+    {
+     "key": "glass",
+     "score": 0.1228
+    },
+    {
+     "key": "mug",
+     "score": 0.1109
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.1051
+    },
+    {
+     "key": "comb",
+     "score": 0.1012
+    }
+   ]
+  },
+  "household/glass": {
+   "visual": [
+    {
+     "key": "toothpaste",
+     "score": 0.8968
+    },
+    {
+     "key": "pillows",
+     "score": 0.8611
+    },
+    {
+     "key": "bed",
+     "score": 0.816
+    },
+    {
+     "key": "cup",
+     "score": 0.7359
+    },
+    {
+     "key": "soap",
+     "score": 0.7259
+    },
+    {
+     "key": "mug",
+     "score": 0.7162
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "brush",
+     "score": 0.3368
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.2039
+    },
+    {
+     "key": "mug",
+     "score": 0.1334
+    },
+    {
+     "key": "fork",
+     "score": 0.1228
+    },
+    {
+     "key": "plate",
+     "score": 0.1138
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.0438
+    }
+   ]
+  },
+  "household/knife": {
+   "visual": [
+    {
+     "key": "toothbrush",
+     "score": 0.9091
+    },
+    {
+     "key": "comb",
+     "score": 0.8302
+    },
+    {
+     "key": "cup",
+     "score": 0.7617
+    },
+    {
+     "key": "fork",
+     "score": 0.7529
+    },
+    {
+     "key": "spoon",
+     "score": 0.7444
+    },
+    {
+     "key": "brush",
+     "score": 0.7419
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "plate",
+     "score": 0.2463
+    },
+    {
+     "key": "comb",
+     "score": 0.0581
+    },
+    {
+     "key": "cup",
+     "score": 0.0494
+    },
+    {
+     "key": "pillows",
+     "score": 0.0494
+    },
+    {
+     "key": "fork",
+     "score": 0.0321
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.0124
+    }
+   ]
+  },
+  "household/mug": {
+   "visual": [
+    {
+     "key": "soap",
+     "score": 0.9228
+    },
+    {
+     "key": "cup",
+     "score": 0.7412
+    },
+    {
+     "key": "brush",
+     "score": 0.7369
+    },
+    {
+     "key": "glass",
+     "score": 0.7162
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.6967
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.6837
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "brush",
+     "score": 0.1605
+    },
+    {
+     "key": "glass",
+     "score": 0.1334
+    },
+    {
+     "key": "fork",
+     "score": 0.1109
+    },
+    {
+     "key": "cup",
+     "score": 0.1078
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.0807
+    },
+    {
+     "key": "comb",
+     "score": 0.0581
+    }
+   ]
+  },
+  "household/pillows": {
+   "visual": [
+    {
+     "key": "bed",
+     "score": 0.9102
+    },
+    {
+     "key": "glass",
+     "score": 0.8611
+    },
+    {
+     "key": "spoon",
+     "score": 0.7518
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.7486
+    },
+    {
+     "key": "plate",
+     "score": 0.7451
+    },
+    {
+     "key": "soap",
+     "score": 0.7419
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "cup",
+     "score": 0.1625
+    },
+    {
+     "key": "spoon",
+     "score": 0.0706
+    },
+    {
+     "key": "soap",
+     "score": 0.0631
+    },
+    {
+     "key": "fork",
+     "score": 0.0541
+    },
+    {
+     "key": "knife",
+     "score": 0.0494
+    },
+    {
+     "key": "glass",
+     "score": 0.0423
+    }
+   ]
+  },
+  "household/plate": {
+   "visual": [
+    {
+     "key": "soap",
+     "score": 0.7732
+    },
+    {
+     "key": "pillows",
+     "score": 0.7451
+    },
+    {
+     "key": "bed",
+     "score": 0.7326
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.7128
+    },
+    {
+     "key": "spoon",
+     "score": 0.7027
+    },
+    {
+     "key": "glass",
+     "score": 0.6942
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "knife",
+     "score": 0.2463
+    },
+    {
+     "key": "comb",
+     "score": 0.1163
+    },
+    {
+     "key": "glass",
+     "score": 0.1138
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.0883
+    },
+    {
+     "key": "pillows",
+     "score": 0.0423
+    },
+    {
+     "key": "fork",
+     "score": 0.0321
+    }
+   ]
+  },
+  "household/soap": {
+   "visual": [
+    {
+     "key": "mug",
+     "score": 0.9228
+    },
+    {
+     "key": "plate",
+     "score": 0.7732
+    },
+    {
+     "key": "bed",
+     "score": 0.7446
+    },
+    {
+     "key": "pillows",
+     "score": 0.7419
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.7388
+    },
+    {
+     "key": "glass",
+     "score": 0.7259
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "spoon",
+     "score": 0.2619
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.0968
+    },
+    {
+     "key": "cup",
+     "score": 0.0821
+    },
+    {
+     "key": "fork",
+     "score": 0.0725
+    },
+    {
+     "key": "pillows",
+     "score": 0.0631
+    },
+    {
+     "key": "comb",
+     "score": 0.0437
+    }
+   ]
+  },
+  "household/spoon": {
+   "visual": [
+    {
+     "key": "fork",
+     "score": 0.9813
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.8009
+    },
+    {
+     "key": "bed",
+     "score": 0.7916
+    },
+    {
+     "key": "pillows",
+     "score": 0.7518
+    },
+    {
+     "key": "knife",
+     "score": 0.7444
+    },
+    {
+     "key": "toothbrush",
+     "score": 0.7436
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "soap",
+     "score": 0.2619
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.1102
+    },
+    {
+     "key": "comb",
+     "score": 0.0894
+    },
+    {
+     "key": "pillows",
+     "score": 0.0706
+    },
+    {
+     "key": "fork",
+     "score": 0.0634
+    },
+    {
+     "key": "cup",
+     "score": 0.0494
+    }
+   ]
+  },
+  "household/toothbrush": {
+   "visual": [
+    {
+     "key": "comb",
+     "score": 0.9715
+    },
+    {
+     "key": "cup",
+     "score": 0.915
+    },
+    {
+     "key": "knife",
+     "score": 0.9091
+    },
+    {
+     "key": "brush",
+     "score": 0.7929
+    },
+    {
+     "key": "spoon",
+     "score": 0.7436
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.7374
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "brush",
+     "score": 0.4975
+    },
+    {
+     "key": "toothpaste",
+     "score": 0.2157
+    },
+    {
+     "key": "glass",
+     "score": 0.2039
+    },
+    {
+     "key": "fork",
+     "score": 0.1051
+    },
+    {
+     "key": "mug",
+     "score": 0.0807
+    },
+    {
+     "key": "comb",
+     "score": 0.04
+    }
+   ]
+  },
+  "household/toothpaste": {
+   "visual": [
+    {
+     "key": "glass",
+     "score": 0.8968
+    },
+    {
+     "key": "spoon",
+     "score": 0.8009
+    },
+    {
+     "key": "fork",
+     "score": 0.7682
+    },
+    {
+     "key": "pillows",
+     "score": 0.7486
+    },
+    {
+     "key": "bed",
+     "score": 0.7456
+    },
+    {
+     "key": "soap",
+     "score": 0.7388
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "toothbrush",
+     "score": 0.2157
+    },
+    {
+     "key": "spoon",
+     "score": 0.1102
+    },
+    {
+     "key": "soap",
+     "score": 0.0968
+    },
+    {
+     "key": "plate",
+     "score": 0.0883
+    },
+    {
+     "key": "comb",
+     "score": 0.0685
+    },
+    {
+     "key": "glass",
+     "score": 0.0438
+    }
+   ]
+  },
+  "classroom/bag": {
+   "visual": [
+    {
+     "key": "pencil",
+     "score": 0.9106
+    },
+    {
+     "key": "table",
+     "score": 0.9005
+    },
+    {
+     "key": "chair",
+     "score": 0.7623
+    },
+    {
+     "key": "desk",
+     "score": 0.752
+    },
+    {
+     "key": "blackboard",
+     "score": 0.7475
+    },
+    {
+     "key": "eraser",
+     "score": 0.7376
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "bottle",
+     "score": 0.1369
+    },
+    {
+     "key": "table",
+     "score": 0.1084
+    },
+    {
+     "key": "eraser",
+     "score": 0.1019
+    },
+    {
+     "key": "desk",
+     "score": 0.0812
+    },
+    {
+     "key": "ruler",
+     "score": 0.0581
+    },
+    {
+     "key": "blackboard",
+     "score": 0.0432
+    }
+   ]
+  },
+  "classroom/blackboard": {
+   "visual": [
+    {
+     "key": "table",
+     "score": 0.77
+    },
+    {
+     "key": "bag",
+     "score": 0.7475
+    },
+    {
+     "key": "chair",
+     "score": 0.7318
+    },
+    {
+     "key": "desk",
+     "score": 0.7298
+    },
+    {
+     "key": "eraser",
+     "score": 0.7041
+    },
+    {
+     "key": "book",
+     "score": 0.698
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "dustbin",
+     "score": 0.1275
+    },
+    {
+     "key": "bottle",
+     "score": 0.0598
+    },
+    {
+     "key": "chair",
+     "score": 0.0517
+    },
+    {
+     "key": "table",
+     "score": 0.0438
+    },
+    {
+     "key": "bag",
+     "score": 0.0432
+    },
+    {
+     "key": "pencil",
+     "score": 0.043
+    }
+   ]
+  },
+  "classroom/book": {
+   "visual": [
+    {
+     "key": "desk",
+     "score": 0.975
+    },
+    {
+     "key": "bottle",
+     "score": 0.9448
+    },
+    {
+     "key": "ruler",
+     "score": 0.8006
+    },
+    {
+     "key": "table",
+     "score": 0.7381
+    },
+    {
+     "key": "bag",
+     "score": 0.7308
+    },
+    {
+     "key": "eraser",
+     "score": 0.7303
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "bottle",
+     "score": 0.1337
+    },
+    {
+     "key": "chair",
+     "score": 0.0503
+    },
+    {
+     "key": "desk",
+     "score": 0.0437
+    },
+    {
+     "key": "blackboard",
+     "score": 0.0406
+    },
+    {
+     "key": "pencil",
+     "score": 0.0383
+    },
+    {
+     "key": "bag",
+     "score": 0.0379
+    }
+   ]
+  },
+  "classroom/bottle": {
+   "visual": [
+    {
+     "key": "book",
+     "score": 0.9448
+    },
+    {
+     "key": "desk",
+     "score": 0.896
+    },
+    {
+     "key": "dustbin",
+     "score": 0.7283
+    },
+    {
+     "key": "eraser",
+     "score": 0.7083
+    },
+    {
+     "key": "bag",
+     "score": 0.6797
+    },
+    {
+     "key": "ruler",
+     "score": 0.6751
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "table",
+     "score": 0.1469
+    },
+    {
+     "key": "bag",
+     "score": 0.1369
+    },
+    {
+     "key": "book",
+     "score": 0.1337
+    },
+    {
+     "key": "ruler",
+     "score": 0.1271
+    },
+    {
+     "key": "blackboard",
+     "score": 0.0598
+    },
+    {
+     "key": "eraser",
+     "score": 0.0581
+    }
+   ]
+  },
+  "classroom/chair": {
+   "visual": [
+    {
+     "key": "table",
+     "score": 0.8302
+    },
+    {
+     "key": "desk",
+     "score": 0.792
+    },
+    {
+     "key": "pencil",
+     "score": 0.7718
+    },
+    {
+     "key": "bag",
+     "score": 0.7623
+    },
+    {
+     "key": "blackboard",
+     "score": 0.7318
+    },
+    {
+     "key": "book",
+     "score": 0.7146
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "pencil",
+     "score": 0.0761
+    },
+    {
+     "key": "dustbin",
+     "score": 0.075
+    },
+    {
+     "key": "eraser",
+     "score": 0.0533
+    },
+    {
+     "key": "blackboard",
+     "score": 0.0517
+    },
+    {
+     "key": "book",
+     "score": 0.0503
+    },
+    {
+     "key": "ruler",
+     "score": 0.035
+    }
+   ]
+  },
+  "classroom/desk": {
+   "visual": [
+    {
+     "key": "book",
+     "score": 0.975
+    },
+    {
+     "key": "bottle",
+     "score": 0.896
+    },
+    {
+     "key": "ruler",
+     "score": 0.8285
+    },
+    {
+     "key": "chair",
+     "score": 0.792
+    },
+    {
+     "key": "table",
+     "score": 0.752
+    },
+    {
+     "key": "bag",
+     "score": 0.752
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "table",
+     "score": 0.65
+    },
+    {
+     "key": "eraser",
+     "score": 0.1863
+    },
+    {
+     "key": "bag",
+     "score": 0.0812
+    },
+    {
+     "key": "pencil",
+     "score": 0.068
+    },
+    {
+     "key": "ruler",
+     "score": 0.0581
+    },
+    {
+     "key": "bottle",
+     "score": 0.0581
+    }
+   ]
+  },
+  "classroom/dustbin": {
+   "visual": [
+    {
+     "key": "bottle",
+     "score": 0.7283
+    },
+    {
+     "key": "table",
+     "score": 0.7233
+    },
+    {
+     "key": "book",
+     "score": 0.7187
+    },
+    {
+     "key": "eraser",
+     "score": 0.7093
+    },
+    {
+     "key": "desk",
+     "score": 0.6877
+    },
+    {
+     "key": "bag",
+     "score": 0.6795
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "blackboard",
+     "score": 0.1275
+    },
+    {
+     "key": "chair",
+     "score": 0.075
+    },
+    {
+     "key": "bag",
+     "score": 0.0404
+    },
+    {
+     "key": "desk",
+     "score": 0.0378
+    },
+    {
+     "key": "bottle",
+     "score": 0.0231
+    },
+    {
+     "key": "pencil",
+     "score": 0.0231
+    }
+   ]
+  },
+  "classroom/eraser": {
+   "visual": [
+    {
+     "key": "bag",
+     "score": 0.7376
+    },
+    {
+     "key": "book",
+     "score": 0.7303
+    },
+    {
+     "key": "desk",
+     "score": 0.7297
+    },
+    {
+     "key": "table",
+     "score": 0.7246
+    },
+    {
+     "key": "pencil",
+     "score": 0.7218
+    },
+    {
+     "key": "dustbin",
+     "score": 0.7093
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "table",
+     "score": 0.1891
+    },
+    {
+     "key": "desk",
+     "score": 0.1863
+    },
+    {
+     "key": "ruler",
+     "score": 0.178
+    },
+    {
+     "key": "bag",
+     "score": 0.1019
+    },
+    {
+     "key": "bottle",
+     "score": 0.0581
+    },
+    {
+     "key": "chair",
+     "score": 0.0533
+    }
+   ]
+  },
+  "classroom/pencil": {
+   "visual": [
+    {
+     "key": "bag",
+     "score": 0.9106
+    },
+    {
+     "key": "table",
+     "score": 0.8819
+    },
+    {
+     "key": "chair",
+     "score": 0.7718
+    },
+    {
+     "key": "ruler",
+     "score": 0.7513
+    },
+    {
+     "key": "desk",
+     "score": 0.7442
+    },
+    {
+     "key": "book",
+     "score": 0.7265
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "chair",
+     "score": 0.0761
+    },
+    {
+     "key": "desk",
+     "score": 0.068
+    },
+    {
+     "key": "eraser",
+     "score": 0.0442
+    },
+    {
+     "key": "table",
+     "score": 0.0442
+    },
+    {
+     "key": "blackboard",
+     "score": 0.043
+    },
+    {
+     "key": "book",
+     "score": 0.0383
+    }
+   ]
+  },
+  "classroom/ruler": {
+   "visual": [
+    {
+     "key": "desk",
+     "score": 0.8285
+    },
+    {
+     "key": "book",
+     "score": 0.8006
+    },
+    {
+     "key": "pencil",
+     "score": 0.7513
+    },
+    {
+     "key": "table",
+     "score": 0.7188
+    },
+    {
+     "key": "chair",
+     "score": 0.6933
+    },
+    {
+     "key": "bottle",
+     "score": 0.6751
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "eraser",
+     "score": 0.178
+    },
+    {
+     "key": "table",
+     "score": 0.1369
+    },
+    {
+     "key": "bottle",
+     "score": 0.1271
+    },
+    {
+     "key": "desk",
+     "score": 0.0581
+    },
+    {
+     "key": "bag",
+     "score": 0.0581
+    },
+    {
+     "key": "blackboard",
+     "score": 0.0393
+    }
+   ]
+  },
+  "classroom/table": {
+   "visual": [
+    {
+     "key": "bag",
+     "score": 0.9005
+    },
+    {
+     "key": "pencil",
+     "score": 0.8819
+    },
+    {
+     "key": "chair",
+     "score": 0.8302
+    },
+    {
+     "key": "blackboard",
+     "score": 0.77
+    },
+    {
+     "key": "desk",
+     "score": 0.752
+    },
+    {
+     "key": "book",
+     "score": 0.7381
+    }
+   ],
+   "phonetic": [
+    {
+     "key": "desk",
+     "score": 0.65
+    },
+    {
+     "key": "eraser",
+     "score": 0.1891
+    },
+    {
+     "key": "bottle",
+     "score": 0.1469
+    },
+    {
+     "key": "ruler",
+     "score": 0.1369
+    },
+    {
+     "key": "bag",
+     "score": 0.1084
+    },
+    {
+     "key": "pencil",
+     "score": 0.0442
+    }
+   ]
+  }
+ }
+}

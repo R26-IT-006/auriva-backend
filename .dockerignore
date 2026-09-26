@@ -1,0 +1,29 @@
+# Secrets — mounted/injected at runtime, never baked into an image.
+.env
+.env.*
+credentials/
+*credentials*.json
+*service-account*.json
+
+# Mounted at runtime from /opt/auriva/models (2.6 GB, and models/whisper is Windows-only).
+/models/
+
+# Rebuilt inside the image for Linux.
+node_modules/
+ml/venv/
+**/__pycache__/
+
+# Not needed at runtime.
+.git/
+.github/
+.claude/
+.vscode/
+logs/
+*.log
+docs/
+research/
+test/
+tests/
+testing/
+Dockerfile
+.dockerignore
