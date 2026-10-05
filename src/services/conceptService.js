@@ -100,6 +100,10 @@ const HOUSEHOLD_SEQUENCE = [
   'soap', 'spoon', 'toothbrush', 'toothpaste',
 ];
 
+const FAMILY_SEQUENCE = [
+  'mother', 'father', 'brother', 'sister', 'grandmother', 'grandfather',
+];
+
 const CATEGORY_SEQUENCES = {
   fruits:        FRUIT_SEQUENCE,
   professionals: PROFESSIONALS_SEQUENCE,
@@ -110,6 +114,7 @@ const CATEGORY_SEQUENCES = {
   colors:    COLORS_SEQUENCE,
   classroom: CLASSROOM_SEQUENCE,
   household: HOUSEHOLD_SEQUENCE,
+  family:    FAMILY_SEQUENCE,
 };
 
 function getSequence(categoryKey) {

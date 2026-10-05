@@ -222,6 +222,8 @@ async function getDashboardStats(teacherId) {
     // Full session list (not just "recent") so the calendar's per-day detail view
     // can show every session on a date the teacher taps, however far back it is.
     sessions: allSessions.map((s) => ({
+      // Lets a row in the calendar's day list open that child's profile.
+      studentId: s.student_id,
       studentName: s.student?.full_name ?? 'Student',
       startedAt: s.started_at,
       endedAt: s.ended_at,
@@ -446,8 +448,11 @@ async function scorePronunciationAttempt(teacherId, studentId, data) {
   return { ...scored, result_id: saved.id };
 }
 
-async function getPronunciationReviewQueue(teacherId, limit) {
-  return getReviewQueue(teacherId, { limit });
+async function getPronunciationReviewQueue(teacherId, limit, studentId = null) {
+  return getReviewQueue(teacherId, {
+    limit,
+    studentId: studentId != null && studentId !== '' ? normalizeStudentId(studentId) : null,
+  });
 }
 
 async function submitPronunciationReview(teacherId, resultId, teacherReviewedScore) {
