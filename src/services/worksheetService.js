@@ -117,9 +117,15 @@ const WORKSHEET_STATUS = Object.freeze({
 });
 
 // Deliberately no 'failed'. A returned worksheet is practice evidence a teacher
-// reads, not something a child passes.
+// reads, not something a child passes. The three teacher outcomes are:
+//   reviewed              "Completed satisfactorily"
+//   needs_more_practice   "Continue practice"
+//   discuss_next_session  "Discuss in next session"
+// Stored separately so the teacher's choice survives into the history; none of
+// them changes mastery, scores or the practice sequence.
 const REVIEW_STATUS = Object.freeze({
   PENDING: 'pending_review', REVIEWED: 'reviewed', NEEDS_MORE_PRACTICE: 'needs_more_practice',
+  DISCUSS_NEXT_SESSION: 'discuss_next_session',
 });
 const VALID_REVIEW_STATUSES = Object.freeze(Object.values(REVIEW_STATUS));
 

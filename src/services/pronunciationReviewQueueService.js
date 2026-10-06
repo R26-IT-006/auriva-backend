@@ -89,8 +89,13 @@ async function getReviewedCountsByPopulation() {
  *    normalization) — this is what lets a newly arriving population, e.g.
  *    autistic students' recordings, catch the calibration up quickly
  *    instead of being drowned out by a larger existing population.
+ *
+ * `studentId` narrows the queue to one child — the student profile's
+ * pronunciation module opens it that way. The ranking is unchanged: coverage
+ * still counts reviewed examples across every population, so one child's
+ * attempts are ordered exactly as they would be within the whole class.
  */
-async function getReviewQueue(teacherId, { limit = DEFAULT_LIMIT } = {}) {
+async function getReviewQueue(teacherId, { limit = DEFAULT_LIMIT, studentId = null } = {}) {
   const { PronunciationSessionResult, Student } = require('../models');
   const safeLimit = Math.max(1, Math.min(MAX_LIMIT, Number(limit) || DEFAULT_LIMIT));
 
@@ -101,6 +106,9 @@ async function getReviewQueue(teacherId, { limit = DEFAULT_LIMIT } = {}) {
     PronunciationSessionResult.findAll({
       where: {
         teacher_id: teacherId,
+        // Still scoped by teacher_id above, so another teacher's student id
+        // simply matches nothing.
+        ...(studentId != null ? { student_id: studentId } : {}),
         teacher_reviewed_score: null,
         created_at: { [Op.gte]: startOfToday },
       },

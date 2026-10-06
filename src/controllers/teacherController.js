@@ -155,7 +155,11 @@ async function getPronunciationResults(req, res) {
 }
 
 async function getPronunciationReviewQueue(req, res) {
-  const queue = await teacherService.getPronunciationReviewQueue(req.user.id, req.query.limit);
+  const queue = await teacherService.getPronunciationReviewQueue(
+    req.user.id,
+    req.query.limit,
+    req.query.student_id,
+  );
   res.json(queue);
 }
 

@@ -415,6 +415,12 @@ router.use('/concepts', require('./concept'));
  *         required: false
  *         schema:
  *           type: integer
+ *       - in: query
+ *         name: student_id
+ *         required: false
+ *         description: Limit the queue to one of the teacher's students
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
  *         description: Ranked review queue

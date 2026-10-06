@@ -268,8 +268,19 @@ describe('teacher review', () => {
   });
 
   it('there is no "failed" review status', () => {
-    expect(svc.VALID_REVIEW_STATUSES).toEqual(['pending_review', 'reviewed', 'needs_more_practice']);
+    expect(svc.VALID_REVIEW_STATUSES).toEqual([
+      'pending_review', 'reviewed', 'needs_more_practice', 'discuss_next_session',
+    ]);
     expect(svc.VALID_REVIEW_STATUSES).not.toContain('failed');
+  });
+
+  it('stores "discuss in next session" as its own outcome', async () => {
+    const sub = { id: 6, worksheet_id: 1, student_id: SID, update: jest.fn().mockResolvedValue(undefined) };
+    mockSubFindByPk.mockResolvedValue(sub);
+    mockWsFindByPk.mockResolvedValue(row({ status: 'submitted' }));
+    const r = await svc.reviewSubmission({ submissionId: 6, reviewStatus: 'discuss_next_session' });
+    expect(r.status).toBe('reviewed');
+    expect(sub.update.mock.calls[0][0].review_status).toBe('discuss_next_session');
   });
 
   it('rejects an unknown or pending review verdict', async () => {
