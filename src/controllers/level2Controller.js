@@ -88,7 +88,10 @@ async function getProgress(req, res) {
 // TASK-46 — one Level 2 report per student, all three topics in a single call.
 // Read-only: it reports the data the session flow already records and changes
 // none of it.
+// The report endpoints read one child's records, so the teacher must own that
+// child — the router's isTeacher check alone let any teacher read any student.
 async function getReport(req, res) {
+  await level2Service.assertStudentBelongsToTeacher(req.user.id, req.params.studentId);
   const data = await level2AnalyticsService.getLevel2Report(req.params.studentId);
   res.json({ data });
 }
@@ -96,6 +99,7 @@ async function getReport(req, res) {
 // TASK-47 — practice-trend timelines. Read-only; neither handler recomputes
 // Level2TopicProgress.status.
 async function getTimeline(req, res) {
+  await level2Service.assertStudentBelongsToTeacher(req.user.id, req.params.studentId);
   const data = await level2AnalyticsService.getModuleTimeline(
     req.params.studentId,
     req.query.days ?? 90
@@ -105,7 +109,20 @@ async function getTimeline(req, res) {
 
 async function getTopicTimeline(req, res) {
   validate(req);
+  await level2Service.assertStudentBelongsToTeacher(req.user.id, req.params.studentId);
   const data = await level2AnalyticsService.getTopicTimeline(
+    req.params.studentId,
+    req.params.topic
+  );
+  res.json({ data });
+}
+
+// Every recorded interaction for one topic, per session (finished or not).
+// Read-only. Includes what the app heard the child say, so ownership is checked.
+async function getTopicActivity(req, res) {
+  validate(req);
+  await level2Service.assertStudentBelongsToTeacher(req.user.id, req.params.studentId);
+  const data = await level2AnalyticsService.getTopicActivity(
     req.params.studentId,
     req.params.topic
   );
@@ -227,6 +244,7 @@ module.exports = {
   getReport,
   getTimeline,
   getTopicTimeline,
+  getTopicActivity,
   recordStep3,
   assessStep4,
   recordNonVerbalTeaching,

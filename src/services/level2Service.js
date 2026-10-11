@@ -1111,4 +1111,9 @@ module.exports = {
   recordNonVerbalWordMatch,
   completeSession,
   getProgress,
+  // Read by level2AnalyticsService (teacher report) and level2Controller.
+  assertStudentBelongsToTeacher,
+  buildSentences,
+  buildFriendSentences,
+  buildPetSentences,
 };

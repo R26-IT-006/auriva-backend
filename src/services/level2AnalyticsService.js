@@ -2,11 +2,16 @@
 
 const { QueryTypes } = require('sequelize');
 const sequelize = require('../config/database');
+const { Op } = require('sequelize');
 const {
   Level2TopicProgress,
   Level2Session,
   Level2SentenceAttempt,
   Level2NonVerbalAttempt,
+  Level2ProductionAttempt,
+  Level2GenderSelectionLog,
+  Level2ActivitySelectionLog,
+  SentenceQuestionnaire,
 } = require('../models');
 
 // TASK-46 — report aggregation for Level 2, kept out of level2Service.js the
@@ -107,9 +112,17 @@ async function getLevel2Report(studentId) {
       ? (session.ended_at ?? session.started_at ?? null)
       : null;
 
+    // Display status. Level2TopicProgress.status is only written when a session
+    // is COMPLETED, so a child partway through their first session still reads
+    // 'not_started' there — while this row shows their recorded activity. Any
+    // session row means the topic has been started: report it as in_progress.
+    // Mastered / struggling still come only from the stored status.
+    const storedStatus = progress ? progress.status : 'not_started';
+    const status = storedStatus === 'not_started' && session ? 'in_progress' : storedStatus;
+
     topics.push({
       topic,
-      status:                     progress ? progress.status : 'not_started',
+      status,
       sessions_attempted:         progress ? progress.total_sessions : 0,
       last_session_date:          lastSessionDate,
       last_pathway:               session ? (session.pathway ?? null) : null,
@@ -239,10 +252,169 @@ async function getTopicTimeline(studentId, topic) {
   return toLevel2Points(rows);
 }
 
+// ---------------------------------------------------------------------------
+// Session activity — every recorded interaction for one topic, per session.
+//
+// Read-only, like the rest of this module. Lists every session (finished or
+// not), newest first, each with its interactions in the order they happened,
+// so the teacher can see exactly what the child did — including what the app
+// heard them say (transcripts). Raw audio is never selected.
+// ---------------------------------------------------------------------------
+
+/** How many sessions one topic's activity view returns. */
+const ACTIVITY_SESSION_LIMIT = 20;
+
+/**
+ * The topic's sentences as currently set up, by index — rebuilt from the
+ * questionnaire with level2Service's own builders (never re-authored here).
+ * Text is deterministic from the questionnaire; only the drag distractors are
+ * random. Returns {} when the questionnaire or a topic's details are missing.
+ */
+function sentenceTextsFor(topic, questionnaire) {
+  if (!questionnaire) return {};
+  // Required lazily: level2Service pulls in the speech/TTS clients, which this
+  // read-only module (and its tests) should not load just to be imported.
+  // eslint-disable-next-line global-require
+  const { buildSentences, buildFriendSentences, buildPetSentences } = require('./level2Service');
+  try {
+    if (topic === 'self_introduction') {
+      return Object.fromEntries(buildSentences(questionnaire).map((text, i) => [i + 1, text]));
+    }
+    const defs = topic === 'describe_friend'
+      ? buildFriendSentences(questionnaire)
+      : buildPetSentences(questionnaire);
+    return Object.fromEntries(defs.map((d) => [d.index, d.text]));
+  } catch {
+    return {};
+  }
+}
+
+/** Groups plain rows by level2_session_id, keeping their query order. */
+function bySession(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    const plain = typeof r.get === 'function' ? r.get({ plain: true }) : r;
+    if (!map.has(plain.level2_session_id)) map.set(plain.level2_session_id, []);
+    map.get(plain.level2_session_id).push(plain);
+  }
+  return map;
+}
+
+/**
+ * @returns {{ topic, limited: boolean, sessions: Array }}
+ */
+async function getTopicActivity(studentId, topic) {
+  const sessions = await Level2Session.findAll({
+    where: { student_id: studentId, topic },
+    attributes: [
+      'id', 'started_at', 'ended_at', 'is_complete', 'pathway',
+      'sxs_element_score', 'full_paragraph_total_score', 'full_paragraph_transcript',
+      'full_paragraph_elements_detected', 'silence_timeout_triggered',
+    ],
+    order: [['started_at', 'DESC']],
+    limit: ACTIVITY_SESSION_LIMIT,
+  });
+
+  if (sessions.length === 0) return { topic, limited: false, sessions: [] };
+
+  const ids = sessions.map((s) => s.id);
+  const inSessions = { level2_session_id: { [Op.in]: ids } };
+  const inOrder = [['created_at', 'ASC'], ['id', 'ASC']];
+
+  // One query per table for all listed sessions — never one per session.
+  const [sentenceRows, productionRows, nonVerbalRows, genderRows, activityRows, questionnaire] =
+    await Promise.all([
+      Level2SentenceAttempt.findAll({
+        where: inSessions,
+        attributes: ['level2_session_id', 'sentence_index', 'step3_result', 'step4_score',
+          'step4_transcript', 'step4_match_type', 'non_verbal_triggered', 'transcription_error', 'created_at'],
+        order: inOrder,
+      }),
+      Level2ProductionAttempt.findAll({
+        where: inSessions,
+        attributes: ['level2_session_id', 'phase', 'sentence_index', 'score', 'match_type',
+          'transcript', 'elements_detected', 'silence_timeout_triggered', 'transcription_error', 'created_at'],
+        order: inOrder,
+      }),
+      Level2NonVerbalAttempt.findAll({
+        where: inSessions,
+        attributes: ['level2_session_id', 'sentence_index', 'context', 'correct_on_first_attempt',
+          'required_second_attempt', 'auto_shown', 'created_at'],
+        order: inOrder,
+      }),
+      Level2GenderSelectionLog.findAll({
+        where: inSessions,
+        attributes: ['level2_session_id', 'first_tap', 'correct_on_first_tap', 'required_prompt',
+          'auto_advanced', 'created_at'],
+        order: inOrder,
+      }),
+      Level2ActivitySelectionLog.findAll({
+        where: inSessions,
+        attributes: ['level2_session_id', 'expected_activity', 'child_selected_activity',
+          'matched_expected', 'created_at'],
+        order: inOrder,
+      }),
+      SentenceQuestionnaire.findOne({ where: { student_id: studentId } }),
+    ]);
+
+  const texts      = sentenceTextsFor(topic, questionnaire ? questionnaire.get({ plain: true }) : null);
+  const sentencesBy  = bySession(sentenceRows);
+  const productionBy = bySession(productionRows);
+  const nonVerbalBy  = bySession(nonVerbalRows);
+  const genderBy     = bySession(genderRows);
+  const activityBy   = bySession(activityRows);
+
+  const strip = ({ level2_session_id, ...rest }) => rest; // eslint-disable-line no-unused-vars
+
+  return {
+    topic,
+    limited: sessions.length === ACTIVITY_SESSION_LIMIT,
+    sessions: sessions.map((s) => {
+      const plain       = typeof s.get === 'function' ? s.get({ plain: true }) : s;
+      const nonVerbal   = (nonVerbalBy.get(plain.id) ?? []).map(strip);
+      const production  = (productionBy.get(plain.id) ?? []).map(strip);
+      return {
+        id:                    plain.id,
+        started_at:            plain.started_at ?? null,
+        ended_at:              plain.ended_at ?? null,
+        is_complete:           !!plain.is_complete,
+        pathway:               plain.pathway ?? null,
+        sxs_score:             plain.sxs_element_score ?? null,
+        paragraph_score:       plain.full_paragraph_total_score ?? null,
+        paragraph_transcript:  plain.full_paragraph_transcript ?? null,
+        paragraph_elements:    plain.full_paragraph_elements_detected ?? null,
+        silence_timeout:       !!plain.silence_timeout_triggered,
+        // Teaching stage, one entry per sentence attempted, in order.
+        sentences: (sentencesBy.get(plain.id) ?? []).map((a) => ({
+          index:               a.sentence_index,
+          text:                texts[a.sentence_index] ?? null,
+          step3_result:        a.step3_result ?? null,
+          step4_score:         a.step4_score ?? null,
+          step4_transcript:    a.step4_transcript ?? null,
+          step4_match_type:    a.step4_match_type ?? null,
+          transcription_error: !!a.transcription_error,
+          picture_choice:      nonVerbal.filter((n) => n.context === 'teaching_fallback'
+            && n.sentence_index === a.sentence_index),
+        })),
+        gender:   (genderBy.get(plain.id) ?? []).map(strip)[0] ?? null,
+        activity: (activityBy.get(plain.id) ?? []).map(strip)[0] ?? null,
+        paragraph_attempts: production.filter((p) => p.phase === 'full_paragraph'),
+        // Speaking each sentence on its own — the stage mastery is judged on.
+        sxs_attempts: production
+          .filter((p) => p.phase === 'sentence_by_sentence')
+          .map((p) => ({ ...p, text: texts[p.sentence_index] ?? null })),
+        sxs_picture_choice: nonVerbal.filter((n) => n.context === 'production_fallback'),
+      };
+    }),
+  };
+}
+
 module.exports = {
   getLevel2Report,
   getModuleTimeline,
   getTopicTimeline,
+  getTopicActivity,
   TOPICS,
   PARAGRAPH_ELEMENTS,
+  ACTIVITY_SESSION_LIMIT,
 };

@@ -59,6 +59,14 @@ router.get('/student/:studentId/level2/topic/:topic/timeline', [
     .withMessage('topic must be one of: self_introduction, describe_friend, describe_pet'),
 ], ctrl.getTopicTimeline);
 
+// Every recorded interaction for one topic, per session (finished or not) —
+// the teacher report's "Activity" drill-down. Read-only; the handler checks the
+// teacher owns the student.
+router.get('/student/:studentId/level2/topic/:topic/activity', [
+  param('topic').isIn(['self_introduction', 'describe_friend', 'describe_pet'])
+    .withMessage('topic must be one of: self_introduction, describe_friend, describe_pet'),
+], ctrl.getTopicActivity);
+
 router.post('/student/:studentId/level2/session/start', [
   body('session_id').optional().isInt({ min: 1 }).withMessage('session_id must be a positive integer'),
   body('topic').optional().isIn(['self_introduction', 'describe_friend', 'describe_pet'])

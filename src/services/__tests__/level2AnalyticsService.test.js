@@ -4,9 +4,21 @@
 // trajectoryService.test.js does, so no database is touched.
 jest.mock('../../models', () => ({
   Level2TopicProgress:   { findOne: jest.fn() },
-  Level2Session:         { findOne: jest.fn() },
+  Level2Session:         { findOne: jest.fn(), findAll: jest.fn() },
   Level2SentenceAttempt: { findAll: jest.fn() },
-  Level2NonVerbalAttempt:{ count:   jest.fn() },
+  Level2NonVerbalAttempt:{ count:   jest.fn(), findAll: jest.fn() },
+  Level2ProductionAttempt:    { findAll: jest.fn() },
+  Level2GenderSelectionLog:   { findAll: jest.fn() },
+  Level2ActivitySelectionLog: { findAll: jest.fn() },
+  SentenceQuestionnaire:      { findOne: jest.fn() },
+}));
+
+// getTopicActivity lazily requires level2Service only for its sentence
+// builders; stub them so the speech/TTS clients are never loaded here.
+jest.mock('../level2Service', () => ({
+  buildSentences: (q) => [`My name is ${q.child_first_name}.`, 'I am 8 years old.', 'I live in Kandy.', 'I am a girl.', 'I like Dancing.'],
+  buildFriendSentences: () => { throw new Error('friend details missing'); },
+  buildPetSentences: () => [{ index: 1, text: 'I have a cat.' }, { index: 3, text: 'My cat is soft.' }],
 }));
 
 // TASK-47 — the timeline functions use raw date-grouped SQL.
@@ -17,6 +29,10 @@ const {
   Level2Session,
   Level2SentenceAttempt,
   Level2NonVerbalAttempt,
+  Level2ProductionAttempt,
+  Level2GenderSelectionLog,
+  Level2ActivitySelectionLog,
+  SentenceQuestionnaire,
 } = require('../../models');
 
 const sequelize = require('../../config/database');
@@ -24,6 +40,8 @@ const {
   getLevel2Report,
   getModuleTimeline,
   getTopicTimeline,
+  getTopicActivity,
+  ACTIVITY_SESSION_LIMIT,
   TOPICS,
 } = require('../level2AnalyticsService');
 
@@ -416,5 +434,138 @@ describe('AC5 — the batch report contract is unchanged by TASK-47', () => {
   it('getLevel2Report issues no raw timeline query', async () => {
     await getLevel2Report(1);
     expect(sequelize.query).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Display status — an unfinished first session reads as "in progress"
+// ---------------------------------------------------------------------------
+
+describe('a topic with a session but no completed one', () => {
+  it('reports in_progress (not not_started) and counts as started', async () => {
+    Level2TopicProgress.findOne.mockImplementation(async ({ where }) =>
+      (where.topic === 'self_introduction' ? row({ status: 'not_started', total_sessions: 0 }) : null));
+    Level2Session.findOne.mockImplementation(async ({ where }) =>
+      (where.topic === 'self_introduction'
+        ? row({ id: 5, started_at: '2026-10-05T09:00:00.000Z', ended_at: null })
+        : null));
+
+    const { topics, totals } = await getLevel2Report(1);
+    expect(topics[0].status).toBe('in_progress');
+    expect(topics[1].status).toBe('not_started');
+    expect(totals.topics_started).toBe(1);
+    expect(totals.in_progress).toBe(1);
+    expect(totals.not_started).toBe(2);
+  });
+
+  it('never upgrades or downgrades a stored mastered status', async () => {
+    Level2TopicProgress.findOne.mockResolvedValue(row({ status: 'mastered', total_sessions: 2 }));
+    Level2Session.findOne.mockResolvedValue(row({ id: 9, started_at: '2026-10-01T09:00:00.000Z' }));
+    const { topics } = await getLevel2Report(1);
+    expect(topics.every((x) => x.status === 'mastered')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session activity — every recorded interaction for one topic
+// ---------------------------------------------------------------------------
+
+describe('getTopicActivity', () => {
+  function primeActivity() {
+    Level2Session.findAll.mockResolvedValue([
+      row({ id: 22, started_at: '2026-10-07T09:00:00.000Z', ended_at: '2026-10-07T09:20:00.000Z',
+        is_complete: true, pathway: 'verbal', sxs_element_score: 4, full_paragraph_total_score: 4,
+        full_paragraph_transcript: 'hello my name is pansilu', full_paragraph_elements_detected: { name: true },
+        silence_timeout_triggered: false }),
+      row({ id: 21, started_at: '2026-10-05T09:00:00.000Z', ended_at: null, is_complete: false }),
+    ]);
+    Level2SentenceAttempt.findAll.mockResolvedValue([
+      row({ level2_session_id: 22, sentence_index: 1, step3_result: 'first_attempt', step4_score: 2,
+        step4_transcript: 'my name pansilu', step4_match_type: 'fuzzy' }),
+      row({ level2_session_id: 22, sentence_index: 2, step3_result: 'required_hint', step4_score: 0,
+        step4_transcript: '', step4_match_type: 'no_match' }),
+      row({ level2_session_id: 21, sentence_index: 1, step3_result: 'first_attempt' }),
+    ]);
+    Level2NonVerbalAttempt.findAll.mockResolvedValue([
+      row({ level2_session_id: 22, sentence_index: 2, context: 'teaching_fallback', correct_on_first_attempt: false, required_second_attempt: true }),
+      row({ level2_session_id: 22, sentence_index: 5, context: 'production_fallback', correct_on_first_attempt: true }),
+    ]);
+    Level2ProductionAttempt.findAll.mockResolvedValue([
+      row({ level2_session_id: 22, phase: 'full_paragraph', score: 4, transcript: 'hello my name is pansilu' }),
+      row({ level2_session_id: 22, phase: 'sentence_by_sentence', sentence_index: 1, score: 3, transcript: 'my name is pansilu', match_type: 'exact' }),
+    ]);
+    Level2GenderSelectionLog.findAll.mockResolvedValue([
+      row({ level2_session_id: 22, first_tap: 'girl', correct_on_first_tap: true }),
+    ]);
+    Level2ActivitySelectionLog.findAll.mockResolvedValue([
+      row({ level2_session_id: 22, expected_activity: 'Dancing', child_selected_activity: 'Dancing', matched_expected: true }),
+    ]);
+    SentenceQuestionnaire.findOne.mockResolvedValue(row({ child_first_name: 'Pansilu' }));
+  }
+
+  it('lists every session newest first, including an unfinished one', async () => {
+    primeActivity();
+    const { sessions, limited } = await getTopicActivity(1, 'self_introduction');
+    expect(sessions.map((x) => x.id)).toEqual([22, 21]);
+    expect(sessions[1].is_complete).toBe(false);
+    expect(sessions[1].sentences).toHaveLength(1);
+    expect(limited).toBe(false);
+  });
+
+  it('groups each interaction under its own session, with the sentence text', async () => {
+    primeActivity();
+    const [latest] = (await getTopicActivity(1, 'self_introduction')).sessions;
+    expect(latest.sentences.map((x) => x.index)).toEqual([1, 2]);
+    expect(latest.sentences[0]).toMatchObject({
+      text: 'My name is Pansilu.', step3_result: 'first_attempt',
+      step4_transcript: 'my name pansilu', step4_match_type: 'fuzzy',
+    });
+    expect(latest.sentences[1].picture_choice).toHaveLength(1);
+    expect(latest.gender).toMatchObject({ first_tap: 'girl', correct_on_first_tap: true });
+    expect(latest.activity).toMatchObject({ child_selected_activity: 'Dancing', matched_expected: true });
+    expect(latest.paragraph_attempts).toHaveLength(1);
+    expect(latest.sxs_attempts[0]).toMatchObject({ sentence_index: 1, score: 3, text: 'My name is Pansilu.' });
+    expect(latest.sxs_picture_choice).toHaveLength(1);
+    // Grouping keys never leak into the response.
+    expect(latest.gender.level2_session_id).toBeUndefined();
+  });
+
+  it('reads every table in one query across all listed sessions, scoped to the student', async () => {
+    primeActivity();
+    await getTopicActivity(7, 'self_introduction');
+    expect(Level2Session.findAll.mock.calls[0][0].where).toEqual({ student_id: 7, topic: 'self_introduction' });
+    expect(Level2Session.findAll.mock.calls[0][0].limit).toBe(ACTIVITY_SESSION_LIMIT);
+    for (const model of [Level2SentenceAttempt, Level2ProductionAttempt, Level2NonVerbalAttempt,
+      Level2GenderSelectionLog, Level2ActivitySelectionLog]) {
+      expect(model.findAll).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('never selects raw audio', async () => {
+    primeActivity();
+    await getTopicActivity(1, 'self_introduction');
+    const selected = [Level2Session, Level2SentenceAttempt, Level2ProductionAttempt]
+      .flatMap((m) => m.findAll.mock.calls[0][0].attributes);
+    expect(selected.some((a) => /audio/i.test(a))).toBe(false);
+  });
+
+  it('returns no sessions, and runs no further queries, when nothing was recorded', async () => {
+    Level2Session.findAll.mockResolvedValue([]);
+    const result = await getTopicActivity(1, 'describe_pet');
+    expect(result).toEqual({ topic: 'describe_pet', limited: false, sessions: [] });
+    expect(Level2SentenceAttempt.findAll).not.toHaveBeenCalled();
+  });
+
+  it('leaves sentence text empty when the topic details are missing, instead of failing', async () => {
+    primeActivity();
+    const { sessions } = await getTopicActivity(1, 'describe_friend');
+    expect(sessions[0].sentences[0].text).toBeNull();
+  });
+
+  it('flags when the session list was capped', async () => {
+    primeActivity();
+    Level2Session.findAll.mockResolvedValue(
+      Array.from({ length: ACTIVITY_SESSION_LIMIT }, (_, i) => row({ id: 100 + i, started_at: '2026-10-01T09:00:00.000Z' })));
+    expect((await getTopicActivity(1, 'self_introduction')).limited).toBe(true);
   });
 });
