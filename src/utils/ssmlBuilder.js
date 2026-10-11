@@ -1,45 +1,53 @@
 'use strict';
 
-const EN_VOICE_NAME = 'en-GB-SoniaNeural';
-const PROSODY_RATE = '0.78';
-const PROSODY_PITCH = '+2st';
+const VOICE_NAME = 'en-IN-Aarti:DragonHDLatestNeural';
+const PROSODY_RATE = '0.6';
 
 /**
  * Builds an Azure Cognitive Services Speech SSML string for a Level 2 sentence.
  *
- * Proper nouns are routed to one of two voices per district_voice_map.json:
- *   - Bucket A (map value === null): internationally anglicized name, stays
- *     on the en-GB voice, spoken as the English display text. Intentional,
- *     not a gap — no warning.
- *   - Bucket B (map value is a non-empty string): everyday local name,
- *     switches to the si-LK voice and speaks the Sinhala-script spelling.
- *   - Key absent from the map entirely: genuine miss, falls back to en-GB
- *     with the English text AND logs a warning.
+ * One Dragon HD voice (Aarti) speaks the whole sentence. Proper nouns are
+ * handled per district_voice_map.json's two-bucket classification:
+ *   - Bucket A (map value === null): internationally anglicized name, spoken
+ *     as plain English text. Intentional, not a gap — no warning.
+ *   - Bucket B (map value is a non-empty string): everyday local name, spoken
+ *     from its Sinhala-script spelling wrapped in <lang xml:lang="si-LK">.
+ *   - Key absent from the map entirely: genuine miss, spoken as the English
+ *     text AND logs a warning.
+ *
+ * Microsoft's HD voices doc lists <prosody> as unsupported for DragonHD, but
+ * Azure accepts it on Aarti and it measurably slows the audio (checked by
+ * output length), so the whole voice body is wrapped in one <prosody rate>.
+ * <lang> and <break> are documented as supported. No mstts namespace — it is
+ * only needed for mstts:express-as, which this builder does not emit.
+ *
+ * Voice name and rate can be overridden without a code edit via
+ * TTS_AARTI_VOICE_NAME / TTS_AARTI_RATE (read at call time).
  *
  * @param {Array<{text: string, isProperNoun: boolean}>} tokens
  * @param {Object} districtVoiceMap  Contents of district_voice_map.json.
- * @param {'boy'|'girl'} gender
+ * @param {'boy'|'girl'} [gender]  Unused — kept so existing callers' signature
+ *   is unchanged; a single voice is used regardless of the child's gender.
  * @returns {string}  Complete SSML string ready for Azure Speech synthesis.
  */
-function buildSentenceSSML(tokens, districtVoiceMap, gender) {
+function buildSentenceSSML(tokens, districtVoiceMap, gender) { // eslint-disable-line no-unused-vars
   if (!tokens || tokens.length === 0) return '';
 
-  const siVoiceName = gender === 'girl' ? 'si-LK-ThiliniNeural' : 'si-LK-SameeraNeural';
+  const voiceName = process.env.TTS_AARTI_VOICE_NAME || VOICE_NAME;
+  const rate = process.env.TTS_AARTI_RATE || PROSODY_RATE;
 
-  const segments = [];
+  let body = '';
 
   for (const token of tokens) {
-    let voiceName = EN_VOICE_NAME;
     let content = token.text;
 
     if (token.isProperNoun) {
       if (Object.prototype.hasOwnProperty.call(districtVoiceMap, token.text)) {
         const mapped = districtVoiceMap[token.text];
         if (mapped) {
-          voiceName = siVoiceName;
-          content = mapped;
+          content = `<lang xml:lang="si-LK">${mapped}</lang>`;
         }
-        // mapped === null -> Bucket A: stay on en-GB, speak token.text, no warning.
+        // mapped === null -> Bucket A: plain English text, no warning.
       } else {
         console.warn(`buildSentenceSSML: no district_voice_map entry for proper noun "${token.text}"`);
       }
@@ -49,22 +57,10 @@ function buildSentenceSSML(tokens, districtVoiceMap, gender) {
       content += '<break time="450ms"/>';
     }
 
-    const last = segments[segments.length - 1];
-    if (last && last.voiceName === voiceName) {
-      last.content += content;
-    } else {
-      segments.push({ voiceName, content });
-    }
+    body += content;
   }
 
-  const body = segments
-    .map(
-      (seg) =>
-        `<voice name="${seg.voiceName}"><prosody rate="${PROSODY_RATE}" pitch="${PROSODY_PITCH}">${seg.content}</prosody></voice>`
-    )
-    .join('');
-
-  return `<speak version="1.0" xml:lang="en-GB" xmlns="http://www.w3.org/2001/10/synthesis">${body}</speak>`;
+  return `<speak version="1.0" xml:lang="en-IN" xmlns="http://www.w3.org/2001/10/synthesis"><voice name="${voiceName}"><prosody rate="${rate}">${body}</prosody></voice></speak>`;
 }
 
 module.exports = { buildSentenceSSML };
