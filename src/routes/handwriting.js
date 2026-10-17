@@ -9,6 +9,7 @@ const liveSessionCtrl = require('../controllers/liveSessionController');
 const reportCtrl      = require('../controllers/reportController');
 const { singleUpload } = require('../middleware/upload');
 
+// All handwriting API routes require an authenticated teacher.
 router.use(verifyToken, isTeacher);
 
 router.post('/assessment',                  ctrl.submitAssessment);

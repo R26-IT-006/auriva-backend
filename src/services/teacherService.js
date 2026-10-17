@@ -122,6 +122,7 @@ async function getOwnStudents(teacherId) {
   return students.map(flattenAvatar);
 }
 
+// Verifies that the requested student belongs to the authenticated teacher before reading their data.
 async function getOwnStudentById(teacherId, studentId) {
   const student = await Student.findOne({
     where: { sid: studentId, teacher_id: teacherId },

@@ -7,6 +7,7 @@ const { computeWordLayoutMetrics, resolveChildFeedbackAdvisory, scoreToConsisten
 const STAGES = new Set(['guided_word_writing', 'practice_exercise_e']);
 const ACTIVITIES = new Set(['A', 'B', 'C', 'D']);
 
+// Persists one A-E exercise outcome; a word is complete only when all five are recorded.
 async function upsertActivity({ studentId, word, activity, status }) {
   if (!ACTIVITIES.has(activity) || !['correct', 'good'].includes(status)) return { status: 'invalid_input' };
   const normalized = String(word || '').toLowerCase();

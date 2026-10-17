@@ -112,6 +112,7 @@ function validateEvidenceEligibility(row) {
  * Possible statuses: not_reference_letter, evidence_already_exists,
  * attempt_row_not_found, not_eligible, evidence_created, save_failed
  */
+// Freezes the Attempt-3 motor features for a mastered reference letter as immutable research evidence.
 async function onLetterMastered({ studentId, letter, caseType, sessionKey }) {
   if (!isPositiveInteger(studentId) || typeof letter !== 'string' || !sessionKey) {
     return result('invalid_input', { evidence: null, milestoneResults: null });

@@ -106,6 +106,7 @@ function clamp01to100(value) { return Math.max(0, Math.min(100, value)); }
  *   throws, even for an unsupported word, missing strokes, or a word too
  *   short to have any gaps.
  */
+// Measures letter-size and spacing consistency across the written word.
 function computeWordLayoutMetrics({ word, strokes, canvasWidth, canvasHeight }) {
   const empty = {
     version: WORD_LAYOUT_VERSION,
@@ -345,6 +346,7 @@ function resolveSpacingDirection(layout) {
   return deviation < 0 ? 'tight' : 'wide';
 }
 
+// Spacing and letter-size analysis provides child feedback but does not change the word pass decision.
 function resolveChildFeedbackAdvisory(layout) {
   if (layout.status !== 'available') return null;
   const sizeLow = layout.size_consistency_score != null && layout.size_consistency_score < CHILD_FEEDBACK_SCORE_THRESHOLD;

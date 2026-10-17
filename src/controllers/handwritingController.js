@@ -657,6 +657,7 @@ async function runDynamicThresholdOrchestration({ studentId, letter, caseType, s
 // session (threshold/pass/mastery are all already finalized before this
 // ever runs), and never touches the HTTP response shape — Feature 11B
 // state is exposed only via its own separate read endpoints.
+// Freezes descriptive motor evidence for a mastered reference letter; it never affects the mastery decision itself.
 async function runLetterMotorMasteryEvidence({ studentId, letter, caseType, sessionKey }) {
   try {
     return await letterMotorMasteryService.onLetterMastered({ studentId, letter, caseType, sessionKey });
@@ -668,6 +669,7 @@ async function runLetterMotorMasteryEvidence({ studentId, letter, caseType, sess
   }
 }
 
+// The backend is authoritative for scoring, cycle progression and mastery decisions.
 async function recordLetterCompletion(req, res) {
   const { student_id, letter, case_type, attempt_scores, quality_threshold, wrote_correctly,
           attempts, collection_mode,
@@ -2190,6 +2192,7 @@ const SUPPORT_DECISION_TO_STARTING_SUPPORT = {
 // Returns a `status` rather than 404 for the honest-negative cases, because
 // "this letter was mastered before we recorded which attempt did it" is a
 // real answer the teacher UI must be able to say out loud - not an error.
+// Returns one letter's mastery writing only when a teacher opens the details, so bulk reports stay free of trajectories.
 async function getLetterMasteryEvidence(req, res) {
   const studentId = Number(req.params.studentId);
   if (!Number.isInteger(studentId) || studentId <= 0) {

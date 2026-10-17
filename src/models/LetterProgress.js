@@ -40,6 +40,7 @@ const LetterProgress = sequelize.define('LetterProgress', {
   // Row existence means nothing about mastery: the failure branch creates
   // rows purely to hold blocked_attempts. Every mastery reader must test
   // this column, never the row's presence.
+  // Non-null means this letter is mastered; row existence alone means nothing.
   mastered_at: {
     type:      DataTypes.DATE,
     allowNull: true,
@@ -74,6 +75,7 @@ const LetterProgress = sequelize.define('LetterProgress', {
   // stored on a historical row identifies its mastering attempt, and picking
   // one by score or recency would fabricate the very attribution this column
   // exists to make provable.
+  // Stores the exact Attempt-3 record that established mastery, so the report never guesses from later attempts.
   mastery_letter_attempt_id: {
     type:      DataTypes.INTEGER,
     allowNull: true,

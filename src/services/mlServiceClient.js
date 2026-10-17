@@ -39,6 +39,7 @@ const ML_SERVICE_BASE = process.env.ML_SERVICE_URL || 'http://localhost:8000';
  *   surface that; this function never swallows an error into a fabricated
  *   "no result" response.
  */
+// Node calls the FastAPI ML service; React Native never connects to FastAPI directly.
 async function predictMotorCluster({ straightScore, curvedScore, complexScore }) {
   const { data } = await axios.post(`${ML_SERVICE_BASE}/motor-cluster/predict`, {
     straight_score: straightScore,
@@ -62,6 +63,7 @@ async function predictMotorCluster({ straightScore, curvedScore, complexScore })
  *   second_nearest_distance, separation_margin) — returned verbatim.
  * @throws on any network/validation/server failure.
  */
+// This ML result is descriptive only and cannot change child-facing mastery or progression.
 async function predictLetterMotorState({ smoothnessScore, dtwDistance, speedCv }) {
   const { data } = await axios.post(`${ML_SERVICE_BASE}/letter-motor-state/predict`, {
     smoothness_score: smoothnessScore,

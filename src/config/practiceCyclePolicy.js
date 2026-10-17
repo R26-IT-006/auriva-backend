@@ -1,45 +1,30 @@
 'use strict';
 
 /**
- * practiceCyclePolicy.js
+ * practiceCyclePolicy.js — daily practice-cycle limit and the practice-date rule.
  *
- * The hard ceiling on how much practice one letter may receive in one day,
- * and the date rule that defines "one day".
+ * Rule: at most THREE completed 3-attempt cycles (9 attempts) per
+ * (student, letter, case_type, practice date). Without a ceiling, a child who
+ * could not yet form a letter would repeat it indefinitely.
  *
- * ── Why this exists ──────────────────────────────────────────────────────
- * Until now there was NO ceiling at all. A failed 3-attempt cycle reset the
- * child straight back to attempt 1 on the same letter, forever, until they
- * passed — see LetterWritingScreen's failure branch, and repetitionPolicy.js's
- * own header, which states plainly that the immediate same-letter retry is
- * "still unbounded". A child who could not yet form `c` would sit on `c`.
+ * Cycle 1 fail -> Cycle 2. Cycle 2 fail -> short warm-up, then Cycle 3.
+ * Cycle 3 fail -> the letter is set aside for the rest of that date, becomes
+ * a home-practice candidate, and is eligible again on the next practice date.
  *
- * The rule now:
- *
- *   at most THREE completed 3-attempt cycles
- *   per (student, letter, case_type, practice date)
- *
- * = 9 real attempts. Each failed cycle is followed immediately by the next
- * one on the same letter. If Cycle 3 also fails, the letter is set aside for
- * the rest of that date, home practice is recommended for that exact letter,
- * and it becomes eligible again on the next practice date.
- *
- * Raised from TWO to THREE alongside the Attempt-3-only mastery rule (see
- * config/masteryPolicy.js). The two changes belong together: mastery is now
- * judged on the UNGUIDED attempt only, which is materially harder — the
+ * Raised from two to three cycles together with the attempt-3-only mastery
+ * rule (masteryPolicy.js): judging only the unguided attempt is harder (the
  * retrospective analysis put mastery at 96.2% under best-of-3 versus 73.4%
- * under attempt-3-only. A third cycle restores some of the room the stricter
- * gate removes, rather than simply making the day harder.
+ * under attempt-3-only), and a third cycle restores some of that room.
  *
- * ── This ceiling is AUTHORITATIVE ────────────────────────────────────────
- * It binds every path that could start a cycle, not just the immediate retry:
- * Feature 5's spaced repetition must also refuse to reinsert a letter that
- * has already used its three cycles today (see repetitionRecommendationService).
- * Two mechanisms, one ceiling.
+ * ── Where the limit is enforced ──────────────────────────────────────────
+ *   - Client: letterCycleGuard (frontend) stops the immediate retry, seeded
+ *     with the server's per-date count returned as `cycle_usage`.
+ *   - Server: repetitionRecommendationService refuses to reinsert a letter
+ *     that reached the cap today.
+ * recordLetterCompletion counts and reports cycles but does not itself reject
+ * a fourth cycle's submission.
  *
- * ── Not clinically validated ─────────────────────────────────────────────
- * `3` is a conservative engineering/pilot default in the same tradition as
- * Feature 2's +5 margin and Feature 3's 4-of-5 rule — a safety rule requiring
- * teacher/pilot validation, not a clinical prescription.
+ * `3` is a pilot engineering default, not clinically validated.
  */
 
 const MAX_CYCLES_PER_LETTER_PER_DATE = 3;
@@ -47,16 +32,13 @@ const MAX_CYCLES_PER_LETTER_PER_DATE = 3;
 /**
  * The timezone a "practice date" is measured in.
  *
- * Deliberately a named zone, not a fixed offset: the boundary between one
- * practice date and the next must fall at LOCAL midnight, where no child is
- * writing. Measuring in raw UTC would roll the day over at 05:30 local time
- * here, so a morning session could be split across two "dates" and silently
- * grant a letter four cycles.
+ * A named zone so the day boundary falls at LOCAL midnight. Raw UTC would roll
+ * the day over at 05:30 local time, splitting a morning session across two
+ * dates and allowing extra cycles.
  *
- * Note that the periodic report's own daily bucketing still uses raw UTC
- * (periodicReportService.buildDailySeries). That is a separate, reporting-only
- * concern and was deliberately left alone — this constant governs the practice
- * CAP only. If the two are ever unified, unify them here.
+ * Known inconsistency: the periodic report's daily bucketing still uses UTC
+ * (periodicReportService.buildDailySeries). This constant governs the
+ * practice cap only.
  */
 const PRACTICE_TIMEZONE = 'Asia/Colombo';
 

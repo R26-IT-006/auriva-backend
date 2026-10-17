@@ -1,6 +1,6 @@
 'use strict';
 
-// Motor score equation (item 5 of the collection-mode ML-readiness pass):
+// Motor Score equation (research-defined weights, not clinically validated):
 //
 //   motor_score = 0.35 * accuracy_component
 //               + 0.25 * smoothness_score
@@ -11,13 +11,15 @@
 // All component scores are 0-100, higher = better. Pressure is intentionally
 // excluded — the device does not capture it. Any missing component is
 // dropped and the remaining weights are renormalized (null-aware weighting)
-// rather than treated as 0, so e.g. a zigzag/curve_wave attempt without a
-// direct accuracy reading isn't unfairly penalized before the dtw fallback
-// below kicks in. If nothing is available, motor_score is null.
+// rather than treated as 0. If nothing is available, motor_score is null.
+//
+// Input provenance (via featureNormalization.js): direction_score is always
+// recomputed from raw strokes on the server; smoothness, dtw_distance and
+// pause_count come from the client's submitted features, and avg_speed too
+// when the client sends it.
 //
 // score_version identifies this formula + its calibration constants, so a
-// later recalibration (once real collection-day data exists) doesn't
-// silently change the meaning of historical scores.
+// later recalibration doesn't silently change the meaning of stored scores.
 const SCORE_VERSION = 'v1';
 
 const WEIGHTS = {
@@ -29,22 +31,19 @@ const WEIGHTS = {
 };
 
 // ── v1 calibration constants ────────────────────────────────────────────────
-// These are documented starting points, not clinically validated thresholds.
-// Recalibrate from real collection-day data before trusting motor_score for
-// anything beyond a pipeline smoke test.
+// Documented starting points, not clinically validated. motor_score is
+// nonetheless the authoritative attempt-3 mastery score (default threshold 70, see
+// config/masteryPolicy.js); recalibrate these against collected pilot data.
 const SMOOTHNESS_MAX_RAD   = 1.0;   // mean turning-angle ceiling (~57 deg) treated as "worst"
 const ACCURACY_MAX_PX      = 60;    // mean pixel deviation from ideal geometry treated as "worst"
-// dtw_distance is in the dtw_norm_v1 coordinate space (child + template each
-// scaled to their own 100-unit bounding box before DTW — see frontend
-// utils/dtwNormalization.js), NOT raw pixels. Matches adaptiveSequencing.js's
-// DTW_CAP on the frontend so the two independently-computed scores agree on
-// what counts as "worst".
+// dtw_distance is in dtw_norm_v1 units (frontend dtwNormalization.js), not
+// raw pixels. Matches the frontend's DTW_CAP so both scores agree on "worst".
 const DTW_MAX_NORM         = 45;
 const PAUSE_MAX_COUNT      = 5;     // pauses (>300ms gaps) at/above this score 0
 const SPEED_MIN_PX_MS      = 0.05;  // below this, too slow/labored
 const SPEED_MAX_PX_MS      = 0.5;   // above this, too fast/sloppy
 const REVERSAL_ANGLE_RAD   = Math.PI / 2; // >90 deg turn counts as a "sharp reversal"
-const MAX_REVERSAL_DENSITY = 0.3;   // fraction of points as reversals treated as "worst"
+const MAX_REVERSAL_DENSITY = 0.3;   // fraction of turning angles that are reversals, treated as "worst"
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -66,13 +65,11 @@ function flattenStrokePoints(strokePoints) {
   return strokePoints;
 }
 
-// direction_score: a geometry-only proxy for stroke/direction control —
-// counts sharp (>90 deg) direction reversals along the raw path, normalized
-// by point count. Deliberately does NOT assume a per-letter "expected
-// stroke count" (no validated ground truth for that exists in this
-// codebase); it only measures what the captured points actually show.
-// Distinct from smoothness_score, which captures small-angle jitter rather
-// than discrete direction-control failures.
+// direction_score: a geometry-only proxy for direction control — the share
+// of measured turning angles that are sharp (>90 deg) reversals along the
+// raw path. Assumes no per-letter expected stroke count (no validated ground
+// truth exists). Distinct from smoothness_score, which reflects small-angle
+// jitter rather than discrete reversals.
 function computeDirectionScore(strokePoints) {
   const points = flattenStrokePoints(strokePoints);
   if (points.length < 3) return null;
@@ -115,15 +112,15 @@ function speedControlScore(avgSpeed) {
   return Math.round(100 * clamp(1 - excess / SPEED_MAX_PX_MS, 0, 1));
 }
 
-// normalized: the canonical feature object from featureNormalization.js
-// (must already contain smoothness_score/accuracy_score/direction_score).
+// normalized: the canonical feature object from featureNormalization.js.
+// Components that are missing are skipped, never scored as zero.
 function computeMotorScore(normalized) {
   const n = normalized ?? {};
 
   let accuracyComponent = n.accuracy_score;
   if (accuracyComponent == null && n.dtw_distance != null) {
-    // item 4: for zigzag/curve_wave (no direct accuracy reading), prefer
-    // path quality derived from dtw_distance / template deviation.
+    // No direct accuracy reading (all letters, zigzag, curve_wave):
+    // derive the accuracy component from dtw_distance instead.
     accuracyComponent = scoreFromDeviation(n.dtw_distance, DTW_MAX_NORM);
   }
 

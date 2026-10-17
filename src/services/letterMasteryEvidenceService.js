@@ -61,6 +61,7 @@ function isValidLetter(letter) {
  * over the other changes nothing about what is returned, only how often an
  * answer exists at all.
  */
+// Resolves the exact Attempt-3 row that established mastery, and never falls back to the latest or highest-scoring attempt.
 async function resolveMasteryAttemptId({ studentId, letter, caseType }) {
   const progress = await LetterProgress.findOne({
     where: { student_id: studentId, letter, case_type: caseType },
@@ -92,6 +93,7 @@ async function resolveMasteryAttemptId({ studentId, letter, caseType }) {
  * @returns {Promise<{status: string, evidence: Object|null}>} `evidence` is
  *   non-null only for status 'available'.
  */
+// Loads student writing evidence only when the teacher opens the letter details.
 async function getLetterMasteryEvidence({ studentId, letter, caseType }) {
   if (!Number.isInteger(studentId) || studentId <= 0) {
     return { status: EVIDENCE_STATUS.NOT_MASTERED, evidence: null };

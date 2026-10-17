@@ -1,30 +1,20 @@
 'use strict';
 
 /**
- * authoritativeAttemptScoring.js
+ * authoritativeAttemptScoring.js — calculate the authoritative Motor Score.
  *
- * Motor Score Unification, Phase 1 (spec §2/§4/§5) — computes the
- * AUTHORITATIVE per-attempt and session-best motor score entirely from
- * backend-derived data (attempt.features + attempt.strokes), reusing the
- * exact existing normalizeLetterFeatures() -> computeMotorScore() pipeline
- * that already runs inside saveLetterAttempts() for persistence. This
- * module makes that same pipeline available BEFORE the pass/fail decision
- * is made, so mastery/threshold gating uses it too — never the
- * client-supplied `attempt_scores` array.
+ * Scores attempts on the server with the same normalizeLetterFeatures() ->
+ * computeMotorScore() pipeline that saveLetterAttempts() uses for storage,
+ * so pass/fail and mastery never use the client's `attempt_scores` array.
  *
- * Eligibility rule (spec §5 — "preserve existing rules around usable
- * attempt/coverage/attempt numbering"): reuses isAttemptCoverageValid()
- * UNCHANGED (same geometry-only coverage/geometry gate the old
- * computeCoverageFilteredBestScore() used) — an attempt whose drawing
- * fails the coverage check is excluded from bestScore eligibility here
- * exactly as it was before. The only thing that changed is WHICH SCORE is
- * computed for each eligible attempt: computeMotorScore() (backend,
- * authoritative), never featuresToScore() (client-supplied, no longer
- * trusted for this decision — spec §4).
+ * Input provenance: the score is computed on the server, but not every input
+ * is recomputed there. direction_score is derived from the raw strokes;
+ * smoothness, dtw_distance and pause_count come from the client's submitted
+ * features, and avg_speed too when sent (see featureNormalization.js).
  *
- * A null motor_score (computeMotorScore() found no usable components at
- * all for that attempt) is also excluded from eligibility — an attempt
- * that produced no derivable score cannot set the session's best score.
+ * An attempt is excluded from bestScore when its coverage check is
+ * explicitly false (isAttemptCoverageValid) or when it has no derivable
+ * motor_score.
  */
 
 const { isAttemptCoverageValid } = require('./attemptCoverageValidity');
@@ -50,9 +40,8 @@ function computeAuthoritativeBestScore({ attempts, canvasWidth, canvasHeight }) 
 
   const attemptScores = attemptsArray.map((attempt) => {
     const coverageValid = isAttemptCoverageValid(attempt?.strokes, canvasWidth, canvasHeight);
-    // Fail open on undeterminable coverage (missing canvas dims) — same
-    // rule the pre-unification coverage filter used: only an EXPLICIT
-    // `false` excludes an attempt, never an unknown (`null`).
+    // Fail open on undeterminable coverage (missing canvas dims): only an
+    // explicit `false` excludes an attempt, never an unknown (`null`).
     if (coverageValid === false) return null;
 
     const { normalized } = normalizeLetterFeatures(attempt?.features, { strokePoints: attempt?.strokes });
@@ -70,24 +59,21 @@ function computeAuthoritativeBestScore({ attempts, canvasWidth, canvasHeight }) 
 }
 
 /**
- * The AUTHORITATIVE MASTERY score for one normal-practice cycle.
+ * Validate attempt 3 and return the authoritative mastery score for one
+ * normal-practice cycle.
  *
- * Mastery is decided on the INDEPENDENT attempt only — see
- * config/masteryPolicy.js for the evidence behind that rule. Attempts 1 and
- * 2 are drawn with on-screen guidance, so scoring mastery on the best of the
- * three certified a guided drawing as independent writing (it did so in ~76%
- * of real cycles).
+ * Mastery uses the independent attempt only (see config/masteryPolicy.js).
+ * Attempts 1 and 2 are drawn with on-screen guidance; best-of-3 certified a
+ * guided drawing as independent writing in ~76% of real cycles.
  *
- * Deliberately NOT a variant of computeAuthoritativeBestScore(): there is no
- * Math.max here and no fallback to an earlier attempt of any kind. If the
- * mastery attempt is missing, coverage-invalid, or produces no derivable
- * score, the cycle FAILS. Falling back to attempt 1 or 2 would reintroduce
- * exactly the leniency this rule removes.
+ * No Math.max and no fallback to attempts 1 or 2: if attempt 3 is missing,
+ * not captured, coverage-invalid or unscoreable, the cycle FAILS.
+ * computeAuthoritativeBestScore() still provides the reported/stored
+ * best_score.
  *
- * computeAuthoritativeBestScore() is untouched and still used for reporting
- * and for the persisted best_score column — attempts 1 and 2 remain fully
- * captured, scored and available to reports and motor analysis. They simply
- * cannot master a letter.
+ * Known gap: the controller calls this only when `attempts` is non-empty
+ * (handwritingController.js recordLetterCompletion). A request with no
+ * `attempts` skips this check entirely and is not yet rejected.
  *
  * @param {{
  *   attempts: Array<{features?: Object, strokes?: Array}>,
@@ -105,43 +91,32 @@ function computeAuthoritativeMasteryScore({ attempts, canvasWidth, canvasHeight 
   const attemptsArray = Array.isArray(attempts) ? attempts : [];
   const base = { attemptNumber: MASTERY_ATTEMPT_NUMBER, coverageValid: null, masteryScore: null };
 
-  // A cycle that never reached the independent attempt cannot master. This
-  // is a FAIL, not an error — the child simply has not yet produced the
-  // evidence mastery requires.
+  // Fewer than 3 attempts: a FAIL, not an error.
   if (attemptsArray.length < MASTERY_ATTEMPT_NUMBER) {
     return { ...base, failReason: MASTERY_FAIL_REASON.ATTEMPT_MISSING };
   }
 
   const attempt = attemptsArray[MASTERY_ATTEMPT_NUMBER - 1];
 
-  // CAPTURE IS CHECKED BEFORE COVERAGE, and the order is load-bearing.
-  //
-  // isAttemptCoverageValid() returns `false` for an EMPTY drawing and for a
-  // genuine-but-tiny one alike (getDrawingBounds([]) is {0,0,0}). Checking
-  // coverage first therefore reported a device fault as
-  // `attempt3_coverage_invalid` — a handwriting judgement about handwriting
-  // that was never recorded, which then consumed one of the child's three
-  // cycles for the day.
-  //
-  // This uses the SAME predicate that decides what capture_status the row is
-  // stored with (utils/captureStatus.js), so "the row we labelled incomplete"
-  // and "the attempt we refuse to evaluate" are guaranteed to be the same
-  // set. Still a FAIL — a cycle with no captured attempt 3 cannot master —
-  // but a DISTINGUISHABLE one, which is what lets the cycle not be consumed.
+  // Check capture completeness BEFORE coverage — the order matters.
+  // isAttemptCoverageValid() returns false for an empty drawing as well as a
+  // tiny real one, so checking coverage first would report a device capture
+  // fault as a handwriting failure and spend one of the day's three cycles.
+  // Uses the same predicate as the stored capture_status (captureStatus.js).
+  // Still a FAIL, but distinguishable, so the cycle is not consumed.
   if (!isAttemptCaptureComplete(attempt)) {
     return { ...base, failReason: MASTERY_FAIL_REASON.CAPTURE_INCOMPLETE };
   }
 
-  // Same coverage/geometry gate the rest of this module uses. Note the
-  // asymmetry, and it is deliberate: only an EXPLICIT `false` fails. An
-  // undeterminable coverage result (missing canvas dimensions) must not
-  // fail a child for a device/telemetry gap, exactly as
-  // computeAuthoritativeBestScore() has always treated it.
+  // Coverage check. Deliberately asymmetric: only an explicit `false` fails;
+  // undeterminable coverage (missing canvas dimensions) must not fail a
+  // child for a device/telemetry gap.
   const coverageValid = isAttemptCoverageValid(attempt?.strokes, canvasWidth, canvasHeight);
   if (coverageValid === false) {
     return { ...base, coverageValid: false, failReason: MASTERY_FAIL_REASON.COVERAGE_INVALID };
   }
 
+  // Calculate the attempt-3 Motor Score.
   const { normalized } = normalizeLetterFeatures(attempt?.features, { strokePoints: attempt?.strokes });
   const { motor_score } = computeMotorScore(normalized);
 

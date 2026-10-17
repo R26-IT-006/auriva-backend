@@ -80,6 +80,7 @@ function round(value, decimals = 1) {
 // "During period" and "cumulative as of end date" are therefore both real,
 // non-fabricated reconstructions from the SAME single query — never two
 // separate table scans.
+// Summarises stored progress for the teacher report; reading it never changes a learner's state.
 async function buildLearningProgressSection({ studentId, startAt, endAt }) {
   // Mastery-semantics correction: counts MASTERED letters, filtered and dated
   // by mastered_at. Previously this counted every letter_progress row by
@@ -127,6 +128,7 @@ async function buildLearningProgressSection({ studentId, startAt, endAt }) {
 // mirrors getLetterProgressReport's own established exclusion rule
 // (reassessment + research rows never count toward normal-progression
 // reporting).
+// Reports motor trends over the period descriptively, separate from the operational mastery decision.
 async function buildMotorPerformanceSection({ studentId, startAt, endAt }) {
   const rows = await LetterAttempt.findAll({
     where: {

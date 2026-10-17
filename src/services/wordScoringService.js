@@ -10,6 +10,7 @@ function loadCanonical() {
 }
 const canonical = loadCanonical();
 const strokesOf = p => !p?.length ? [] : Array.isArray(p[0]) ? p : [p];
+// Builds the reference word path the learner trajectory is compared against.
 function buildWordGuide(word) {
   const clean = String(word || '').replace(/[^a-zA-Z]/g, '');
   if (!canonical.words.has(String(word).toLowerCase())) return null;
@@ -47,6 +48,7 @@ function letterBoundsAndRegions(guide,w,h) {
 }
 function dtw(a,b){if(a.length<2||b.length<2)return null;let prev=new Float64Array(b.length),cur=new Float64Array(b.length);const dist=(x,y)=>Math.hypot(x.x-y.x,x.y-y.y);prev[0]=dist(a[0],b[0]);for(let j=1;j<b.length;j++)prev[j]=prev[j-1]+dist(a[0],b[j]);for(let i=1;i<a.length;i++){cur[0]=prev[0]+dist(a[i],b[0]);for(let j=1;j<b.length;j++)cur[j]=dist(a[i],b[j])+Math.min(cur[j-1],prev[j],prev[j-1]);[prev,cur]=[cur,prev];}return prev[b.length-1]/Math.max(a.length,b.length);}
 function smoothness(strokes){const p=strokes.flat(),c=[];for(let i=1;i<p.length-1;i++){const a=p[i-1],b=p[i],d=p[i+1],l1=Math.hypot(b.x-a.x,b.y-a.y),l2=Math.hypot(d.x-b.x,d.y-b.y);if(l1&&l2)c.push(Math.acos(Math.max(-1,Math.min(1,((b.x-a.x)*(d.x-b.x)+(b.y-a.y)*(d.y-b.y))/(l1*l2)))));}return c.length?c.reduce((s,x)=>s+x,0)/c.length:0;}
+// Produces the authoritative word-writing score from DTW distance, smoothness and letter coverage.
 function scoreWord({word,strokes,canvasWidth,canvasHeight}) {
   const guide=buildWordGuide(String(word||'').toLowerCase()), clean=cleanStrokes(strokes), w=Number(canvasWidth),h=Number(canvasHeight);
   if(!guide||!clean.length||!Number.isFinite(w)||!Number.isFinite(h)||w<=0||h<=0)return {valid:false,error:guide?'invalid_strokes':'unsupported_word'};

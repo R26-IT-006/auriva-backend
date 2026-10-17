@@ -1,41 +1,40 @@
 'use strict';
 
 /**
- * masteryPolicy.js
- *
- * The NORMAL LETTER PRACTICE mastery policy, in one place.
+ * masteryPolicy.js — normal letter-practice mastery policy.
  *
  * ── The policy ───────────────────────────────────────────────────────────
  *   Cycle 1: attempts 1 (high support), 2 (reduced), 3 (independent)
- *            evaluate ONLY attempt 3
+ *            evaluate ONLY attempt 3 (authoritative backend Motor Score)
  *            pass -> mastered -> next letter
  *            fail -> Cycle 2
- *   Cycle 2: same, fail -> Cycle 3
- *   Cycle 3: same, fail -> advance UNMASTERED + exact-letter home practice
+ *   Cycle 2: same; fail -> short motor warm-up (client), then Cycle 3
+ *   Cycle 3: same; fail -> advance UNMASTERED, letter becomes a home-practice
+ *            candidate
  *
- *   Maximum 3 cycles x 3 attempts = 9 attempts per letter / case / practice date.
+ *   Maximum 3 cycles x 3 attempts = 9 attempts per letter / case / practice
+ *   date (see practiceCyclePolicy.js for where that cap is enforced).
+ *
+ * Known gap: recordLetterCompletion evaluates attempt 3 only when the request
+ * includes `attempts`; a request without them is not yet rejected.
  *
  * ── Why attempt 3 only ───────────────────────────────────────────────────
- * Attempts 1 and 2 are drawn WITH on-screen guidance. Mastering on the best
- * of the three therefore certified a guided drawing as independent writing.
- * The Stage A retrospective analysis measured exactly that on real pilot
- * data (548 normal-learning attempts, 174 complete cycles):
+ * Attempts 1 and 2 are drawn WITH on-screen guidance, so best-of-3 certified
+ * a guided drawing as independent writing. Stage A retrospective analysis of
+ * pilot data (548 normal-learning attempts, 174 complete cycles):
  *
  *   attempt 1 mean 80.2   attempt 2 mean 82.1   attempt 3 mean 76.7
  *   best-of-3 mean 84.5  ->  +7.8 points of leniency over the unguided attempt
  *   attempt 3 was the best attempt in only 24.1% of cycles
  *
- * i.e. roughly three quarters of masteries under the old rule were awarded
- * on a guided attempt. Scores drop 5.4 points when the guide is removed —
- * which is precisely the signal this policy exists to measure.
- *
- * Attempts 1 and 2 are still captured, still scored, and still available to
- * reports and motor analysis. They simply cannot master a letter.
+ * Attempts 1 and 2 are still captured, scored and reported; they simply
+ * cannot master a letter.
  *
  * ── The threshold ────────────────────────────────────────────────────────
- * NOT clinically validated. A pilot engineering default in the same
- * tradition as Feature 2's +5 margin and the practice-cycle cap — it needs
- * teacher/pilot validation before it can be called anything more.
+ * Default 70. NOT clinically validated — a pilot engineering default that
+ * needs teacher/pilot validation. Resolved by
+ * progressionThresholdResolver.js; a numeric `quality_threshold` in the
+ * request currently overrides it (no bounds check).
  *
  * Chosen from a retrospective sensitivity sweep over Attempt-3-only scores
  * (79 letter-days; NOT a clinical trial, and NOT trained on this data):
@@ -52,24 +51,19 @@
  * benefit, and 75 nearly doubles homework on a dataset with only five
  * observed third cycles.
  *
- * Deliberately its own constant, NOT a reuse of
- * progressionThresholdResolver.GLOBAL_DEFAULT (55) — that constant is
- * unchanged and still serves its own callers.
+ * Separate from progressionThresholdResolver.GLOBAL_DEFAULT (55), which still
+ * serves its own fallback callers.
  */
 
 const NORMAL_PRACTICE_MASTERY_THRESHOLD = 70;
 
-/**
- * Which attempt in a cycle is the mastery attempt. 1-based, matching
- * LetterAttempt.attempt_number and the on-screen attempt counter.
- */
+/** The mastery attempt (1-based, matches LetterAttempt.attempt_number). */
 const MASTERY_ATTEMPT_NUMBER = 3;
 
-/** Attempts per cycle. */
 const ATTEMPTS_PER_CYCLE = 3;
 
 /**
- * Feature 2 progression family thresholds -> automatic mastery gating.
+ * Progression family thresholds -> automatic mastery gating.
  *
  * DISABLED for the pilot, deliberately and reversibly.
  *
@@ -85,25 +79,17 @@ const ATTEMPTS_PER_CYCLE = 3;
  *     proxy the frontend itself labels diagnostic-only) over DTW for shapes
  *
  * Those baselines are therefore not yet trustworthy as the SOURCE of a
- * mastery threshold. This flag disconnects that one operational link and
- * nothing else:
- *
- *   STILL HAPPENS: baselines are computed and stored, threshold history is
- *                  preserved, provenance is intact, the initial assessment
- *                  UI is untouched, research/calibration use continues.
- *   STOPS:         progression_* automatically setting the value a child's
- *                  letter mastery is judged against.
- *
- * Flip back to `true` once Motor Score calibration is validated. Nothing is
- * deleted, so re-enabling needs no migration.
+ * mastery threshold. This flag only stops progression_* from setting the
+ * mastery threshold; baselines and threshold history are still computed and
+ * stored. Re-enable once Motor Score calibration is validated (no migration
+ * needed).
  */
 const PROGRESSION_FAMILY_THRESHOLDS_ENABLED = false;
 
 /**
- * Stamped on mastery evidence so a future reader can tell WHICH policy
- * awarded a given mastery. Existing rows predate this and carry no marker —
- * they remain historical truth under the best-of-3 policy that was in force
- * when they were written, and are never rewritten.
+ * Records which policy awarded a mastery. Older rows carry no marker and
+ * remain valid under the best-of-3 policy of their time; they are never
+ * rewritten.
  */
 const MASTERY_POLICY_VERSION = 'attempt3-only-3cycle-v1';
 
@@ -118,10 +104,8 @@ const MASTERY_FAIL_REASON = {
   COVERAGE_INVALID:       'attempt3_coverage_invalid',
   ATTEMPT_MISSING:        'attempt3_missing',
   SCORE_UNAVAILABLE:      'attempt3_score_unavailable',
-  // The device never captured the attempt at all — no strokes, or no
-  // features. NOT a handwriting judgement, and deliberately distinct from
-  // COVERAGE_INVALID, which it used to be silently folded into. A child must
-  // never lose a practice cycle to a capture fault.
+  // The device never captured the attempt (no strokes or no features). Not a
+  // handwriting judgement, so it must never cost the child a practice cycle.
   CAPTURE_INCOMPLETE:     'attempt3_capture_incomplete',
 };
 
@@ -139,24 +123,26 @@ const EVALUATION_STATUS = {
 };
 
 /**
- * Whether a failed cycle uses up one of the day's three.
+ * Whether a failed cycle uses up one of the day's three (reported to the
+ * client as `cycle_consumed`).
  *
  * True for every EVALUATED outcome, including a coverage failure — a tiny or
- * off-target real drawing is handwriting evidence and consumes a cycle
- * exactly as a below-threshold score does.
+ * off-target real drawing is handwriting evidence. False only for a capture
+ * fault.
  *
- * False only for a capture fault, and note the asymmetry that leaves: a
- * NETWORK failure still consumes a cycle client-side. That is deliberate.
- * The request may well have reached the server and been recorded; not
- * consuming would permit unbounded retries against a server that already
- * counted the cycle. The server's own per-date count reconciles the state on
- * the next entry or restart, because it is the authority.
+ * A network failure never reaches this function: the client receives no
+ * response, consumes no cycle, and keeps the child on attempt 3 to resubmit
+ * (LetterWritingScreen.js). If the request did reach the server, its rows
+ * count towards the server's per-date cycle total on the next submission.
  */
 function cycleIsConsumed(failReason) {
   return failReason !== MASTERY_FAIL_REASON.CAPTURE_INCOMPLETE;
 }
 
-/** Branch labels used by the decision and by [NORMAL_LETTER_CYCLE] logging. */
+/**
+ * Branch labels for [NORMAL_LETTER_CYCLE] logging (logging only; the client
+ * performs the retry, warm-up and advance).
+ */
 const CYCLE_BRANCH = {
   MASTERED_ADVANCE:             'MASTERED_ADVANCE',
   FAILED_START_CYCLE_2:         'FAILED_START_CYCLE_2',

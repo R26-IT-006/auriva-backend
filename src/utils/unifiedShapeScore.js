@@ -1,66 +1,55 @@
 'use strict';
 
-// ── CANONICAL — this file is the single source of truth for the shape-
-// assessment unified motor score (invariant DTW + smoothness). ──────────────
+// Unified shape score — canonical formula for the six-shape initial
+// assessment: direction-invariant DTW (0.8) + smoothness (0.2).
 //
-// auriva-frontend/src/utils/unifiedShapeScoreMirror.js is a MIRROR of this
-// file's logic — needed because the frontend must compute this score
-// synchronously on-device (adaptive letter sequencing runs immediately after
-// the assessment, before any network round-trip) and the two packages have
-// no shared workspace. Any change to the formula, config constants, or
-// invariance rules below MUST be made HERE FIRST, then mirrored there.
-// tests/unifiedShapeScoreMirrorParity.test.js requires both files and fails
-// the suite loudly if they ever disagree — do not disable or weaken that
-// test to make a change land.
+// auriva-frontend/src/utils/unifiedShapeScoreMirror.js mirrors this file so
+// the tablet can score shapes on-device before any network call. Change the
+// formula or constants HERE first, then mirror them;
+// tests/unifiedShapeScoreMirrorParity.test.js fails if the two disagree.
 //
-// Distinct from utils/motorScore.js's computeMotorScore(), a separate,
-// older 5-component formula still used (unmodified, out of scope here) to
-// populate ShapeFeature.motor_score / LetterAttempt.motor_score — a
-// write-only diagnostic path nothing downstream reads. This module is the
-// formula that actually drives the persisted Feature 1 baseline, the
-// Teacher Report, and adaptive letter sequencing, via the frontend mirror.
+// Two shape-score domains — do not confuse them:
+//   - This formula (via the frontend mirror) produces the per-shape scores
+//     behind motor_profile and StudentMotorBaseline.straight/curved/
+//     complex_score, which feed rule-based letter sequencing and the
+//     teacher-facing Initial Handwriting Skills Summary. On the backend,
+//     deriveMotorScoreFromStoredShape() recomputes it on read for older
+//     assessments that lack a stored motor_score (getInitialReport).
+//   - utils/motorScore.js's computeMotorScore() is a separate 5-component
+//     formula. It fills ShapeFeature.motor_score (and from it the
+//     StudentMotorBaseline.progression_* columns) and is the authoritative
+//     letter-mastery score for LetterAttempt rows.
+// The inactive Shape K-Means model is served from the straight/curved/
+// complex_score columns; its training vectors came from a different score
+// domain (ML workflow audit, docs/ml-workflow-audit/02, outside this repo).
 //
-// Also distinct from, and shares NO code with, computeMultiStrokeDTW in
-// auriva-frontend/src/utils/dtw.js (order-invariant multi-stroke DTW used
-// for LETTERS) — untouched by this work. This module reimplements its own
-// DTW + bounding-box normalization internally because (a) it must run in
-// Node without depending on the RN frontend package, and (b)
-// computeMultiStrokeDTW must not be coupled to shape-only invariance rules
-// (e.g. full_circle rotation search) that don't apply to letters. The
-// algorithm is the same DTW dtw.js implements — verified byte-identical
-// against real stored dtw_distance values earlier in this investigation —
-// a separate function object for the reasons above, not a divergent one.
+// Shares no code with the frontend's letter DTW (computeMultiStrokeDTW in
+// dtw.js): this module must run in Node, and its shape-only invariances
+// (reversal, full_circle rotation search) do not apply to letters. The DTW
+// recurrence itself is the same as dtw.js's computeDTW.
 
 const DTW_DIVISOR        = 10;   // invariant DTW distance treated as "worst" at this value
 const ROTATION_STEP_DEG  = 10;   // full_circle rotation-search granularity (36 rotations)
 const SMOOTHNESS_CEILING = 0.3;  // mean turning-angle (rad) treated as "worst"
 const SMOOTHNESS_WEIGHT  = 0.2;  // secondary weight; DTW carries the remaining 0.8
 
-// Shapes with no canonical start point on their boundary — the only ones
-// that get the rotation-sweep search in addition to direction (reversal)
-// invariance. A full circle's parametrization start is arbitrary; every
-// other shape here has two genuinely distinct, non-interchangeable
-// endpoints, so "starting from the other end" is already fully covered by
-// reversal alone (see Step 1 report for the full per-shape justification).
+// Shapes with no canonical start point get a rotation-sweep search in
+// addition to direction (reversal) invariance. Only a full circle qualifies;
+// every other shape has two distinct endpoints, which reversal alone covers.
 const ROTATION_INVARIANT_SHAPES = ['full_circle'];
 
 const N_TEMPLATE_POINTS = 100;
 
-// Reused, not reimplemented — flattenStrokePoints is a small, generic
-// [{stroke_id, points}] -> [{x,y,...}] format helper, not part of this
-// module's scoring formula identity, and utils/motorScore.js already has
-// a tested one.
+// Generic [{stroke_id, points}] -> [{x,y,...}] helper (not part of the formula).
 const { flattenStrokePoints } = require('./motorScore');
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-// Mirrors ShapeAssessmentScreen.js's computePathPoints() exactly, but takes
-// canvasWidth/canvasHeight as explicit parameters (persisted per
-// shape_features row as canvas_width/canvas_height) rather than closing
-// over a fixed screen size — the pilot's 791×427 is one device's
-// dimensions, not a constant to hardcode.
+// Reference template for each shape, in canvas pixels. Same geometry as the
+// frontend mirror's computeShapeTemplate(); canvas size is a parameter
+// (stored per row as canvas_width/canvas_height), not a hardcoded device size.
 function computeShapeTemplate(shapeId, canvasWidth, canvasHeight, nPoints = N_TEMPLATE_POINTS) {
   const cx = canvasWidth / 2;
   const cy = canvasHeight / 2;
@@ -211,11 +200,10 @@ function computeInvariantDtwDistance(childPoints, shapeId, canvasWidth, canvasHe
   return Number.isFinite(best) ? best : null;
 }
 
-// Mean turning-angle (radians) — same metric ShapeAssessmentScreen.js's
-// calculateFeatures() already computes; duplicated here (not imported — the
-// frontend can't be required from Node) so the backend can independently
-// recompute the full score from raw points for future validation/backfill
-// tooling.
+// Mean turning angle (radians), the same metric as the frontend's
+// calculateFeatures(). Exported for validation/backfill tooling; not called
+// by deriveMotorScoreFromStoredShape(), which uses the stored client value.
+// Limitation: fewer than 3 points returns 0, which scores as perfectly smooth.
 function computeSmoothnessRaw(points) {
   if (!Array.isArray(points) || points.length < 3) return 0;
   const changes = [];
@@ -231,11 +219,11 @@ function computeSmoothnessRaw(points) {
   return changes.length > 0 ? changes.reduce((a, b) => a + b, 0) / changes.length : 0;
 }
 
-// score = 0.8 * dtwScore + 0.2 * smoothnessScore. Ceilings set just above
-// the observed P100 in the 42-row pilot sample so nothing clips (Step 1/2
-// reports). Coverage was tested and deliberately excluded — 89.4-100%
-// range, SD 2.16, effectively constant; the one treatment strong enough to
-// matter damaged an unrelated, correct row.
+// Calculate unified motor score: 0.8 * dtwScore + 0.2 * smoothnessScore.
+// Ceilings (DTW_DIVISOR, SMOOTHNESS_CEILING) sit just above the observed
+// maximum in the 42-row pilot sample, so nothing clips; pilot-derived, not
+// clinically validated. Coverage was tested and excluded (89.4-100%, SD 2.16,
+// effectively constant). If one component is missing, the other is used alone.
 function computeUnifiedShapeScore(dtwDistance, smoothnessRaw) {
   const dtwScore = dtwDistance == null ? null : clamp(100 - (dtwDistance / DTW_DIVISOR) * 100, 0, 100);
   const smoothnessScore = smoothnessRaw == null ? null : clamp(100 - (smoothnessRaw / SMOOTHNESS_CEILING) * 100, 0, 100);
@@ -253,21 +241,17 @@ function computeUnifiedShapeScore(dtwDistance, smoothnessRaw) {
 }
 
 /**
- * Derives motor_score for one stored shape row on read, without any data
- * migration. Historical assessments (recorded before motor_score existed)
- * have raw stroke_points/canvas_width/canvas_height and features.smoothness
- * — everything needed to recompute the same real score a live assessment
- * would have produced, using this SAME canonical formula. Never fabricates
- * a placeholder: returns explicit nulls when there genuinely isn't enough
- * raw data to compute a real score, rather than a plausible-looking guess.
+ * Derives motor_score for one stored shape row on read (no migration).
+ * Older assessments lack features.motor_score; it is recomputed with this
+ * formula from the stored strokes, canvas size and the client's
+ * features.smoothness. Returns explicit nulls, never a placeholder, when the
+ * data is insufficient.
  *
  * @param {{ shapeId: string, features: object, strokes: Array, canvasWidth: number|null, canvasHeight: number|null }} shape
  * @returns {{ motor_score: number|null, dtw_score: number|null, smoothness_score: number|null, source: 'stored'|'recomputed_on_read'|'unavailable' }}
  */
 function deriveMotorScoreFromStoredShape({ shapeId, features, strokes, canvasWidth, canvasHeight }) {
-  // Already has a real computed score (post-unification assessments,
-  // captured with the current calculateFeatures()) — use it verbatim,
-  // never recompute over a value that's already correct.
+  // Use a stored score as-is (assessments captured with the current app).
   if (features?.motor_score != null) {
     return {
       motor_score: features.motor_score,
@@ -277,6 +261,7 @@ function deriveMotorScoreFromStoredShape({ shapeId, features, strokes, canvasWid
     };
   }
 
+  // Otherwise recompute from raw strokes; missing inputs stay null.
   const points = flattenStrokePoints(strokes);
   const canRecomputeDtw = shapeId
     && points.length >= 2
